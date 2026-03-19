@@ -50,12 +50,9 @@ It automatically scrapes brand websites, generates targeted prompts, and process
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Node.js 18+ 
-- PostgreSQL database (local or cloud)
-- OpenAI API key
+### Option 1: Docker (recommended)
 
-### Installation
+The easiest way to run the app. Includes PostgreSQL — no local database setup needed.
 
 1. **Clone the repository**
    ```bash
@@ -63,69 +60,67 @@ It automatically scrapes brand websites, generates targeted prompts, and process
    cd llm-brand-tracker
    ```
 
-2. **Install dependencies**
+2. **Create a `.env` file**
+   ```env
+   OPENAI_API_KEY=your_openai_api_key_here
+   ```
+
+3. **Start the app**
    ```bash
+   docker compose up --build
+   ```
+   This builds the app, starts PostgreSQL, runs the schema migration, and serves the app on `http://localhost:3000`.
+
+4. **Stop / reset**
+   ```bash
+   docker compose down        # Stop containers (data preserved in pgdata volume)
+   docker compose down -v     # Stop and wipe database
+   ```
+
+### Option 2: Local development
+
+For development without Docker. Requires Node.js 18+ and a local PostgreSQL instance.
+
+1. **Clone and install**
+   ```bash
+   git clone https://github.com/yourusername/llm-brand-tracker.git
+   cd llm-brand-tracker
    npm install
    ```
 
-3. **Set up the database**
-   
-   **Temp Solution: Local PostgreSQL**
+2. **Set up PostgreSQL**
    ```bash
-   # Install PostgreSQL (macOS with Homebrew)
-   brew install postgresql
+   brew install postgresql   # macOS
    brew services start postgresql
-   
-   # Edit the following bash replacing "your_password" with the password you would like.
+
    createdb brand_tracker
    psql -d brand_tracker -c "CREATE USER admin WITH PASSWORD 'your_password';"
    psql -d brand_tracker -c "GRANT ALL PRIVILEGES ON DATABASE brand_tracker TO admin;"
    psql -d brand_tracker -c "GRANT ALL ON SCHEMA public TO admin;"
    ```
-   
-4. **Set up environment variables**
-   Create a `.env` file in the root directory and add the following:
+
+3. **Create a `.env` file**
    ```env
-   # Database Configuration
    DATABASE_URL=postgresql://admin:your_password@localhost:5432/brand_tracker
-   # Replace 'your_password' with the password you set when creating the user
-   
-   # OpenAI Configuration
    OPENAI_API_KEY=your_openai_api_key_here
-   
-   # Application Configuration
-   NODE_ENV=development
-   
-   # Analysis Settings (optional)
-   PROMPTS_PER_TOPIC=20
-   ANALYSIS_FREQUENCY=daily
    ```
 
-   Then run:
-   ```bash
-   npm install dotenv
-   ```
-
-5. **Push database schema**
+4. **Push schema and start**
    ```bash
    npm run db:push
-   ```
-
-6. **Start the development server**
-   ```bash
    npm run dev
    ```
 
-7. **Open your browser**
-   Navigate to `http://localhost:3000`
+5. **Open** `http://localhost:3000`
 
 ### Available Scripts
 ```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run start        # Start production server
-npm run check        # TypeScript type checking
-npm run db:push      # Push database schema changes
+npm run dev          # Start dev server (port 3000)
+npm run build        # Vite build + esbuild server bundle
+npm run start        # Production server (node dist/index.js)
+npm run db:push      # Push schema to DB (drizzle-kit push)
+docker compose up --build   # Build and run with PostgreSQL
+docker compose down -v      # Stop and wipe DB
 ```
 
 ## 📖 Usage
@@ -148,18 +143,21 @@ npm run db:push      # Push database schema changes
 
 ## 🛠️ Development & Future
 
-There are many improvements to make. Here are a few issues that need to be addressed:
-1. **Local Postgres only**. This currently only works with local postgres. If you wipe this locally, all your historical analysis is lost.
-2. **No deployment options**. This isn't dockerized, so there's no way to host this somewhere.
-3. **Prompts are redundant**. There isn't enough differentiation among prompt structure, so results are skewed.
-4. **Prompt specificity**. Prompts are too specific to devtools; need better prompting to get prompts.
-5. **Competitor compleness**. Getting competitors is a bit buggy, could use prompt iteration.
-6. **UI bugs**. The UI is sometimes unintuitive, sharp on the edges, or even buggy.
-7. **Speed & repeatability**. The analysis only runs when you press a button, but should run in the background. It's also super slow.
-8. **Auth**. Even if we did deploy it somewhere, there's no auth (user/pw even).
-9. **Error handling**. There are still some hard coded values, do better error handling to not have fallbacks.
+Recent improvements:
+- ~~Local Postgres only~~ — Dockerized with persistent volumes
+- ~~No deployment options~~ — Docker Compose with one-command startup
+- ~~Prompts are redundant~~ — Brand-neutral prompt generation with deduplication
+- ~~Prompt specificity~~ — Dynamic topic generation based on brand analysis
+- ~~Competitor completeness~~ — Improved detection with merge feature for duplicates
+- ~~Speed~~ — 3 concurrent workers with rate limit backoff
 
-The above is why this project is public. Let's fix this and all benefit from better brand LLM visibility.
+Remaining areas for improvement:
+1. **Auth**. No user authentication — anyone with access can run analysis
+2. **Multi-LLM support**. Currently ChatGPT only — Claude, Gemini, Perplexity planned
+3. **Scheduled runs**. Analysis only runs manually — needs background scheduling
+4. **Export/reporting**. Limited export options — needs PDF reports, email digests
+
+This project is public. Contributions welcome.
 
 ## 🤝 Contributing
 
