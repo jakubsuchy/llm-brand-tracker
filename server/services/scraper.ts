@@ -105,7 +105,7 @@ export async function fetchWebsiteText(url: string): Promise<string> {
 export function extractDomainFromUrl(url: string): string {
   try {
     const parsedUrl = new URL(url);
-    return parsedUrl.hostname;
+    return parsedUrl.hostname.replace(/^www\./, '');
   } catch (error) {
     // If URL parsing fails, try to extract domain from text
     const domainMatch = url.match(/(?:https?:\/\/)?(?:www\.)?([^\/\s]+)/);
@@ -143,8 +143,8 @@ export function extractUrlsFromText(text: string): string[] {
       if (!cleanUrl.startsWith('http')) {
         cleanUrl = 'https://' + cleanUrl;
       }
-      // Remove trailing punctuation and whitespace
-      cleanUrl = cleanUrl.replace(/[.,;!?]+$/, '').trim();
+      // Remove trailing punctuation, parentheses, and whitespace
+      cleanUrl = cleanUrl.replace(/[.,;!?)]+$/, '').trim();
       return cleanUrl;
     })
     .filter(url => {

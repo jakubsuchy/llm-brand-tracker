@@ -9,10 +9,16 @@ import { Loader2, Plus, X, CheckCircle, AlertCircle, RefreshCw } from "lucide-re
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
+interface PromptItem {
+  id?: number;
+  text: string;
+}
+
 interface TopicWithPrompts {
+  id?: number;
   name: string;
   description: string;
-  prompts: string[];
+  prompts: PromptItem[];
 }
 
 interface CompetitorSuggestion {
@@ -26,19 +32,21 @@ interface GenerationSettings {
   promptsPerTopic: number;
   numberOfTopics: number;
   diversityThreshold: number; // Minimum % difference between prompts
+  customTopics: string[]; // User-specified topics to use instead of AI-generated ones
 }
 
 export default function PromptGeneratorPage() {
   const { toast } = useToast();
-  
-  // State management with localStorage persistence
+
   const [brandUrl, setBrandUrl] = useState("");
   const [competitors, setCompetitors] = useState<CompetitorSuggestion[]>([]);
   const [settings, setSettings] = useState<GenerationSettings>({
     promptsPerTopic: 10,
     numberOfTopics: 5,
-    diversityThreshold: 50
+    diversityThreshold: 50,
+    customTopics: []
   });
+  const [newTopicInput, setNewTopicInput] = useState('');
   const [generatedTopics, setGeneratedTopics] = useState<TopicWithPrompts[]>([]);
   const [currentStep, setCurrentStep] = useState<'url' | 'competitors' | 'settings' | 'topics' | 'ready'>('url');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -47,47 +55,43 @@ export default function PromptGeneratorPage() {
   const [customTopicDescription, setCustomTopicDescription] = useState('');
   const [isAddingCustomTopic, setIsAddingCustomTopic] = useState(false);
 
-  // Load saved state on component mount
+  // Load state from DB on mount
+  const { data: dbTopicsWithPrompts } = useQuery<TopicWithPrompts[]>({
+    queryKey: ['/api/topics/with-prompts'],
+  });
+
+  const { data: dbCompetitors } = useQuery<CompetitorSuggestion[]>({
+    queryKey: ['/api/competitors'],
+  });
+
   useEffect(() => {
-    const savedState = localStorage.getItem('promptGeneratorState');
-    if (savedState) {
-      try {
-        const parsed = JSON.parse(savedState);
-        const hasData = parsed.brandUrl || parsed.competitors?.length > 0 || parsed.generatedTopics?.length > 0;
-        
-        if (hasData) {
-          setBrandUrl(parsed.brandUrl || "");
-          setCompetitors(parsed.competitors || []);
-          setSettings(parsed.settings || {
-            promptsPerTopic: 10,
-            numberOfTopics: 5,
-            diversityThreshold: 50
-          });
-          setGeneratedTopics(parsed.generatedTopics || []);
-          setCurrentStep(parsed.currentStep || 'url');
-          
-          toast({
-            title: "Previous session restored",
-            description: "Your last prompt generation session has been loaded",
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load saved state:', error);
-      }
-    }
+    // Load brand URL from DB settings
+    fetch('/api/settings/brand').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.brandUrl) setBrandUrl(data.brandUrl);
+    }).catch(() => {});
   }, []);
 
-  // Save state to localStorage whenever it changes
   useEffect(() => {
-    const stateToSave = {
-      brandUrl,
-      competitors,
-      settings,
-      generatedTopics,
-      currentStep
-    };
-    localStorage.setItem('promptGeneratorState', JSON.stringify(stateToSave));
-  }, [brandUrl, competitors, settings, generatedTopics, currentStep]);
+    if (dbTopicsWithPrompts && dbTopicsWithPrompts.length > 0) {
+      setGeneratedTopics(dbTopicsWithPrompts.map(t => ({
+        ...t,
+        prompts: t.prompts.map((p: any) => typeof p === 'string' ? { text: p } : p)
+      })));
+      // Determine step based on available data
+      setCurrentStep('topics');
+    }
+  }, [dbTopicsWithPrompts]);
+
+  useEffect(() => {
+    if (dbCompetitors && dbCompetitors.length > 0 && competitors.length === 0) {
+      setCompetitors(dbCompetitors.map((c: any) => ({
+        name: c.name,
+        url: '',
+        category: c.category || 'Custom',
+        validated: true
+      })));
+    }
+  }, [dbCompetitors]);
 
   // Analyze brand URL and suggest competitors
   const analyzeUrlMutation = useMutation({
@@ -130,7 +134,10 @@ export default function PromptGeneratorPage() {
       return response.json();
     },
     onSuccess: (data: any) => {
-      setGeneratedTopics(data.topics);
+      setGeneratedTopics(data.topics.map((t: any) => ({
+        ...t,
+        prompts: t.prompts.map((p: any) => typeof p === 'string' ? { text: p } : p)
+      })));
       setCurrentStep('topics');
       setIsGenerating(false);
       toast({
@@ -151,7 +158,11 @@ export default function PromptGeneratorPage() {
   // Save prompts and run analysis
   const runAnalysisMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', `/api/save-and-analyze`, { topics: generatedTopics });
+      const topicsPayload = generatedTopics.map(t => ({
+        ...t,
+        prompts: t.prompts.map(p => typeof p === 'string' ? p : p.text)
+      }));
+      const response = await apiRequest('POST', `/api/save-and-analyze`, { topics: topicsPayload, brandUrl });
       return response.json();
     },
     onSuccess: () => {
@@ -223,7 +234,7 @@ export default function PromptGeneratorPage() {
       const newTopic: TopicWithPrompts = {
         name: customTopicName,
         description: customTopicDescription,
-        prompts: data.prompts
+        prompts: data.prompts.map((p: string) => ({ text: p }))
       };
       
       setGeneratedTopics(prev => [...prev, newTopic]);
@@ -265,13 +276,15 @@ export default function PromptGeneratorPage() {
       const result = await response.json();
       console.log(`[${new Date().toISOString()}] Database cleared:`, result);
       
-      localStorage.removeItem('promptGeneratorState');
+      queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competitors'] });
       setBrandUrl("");
       setCompetitors([]);
       setSettings({
         promptsPerTopic: 10,
         numberOfTopics: 5,
-        diversityThreshold: 50
+        diversityThreshold: 50,
+        customTopics: []
       });
       setGeneratedTopics([]);
       setCurrentStep('url');
@@ -506,11 +519,77 @@ export default function PromptGeneratorPage() {
                 />
               </div>
             </div>
+
+            {/* Custom Topics */}
+            <div className="space-y-3">
+              <Label>Custom Topics (optional)</Label>
+              <p className="text-sm text-gray-600">
+                Specify your own topics instead of letting AI generate them. If you add fewer than the number above, the rest will be AI-generated.
+              </p>
+              <div className="flex space-x-2">
+                <Input
+                  placeholder="e.g. Enterprise pricing, Developer experience, Migration from competitors"
+                  value={newTopicInput}
+                  onChange={(e) => setNewTopicInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newTopicInput.trim()) {
+                      setSettings(prev => ({
+                        ...prev,
+                        customTopics: [...(prev.customTopics ?? []), newTopicInput.trim()]
+                      }));
+                      setNewTopicInput('');
+                    }
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (newTopicInput.trim()) {
+                      setSettings(prev => ({
+                        ...prev,
+                        customTopics: [...(prev.customTopics ?? []), newTopicInput.trim()]
+                      }));
+                      setNewTopicInput('');
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              {(settings.customTopics ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {(settings.customTopics ?? []).map((topic, index) => (
+                    <Badge key={index} variant="secondary" className="flex items-center gap-1 px-3 py-1">
+                      {topic}
+                      <button
+                        onClick={() => setSettings(prev => ({
+                          ...prev,
+                          customTopics: (prev.customTopics ?? []).filter((_, i) => i !== index)
+                        }))}
+                        className="ml-1 hover:text-red-600"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="p-4 bg-blue-50 rounded-lg">
               <h4 className="font-medium text-blue-900 mb-2">Generation Summary</h4>
               <p className="text-sm text-blue-800">
-                Will generate <strong>{settings.numberOfTopics} topics</strong> with{' '}
-                <strong>{settings.promptsPerTopic} prompts each</strong> ({settings.numberOfTopics * settings.promptsPerTopic} total).
+                {(settings.customTopics ?? []).length > 0 ? (
+                  <>
+                    Will use <strong>{(settings.customTopics ?? []).length} custom topic{(settings.customTopics ?? []).length !== 1 ? 's' : ''}</strong>
+                    {(settings.customTopics ?? []).length < settings.numberOfTopics && (
+                      <> + <strong>{settings.numberOfTopics - (settings.customTopics ?? []).length} AI-generated</strong></>
+                    )} with{' '}
+                  </>
+                ) : (
+                  <>Will generate <strong>{settings.numberOfTopics} topics</strong> with{' '}</>
+                )}
+                <strong>{settings.promptsPerTopic} prompts each</strong> ({Math.max(settings.numberOfTopics, (settings.customTopics ?? []).length) * settings.promptsPerTopic} total).
                 Prompts will differ by at least <strong>{settings.diversityThreshold}%</strong> in word content.
               </p>
             </div>
@@ -583,28 +662,56 @@ export default function PromptGeneratorPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {generatedTopics.map((topic, index) => (
-              <Card key={index}>
+            {generatedTopics.map((topic, topicIndex) => (
+              <Card key={topic.id || topicIndex}>
                 <CardHeader>
-                  <CardTitle className="text-lg">{topic.name}</CardTitle>
-                  <p className="text-sm text-gray-600">{topic.description}</p>
-                  <Badge variant="secondary">{topic.prompts.length} prompts</Badge>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <CardTitle className="text-lg">{topic.name}</CardTitle>
+                      <p className="text-sm text-gray-600">{topic.description}</p>
+                      <Badge variant="secondary" className="mt-1">{topic.prompts.length} prompts</Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        if (topic.id) {
+                          await fetch(`/api/topics/${topic.id}`, { method: 'DELETE' });
+                          queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+                        }
+                        setGeneratedTopics(prev => prev.filter((_, i) => i !== topicIndex));
+                      }}
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50 -mt-1 -mr-2"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm">Sample Prompts:</h4>
-                    <div className="space-y-1">
-                      {topic.prompts.slice(0, 3).map((prompt, pIndex) => (
-                        <p key={pIndex} className="text-sm text-gray-700 p-2 bg-gray-50 rounded">
-                          "{prompt}"
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {topic.prompts.map((prompt, pIndex) => (
+                      <div key={prompt.id || pIndex} className="flex items-start gap-1 group">
+                        <p className="text-sm text-gray-700 p-2 bg-gray-50 rounded flex-1">
+                          {typeof prompt === 'string' ? prompt : prompt.text}
                         </p>
-                      ))}
-                      {topic.prompts.length > 3 && (
-                        <p className="text-xs text-gray-500">
-                          +{topic.prompts.length - 3} more prompts...
-                        </p>
-                      )}
-                    </div>
+                        <button
+                          onClick={async () => {
+                            if (typeof prompt === 'object' && prompt.id) {
+                              await fetch(`/api/prompts/${prompt.id}`, { method: 'DELETE' });
+                              queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+                            }
+                            setGeneratedTopics(prev => prev.map((t, i) =>
+                              i === topicIndex
+                                ? { ...t, prompts: t.prompts.filter((_, pi) => pi !== pIndex) }
+                                : t
+                            ));
+                          }}
+                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-1 shrink-0"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

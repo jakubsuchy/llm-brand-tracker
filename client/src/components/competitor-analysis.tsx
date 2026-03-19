@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, ExternalLink } from "lucide-react";
 
 interface CompetitorAnalysis {
   competitorId: number;
@@ -29,30 +30,24 @@ const getCompetitorColor = (index: number) => {
   return colors[index % colors.length];
 };
 
-export default function CompetitorAnalysis() {
+export default function CompetitorAnalysis({ runId }: { runId?: string }) {
+  const runParam = runId ? `?runId=${runId}` : '';
   const { data: competitors, isLoading, error } = useQuery<CompetitorAnalysis[]>({
-    queryKey: ["/api/competitors/analysis"],
+    queryKey: [`/api/competitors/analysis${runParam}`],
   });
 
-  const { data: responses } = useQuery<any[]>({
-    queryKey: ['/api/responses', { limit: 1000, full: true }],
-    queryFn: () => fetch('/api/responses?limit=1000&full=true').then(res => res.json()),
+  const { data: metrics } = useQuery<{ totalPrompts: number }>({
+    queryKey: [`/api/metrics${runParam}`],
   });
 
-  // Calculate actual percentage of prompts each competitor appears in
-  const competitorsWithPromptPercentage = competitors?.map(competitor => {
-    const totalPrompts = responses?.length || 1;
-    const promptsWithCompetitor = responses?.filter(response => 
-      response.competitorsMentioned?.includes(competitor.name)
-    ).length || 0;
+  const totalPrompts = metrics?.totalPrompts || 0;
 
-    return {
-      ...competitor,
-      promptPercentage: ((promptsWithCompetitor / totalPrompts) * 100),
-      promptsAppeared: promptsWithCompetitor,
-      totalPrompts
-    };
-  }) || [];
+  const competitorsWithPromptPercentage = competitors?.map(competitor => ({
+    ...competitor,
+    promptPercentage: competitor.mentionRate,
+    promptsAppeared: competitor.mentionCount,
+    totalPrompts,
+  })) || [];
 
   if (isLoading) {
     return (
@@ -82,7 +77,7 @@ export default function CompetitorAnalysis() {
     );
   }
 
-  const topCompetitors = competitorsWithPromptPercentage.slice(0, 4);
+  const topCompetitors = [...competitorsWithPromptPercentage].sort((a, b) => b.promptPercentage - a.promptPercentage).slice(0, 4);
 
   return (
     <Card className="bg-white border-slate-200">
@@ -126,17 +121,22 @@ export default function CompetitorAnalysis() {
                       <p className="text-xs text-slate-500">{competitor.category || 'Platform'}</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-semibold ${
-                      competitor.promptPercentage >= 50 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {competitor.promptPercentage.toFixed(0)}%
-                    </p>
-                    <div className="flex items-center justify-end">
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold ${
+                        competitor.promptPercentage >= 50 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {competitor.promptPercentage.toFixed(0)}%
+                      </p>
                       <p className="text-xs text-slate-500">
                         {competitor.promptsAppeared}/{competitor.totalPrompts} prompts
                       </p>
                     </div>
+                    <Link href={`/competitors?competitor=${encodeURIComponent(competitor.name)}${runId ? `&runId=${runId}` : ''}`}>
+                      <span className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer">
+                        View details <ExternalLink className="h-3 w-3" />
+                      </span>
+                    </Link>
                   </div>
                 </div>
               );

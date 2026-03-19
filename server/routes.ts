@@ -8,8 +8,85 @@ import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
 // Store active analysis sessions
 const analysisProgress = new Map<string, any>();
 
+// Brand name for filtering — loaded from DB on startup, persisted on change
+let currentBrandName: string = '';
+
+async function loadBrandName() {
+  try {
+    const saved = await storage.getSetting('brandName');
+    if (saved) currentBrandName = saved;
+    console.log(`[DEBUG] Loaded brandName from DB: "${currentBrandName}"`);
+  } catch {}
+}
+
+async function saveBrandName(name: string) {
+  currentBrandName = name;
+  await storage.setSetting('brandName', name);
+}
+
+// Shared analysis launcher — single source of truth
+async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
+  // Extract brand name from URL, or keep existing, or recover from DB
+  if (brandUrl) {
+    const { extractDomainFromUrl } = await import("./services/scraper");
+    const domain = extractDomainFromUrl(brandUrl);
+    await saveBrandName(domain.split('.')[0].replace(/[^a-zA-Z]/g, ''));
+    await storage.setSetting('brandUrl', brandUrl);
+  }
+  if (!currentBrandName) {
+    // Try to recover from saved brandUrl in DB
+    const savedUrl = await storage.getSetting('brandUrl');
+    if (savedUrl) {
+      const { extractDomainFromUrl } = await import("./services/scraper");
+      const domain = extractDomainFromUrl(savedUrl);
+      await saveBrandName(domain.split('.')[0].replace(/[^a-zA-Z]/g, ''));
+    }
+  }
+  const brandName = currentBrandName;
+  console.log(`[DEBUG] launchAnalysis: brandName="${brandName}", savedPrompts=${savedPrompts?.length ?? 'none'}`);
+
+  // Create analysis run record
+  const totalPrompts = savedPrompts?.length || (await storage.getPrompts()).length;
+  const analysisRun = await storage.createAnalysisRun({
+    status: 'running',
+    brandName: brandName || null,
+    brandUrl: brandUrl || null,
+    totalPrompts,
+    completedPrompts: 0
+  });
+  console.log(`[DEBUG] Created analysis run #${analysisRun.id}`);
+
+  const sessionId = `analysis_${analysisRun.id}`;
+  const analysisWorker = new BrandAnalyzer((progress) => {
+    analysisProgress.set(sessionId, progress);
+  });
+  analysisWorker.setBrandName(brandName);
+  analysisWorker.setAnalysisRunId(analysisRun.id);
+  if (brandUrl) {
+    analysisWorker.setBrandUrl(brandUrl.trim());
+  }
+
+  const useExisting = !savedPrompts;
+  analysisWorker.runFullAnalysis(useExisting, savedPrompts || undefined).then(async () => {
+    await storage.completeAnalysisRun(analysisRun.id, 'complete');
+    console.log(`[DEBUG] Analysis run #${analysisRun.id} completed`);
+  }).catch(async (error) => {
+    await storage.completeAnalysisRun(analysisRun.id, 'error');
+    console.error("Analysis failed:", error);
+    analysisProgress.set(sessionId, {
+      status: 'error',
+      message: `Analysis failed: ${error.message}`,
+      progress: 0
+    });
+  });
+
+  return sessionId;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+  // Load persisted brand name from DB
+  await loadBrandName();
+
   // Test analysis endpoint - process just one prompt
   app.post("/api/test-analysis", async (req, res) => {
     try {
@@ -62,8 +139,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Overview metrics endpoint
   app.get("/api/metrics", async (req, res) => {
     try {
-      const metrics = await analyzer.getOverviewMetrics();
-      res.json(metrics);
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const allResponses = await storage.getResponsesWithPrompts(runId);
+
+      const brandMentions = allResponses.filter(r => r.brandMentioned).length;
+      const brandMentionRate = allResponses.length > 0 ? (brandMentions / allResponses.length) * 100 : 0;
+
+      // Get top competitor from competitor_mentions table
+      let topCompetitorName = 'N/A';
+      const mentions = runId
+        ? await storage.getCompetitorAnalysisByRun(runId)
+        : await storage.getCompetitorAnalysisAllRuns();
+      const top = mentions.sort((a, b) => b.mentionCount - a.mentionCount)[0];
+      if (top) topCompetitorName = top.name;
+
+      // Get source counts
+      const allSources = await storage.getSources();
+      let sourceCount = 0;
+      let domainCount = 0;
+      if (runId) {
+        const sourcesWithUrls = await Promise.all(
+          allSources.map(async s => {
+            const urls = await storage.getSourceUrlsBySourceId(s.id, runId);
+            return urls.length > 0 ? s : null;
+          })
+        );
+        const activeSources = sourcesWithUrls.filter(Boolean);
+        domainCount = activeSources.length;
+        sourceCount = activeSources.reduce((sum, s) => {
+          return sum; // counted below
+        }, 0);
+        // Count total URLs for this run
+        let totalUrls = 0;
+        for (const s of allSources) {
+          const urls = await storage.getSourceUrlsBySourceId(s.id, runId);
+          totalUrls += urls.length;
+        }
+        sourceCount = totalUrls;
+      } else {
+        domainCount = allSources.length;
+        sourceCount = allSources.reduce((sum, s) => sum + (s.citationCount || 0), 0);
+      }
+
+      res.json({
+        brandMentionRate,
+        totalPrompts: allResponses.length,
+        topCompetitor: topCompetitorName,
+        totalSources: sourceCount,
+        totalDomains: domainCount
+      });
     } catch (error) {
       console.error("Error fetching metrics:", error);
       res.status(500).json({ error: "Failed to fetch metrics" });
@@ -73,18 +197,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Total counts endpoint for accurate statistics
   app.get("/api/counts", async (req, res) => {
     try {
-      const allResponses = await storage.getResponsesWithPrompts();
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const allResponses = await storage.getResponsesWithPrompts(runId);
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
-      const allCompetitors = await storage.getCompetitors();
-      const allSources = await storage.getSources();
-      
+
       res.json({
         totalResponses: allResponses.length,
         totalPrompts: allPrompts.length,
         totalTopics: allTopics.length,
-        totalCompetitors: allCompetitors.length,
-        totalSources: allSources.length,
+        totalCompetitors: 0,
+        totalSources: 0,
         brandMentions: allResponses.filter(r => r.brandMentioned).length,
         brandMentionRate: allResponses.length > 0 ? (allResponses.filter(r => r.brandMentioned).length / allResponses.length) * 100 : 0
       });
@@ -105,13 +228,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get topics with their prompts (for prompt generator review)
+  app.get("/api/topics/with-prompts", async (req, res) => {
+    try {
+      const allTopics = await storage.getTopics();
+      const allPrompts = await storage.getPrompts();
+      const result = allTopics
+        .filter(t => !t.deleted)
+        .map(topic => ({
+          id: topic.id,
+          name: topic.name,
+          description: topic.description,
+          prompts: allPrompts
+            .filter(p => p.topicId === topic.id && !p.deleted)
+            .map(p => ({ id: p.id, text: p.text }))
+        }));
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching topics with prompts:", error);
+      res.status(500).json({ error: "Failed to fetch topics with prompts" });
+    }
+  });
+
+  // Soft-delete a topic and its prompts
+  app.delete("/api/topics/:id", async (req, res) => {
+    try {
+      const topicId = parseInt(req.params.id);
+      await storage.softDeleteTopic(topicId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting topic:", error);
+      res.status(500).json({ error: "Failed to delete topic" });
+    }
+  });
+
+  // Soft-delete a prompt
+  app.delete("/api/prompts/:id", async (req, res) => {
+    try {
+      const promptId = parseInt(req.params.id);
+      await storage.softDeletePrompt(promptId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting prompt:", error);
+      res.status(500).json({ error: "Failed to delete prompt" });
+    }
+  });
+
   app.get("/api/topics/analysis", async (req, res) => {
     try {
-      const analysis = await analyzer.getTopicAnalysis();
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      // Derive topic analysis from responses
+      const allResponses = await storage.getResponsesWithPrompts(runId);
+      const topicMap = new Map<number, { name: string; total: number; brandMentions: number }>();
+      for (const r of allResponses) {
+        const topicId = r.prompt?.topicId || 0;
+        const topicName = r.prompt?.topic?.name || 'General';
+        if (!topicMap.has(topicId)) topicMap.set(topicId, { name: topicName, total: 0, brandMentions: 0 });
+        const t = topicMap.get(topicId)!;
+        t.total++;
+        if (r.brandMentioned) t.brandMentions++;
+      }
+      const analysis = [...topicMap.entries()].map(([topicId, t]) => ({
+        topicId,
+        topicName: t.name,
+        totalPrompts: t.total,
+        brandMentions: t.brandMentions,
+        mentionRate: t.total > 0 ? (t.brandMentions / t.total) * 100 : 0
+      }));
       res.json(analysis);
     } catch (error) {
       console.error("Error fetching topic analysis:", error);
       res.status(500).json({ error: "Failed to fetch topic analysis" });
+    }
+  });
+
+  // Competitor merge endpoints — registered BEFORE /api/competitors
+  app.get("/api/competitors/merge-suggestions", async (req, res) => {
+    try {
+      const suggestions = await storage.getMergeSuggestions();
+      res.json(suggestions);
+    } catch (error) {
+      console.error("Error fetching merge suggestions:", error);
+      res.status(500).json({ error: "Failed to fetch merge suggestions" });
+    }
+  });
+
+  app.post("/api/competitors/merge", async (req, res) => {
+    try {
+      const { primaryId, absorbedIds } = req.body;
+      if (!primaryId || !Array.isArray(absorbedIds) || absorbedIds.length === 0) {
+        return res.status(400).json({ error: "primaryId and absorbedIds[] are required" });
+      }
+      const count = await storage.mergeCompetitors(primaryId, absorbedIds);
+      res.json({ success: true, mergedCount: count });
+    } catch (error) {
+      console.error("Error merging competitors:", error);
+      res.status(500).json({ error: (error as Error).message || "Failed to merge competitors" });
+    }
+  });
+
+  app.post("/api/competitors/unmerge", async (req, res) => {
+    try {
+      const { competitorId } = req.body;
+      if (!competitorId) {
+        return res.status(400).json({ error: "competitorId is required" });
+      }
+      await storage.unmergeCompetitor(competitorId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error unmerging competitor:", error);
+      res.status(500).json({ error: "Failed to unmerge competitor" });
+    }
+  });
+
+  app.get("/api/competitors/merge-history", async (req, res) => {
+    try {
+      const history = await storage.getMergeHistory();
+      res.json(history);
+    } catch (error) {
+      console.error("Error fetching merge history:", error);
+      res.status(500).json({ error: "Failed to fetch merge history" });
     }
   });
 
@@ -128,8 +364,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/competitors/analysis", async (req, res) => {
     try {
-      const analysis = await analyzer.getCompetitorAnalysis();
-      res.json(analysis);
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      if (runId) {
+        const mentions = await storage.getCompetitorAnalysisByRun(runId);
+        const totalResponses = (await storage.getResponsesWithPrompts(runId)).length;
+        const analysis = mentions.map(m => ({
+          competitorId: m.competitorId,
+          name: m.name,
+          category: m.category,
+          mentionCount: m.mentionCount,
+          mentionRate: totalResponses > 0 ? (m.mentionCount / totalResponses) * 100 : 0,
+          changeRate: 0
+        }));
+        res.json(analysis);
+      } else {
+        const mentions = await storage.getCompetitorAnalysisAllRuns();
+        const totalResponses = (await storage.getResponsesWithPrompts()).length;
+        const analysis = mentions.map(m => ({
+          competitorId: m.competitorId,
+          name: m.name,
+          category: m.category,
+          mentionCount: m.mentionCount,
+          mentionRate: totalResponses > 0 ? (m.mentionCount / totalResponses) * 100 : 0,
+          changeRate: 0
+        }));
+        res.json(analysis);
+      }
     } catch (error) {
       console.error("Error fetching competitor analysis:", error);
       res.status(500).json({ error: "Failed to fetch competitor analysis" });
@@ -149,11 +409,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/sources/analysis", async (req, res) => {
     try {
-      const analysis = await analyzer.getSourceAnalysis();
-      res.json(analysis);
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const allSources = await storage.getSources();
+
+      // Derive source type dynamically from brand name and competitor list
+      // Include merged competitors so their domains still match for classification
+      const brandName = (currentBrandName || await storage.getSetting('brandName') || '').toLowerCase();
+      const allCompetitors = await storage.getAllCompetitorsIncludingMerged();
+
+      // Load subdomain prefixes setting (default: "docs")
+      const subdomainSetting = await storage.getSetting('competitorSubdomains');
+      const subdomainPrefixes = subdomainSetting
+        ? subdomainSetting.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+        : ['docs'];
+
+      // Build lookup: competitor domains (if set) + name-based matching
+      const competitorDomains = new Set<string>();
+      const competitorNameWords: string[][] = [];
+      for (const c of allCompetitors) {
+        if (c.domain) competitorDomains.add(c.domain.toLowerCase());
+        competitorNameWords.push(c.name.toLowerCase().split(/\s+/));
+      }
+
+      // Strip recognized subdomain prefixes to get the base domain for matching
+      const stripSubdomain = (domain: string): string => {
+        for (const prefix of subdomainPrefixes) {
+          if (domain.startsWith(prefix + '.')) {
+            return domain.slice(prefix.length + 1);
+          }
+        }
+        return domain;
+      };
+
+      const results = await Promise.all(allSources.map(async source => {
+        const urls = await storage.getSourceUrlsBySourceId(source.id, runId);
+        if (urls.length === 0) return null;
+
+        const domainLower = source.domain.toLowerCase();
+        const domainBase = domainLower.split('.')[0];
+        const strippedDomain = stripSubdomain(domainLower);
+        const strippedBase = strippedDomain.split('.')[0];
+        let sourceType = 'neutral';
+        if (brandName && (domainLower.includes(brandName) || brandName.includes(domainBase) || strippedDomain.includes(brandName) || brandName.includes(strippedBase))) {
+          sourceType = 'brand';
+        } else if (
+          competitorDomains.has(domainLower) ||
+          competitorDomains.has(strippedDomain) ||
+          competitorNameWords.some(words => words.some(w => domainBase.includes(w) || w.includes(domainBase) || strippedBase.includes(w) || w.includes(strippedBase)))
+        ) {
+          sourceType = 'competitor';
+        }
+
+        return {
+          sourceId: source.id,
+          domain: source.domain,
+          sourceType,
+          citationCount: urls.length,
+          urls
+        };
+      }));
+      res.json(results.filter(Boolean));
     } catch (error) {
       console.error("Error fetching source analysis:", error);
       res.status(500).json({ error: "Failed to fetch source analysis" });
+    }
+  });
+
+  // Get responses that cite a specific domain
+  app.get("/api/sources/:domain/responses", async (req, res) => {
+    try {
+      const domain = req.params.domain;
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const allResponses = await storage.getResponsesWithPrompts(runId);
+      // Filter responses whose text contains this domain
+      const matching = allResponses.filter(r =>
+        r.text.toLowerCase().includes(domain.toLowerCase())
+      );
+      res.json(matching);
+    } catch (error) {
+      console.error("Error fetching responses for domain:", error);
+      res.status(500).json({ error: "Failed to fetch responses" });
     }
   });
 
@@ -179,17 +514,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/responses", async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const useFullDataset = req.query.full === 'true' || limit > 100;
-      
+
       let responses;
       if (useFullDataset) {
-        // Get full dataset for large requests or when explicitly requested
-        responses = await storage.getResponsesWithPrompts();
+        responses = await storage.getResponsesWithPrompts(runId);
       } else {
-        // Get limited dataset for smaller requests
-        responses = await storage.getLatestResponses();
+        responses = await storage.getRecentResponses(limit, runId);
       }
-      
+
+
       res.json(responses.slice(0, limit));
     } catch (error) {
       console.error("Error fetching responses:", error);
@@ -277,6 +612,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[${new Date().toISOString()}] Analyzing brand URL: ${url}`);
 
+      // Persist brand name from URL
+      const { extractDomainFromUrl } = await import("./services/scraper");
+      const domain = extractDomainFromUrl(url);
+      await saveBrandName(domain.split('.')[0].replace(/[^a-zA-Z]/g, ''));
+      await storage.setSetting('brandUrl', url);
+      console.log(`[${new Date().toISOString()}] Brand name set to: ${currentBrandName}`);
+
       // Use OpenAI to analyze the brand and find competitors
       const { analyzeBrandAndFindCompetitors } = await import("./services/openai");
       const competitors = await analyzeBrandAndFindCompetitors(url);
@@ -301,66 +643,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate diverse topics and prompts using OpenAI
       const { generatePromptsForTopic } = await import("./services/openai");
 
-      // Get existing topics from database or generate new ones dynamically
-      const existingTopics = await storage.getTopics();
-      
-      let topics;
-      if (existingTopics.length >= settings.numberOfTopics) {
-        // Use existing topics
-        topics = existingTopics.slice(0, settings.numberOfTopics).map(topic => ({
-          name: topic.name,
-          description: topic.description || `Questions about ${topic.name.toLowerCase()}`
-        }));
-      } else {
-        // Generate new topics dynamically based on brand analysis
-        const { generateDynamicTopics } = await import("./services/openai");
-        const newTopics = await generateDynamicTopics(
-          brandUrl, 
-          settings.numberOfTopics - existingTopics.length,
-          competitors.map((c: any) => c.name)
-        );
-        
-        topics = [
-          ...existingTopics.map(topic => ({
+      const customTopics: string[] = settings.customTopics || [];
+
+      // Start with user-specified custom topics
+      let topics: Array<{name: string, description: string}> = customTopics.map((name: string) => ({
+        name,
+        description: `Analysis of ${name.toLowerCase()} in the competitive landscape`
+      }));
+
+      // Fill remaining slots with AI-generated topics if needed
+      const targetCount = Math.max(settings.numberOfTopics, customTopics.length);
+      if (topics.length < targetCount) {
+        const remaining = targetCount - topics.length;
+
+        // Check existing DB topics first
+        const existingTopics = await storage.getTopics();
+        const existingMapped = existingTopics
+          .filter(t => !customTopics.some(ct => ct.toLowerCase() === t.name.toLowerCase()))
+          .map(topic => ({
             name: topic.name,
             description: topic.description || `Questions about ${topic.name.toLowerCase()}`
-          })),
-          ...newTopics
-        ];
-      }
+          }));
 
-      // Generate prompts for each topic
-      const topicsWithPrompts = [];
-      
-      for (let i = 0; i < topics.length; i++) {
-        const topic = topics[i];
-        console.log(`[${new Date().toISOString()}] Generating prompts for topic ${i + 1}/${topics.length}: ${topic.name}`);
-        
-        try {
-          const prompts = await generatePromptsForTopic(
-            topic.name, 
-            topic.description, 
-            settings.promptsPerTopic,
-            competitors.map((c: any) => c.name)
-          );
-          
-          console.log(`[${new Date().toISOString()}] Generated ${prompts.length} prompts for topic: ${topic.name}`);
-          
-          topicsWithPrompts.push({
-            name: topic.name,
-            description: topic.description,
-            prompts
-          });
-        } catch (error) {
-          console.error(`[${new Date().toISOString()}] Error generating prompts for topic ${topic.name}:`, error);
-          // Add empty prompts array to continue with other topics
-          topicsWithPrompts.push({
-            name: topic.name,
-            description: topic.description,
-            prompts: []
-          });
+        if (existingMapped.length >= remaining) {
+          topics = [...topics, ...existingMapped.slice(0, remaining)];
+        } else {
+          topics = [...topics, ...existingMapped];
+          const stillNeeded = remaining - existingMapped.length;
+          if (stillNeeded > 0) {
+            const { generateDynamicTopics } = await import("./services/openai");
+            const newTopics = await generateDynamicTopics(
+              brandUrl,
+              stillNeeded,
+              competitors.map((c: any) => c.name)
+            );
+            topics = [...topics, ...newTopics];
+          }
         }
       }
+
+      // Generate prompts for all topics in parallel
+      const competitorNames = competitors.map((c: any) => c.name);
+      const topicsWithPrompts = await Promise.all(
+        topics.map(async (topic) => {
+          console.log(`[${new Date().toISOString()}] Generating prompts for topic: ${topic.name}`);
+          try {
+            const prompts = await generatePromptsForTopic(
+              topic.name,
+              topic.description,
+              settings.promptsPerTopic,
+              competitorNames
+            );
+            console.log(`[${new Date().toISOString()}] Generated ${prompts.length} prompts for topic: ${topic.name}`);
+            return { name: topic.name, description: topic.description, prompts };
+          } catch (error) {
+            console.error(`[${new Date().toISOString()}] Error generating prompts for topic ${topic.name}:`, error);
+            return { name: topic.name, description: topic.description, prompts: [] };
+          }
+        })
+      );
 
       res.json({ topics: topicsWithPrompts });
     } catch (error) {
@@ -371,60 +712,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/save-and-analyze", async (req, res) => {
     try {
-      const { topics } = req.body;
-      
+      const { topics, brandUrl } = req.body;
+
       if (!topics || !Array.isArray(topics)) {
         return res.status(400).json({ error: "Topics array is required" });
       }
 
-      // Clear existing prompts and create new ones
-      const allPrompts = [];
-      
+      // Build a set of incoming prompt texts for comparison
+      const incomingPrompts = new Set<string>();
       for (const topic of topics) {
-        // Create or find topic
-        let topicRecord = await storage.getTopics().then(topics => 
-          topics.find(t => t.name === topic.name)
-        );
-        
-        if (!topicRecord) {
-          topicRecord = await storage.createTopic({
-            name: topic.name,
-            description: topic.description
-          });
-        }
-
-        // Create prompts for this topic
         for (const promptText of topic.prompts) {
-          const prompt = await storage.createPrompt({
-            text: promptText,
-            topicId: topicRecord.id
-          });
-          allPrompts.push(prompt);
+          incomingPrompts.add(promptText.toLowerCase().trim());
         }
       }
 
-      // Start new analysis with the saved prompts
-      const sessionId = `analysis_${Date.now()}`;
-      const analysisWorker = new BrandAnalyzer((progress) => {
-        analysisProgress.set(sessionId, progress);
-      });
-      
-      // Clear existing responses to ensure fresh analysis with new prompts
-      await storage.clearAllResponses();
-      
-      analysisWorker.runFullAnalysis(false, allPrompts).catch(error => {
-        console.error("Analysis failed:", error);
-        analysisProgress.set(sessionId, {
-          status: 'error',
-          message: `Analysis failed: ${error.message}`,
-          progress: 0
-        });
-      });
+      // Check existing prompts — deduplicate by text (keep first/lowest id)
+      const rawExistingPrompts = await storage.getPrompts();
+      const existingByText = new Map<string, typeof rawExistingPrompts[0]>();
+      for (const p of rawExistingPrompts) {
+        const key = p.text.toLowerCase().trim();
+        if (!existingByText.has(key)) existingByText.set(key, p);
+      }
 
-      res.json({ 
-        success: true, 
-        message: "Prompts saved and analysis started",
-        promptCount: allPrompts.length 
+      // Determine if prompts changed
+      const promptsChanged = incomingPrompts.size !== existingByText.size ||
+        [...incomingPrompts].some(p => !existingByText.has(p));
+
+      let allPrompts;
+
+      if (promptsChanged) {
+        // Prompts differ — create new topic/prompt records for any that don't exist
+        console.log(`[${new Date().toISOString()}] Prompts changed, syncing ${incomingPrompts.size} prompts`);
+        const newPrompts = [];
+        for (const topic of topics) {
+          let topicRecord = await storage.getTopics().then(t =>
+            t.find(existing => existing.name === topic.name)
+          );
+          if (!topicRecord) {
+            topicRecord = await storage.createTopic({
+              name: topic.name,
+              description: topic.description
+            });
+          }
+          for (const promptText of topic.prompts) {
+            const key = promptText.toLowerCase().trim();
+            const existing = existingByText.get(key);
+            if (existing) {
+              newPrompts.push(existing);
+            } else {
+              const prompt = await storage.createPrompt({
+                text: promptText,
+                topicId: topicRecord.id
+              });
+              newPrompts.push(prompt);
+              existingByText.set(key, prompt); // prevent creating again in same batch
+            }
+          }
+        }
+        allPrompts = newPrompts;
+      } else {
+        // Same prompts — reuse existing deduplicated records
+        console.log(`[${new Date().toISOString()}] Prompts unchanged, reusing ${existingByText.size} existing prompts`);
+        allPrompts = [...existingByText.values()];
+      }
+
+      const sessionId = await launchAnalysis(brandUrl, allPrompts);
+
+      res.json({
+        success: true,
+        message: promptsChanged
+          ? `Prompts updated and analysis started (${allPrompts.length} prompts)`
+          : `Analysis started with existing prompts (${allPrompts.length} prompts)`,
+        promptCount: allPrompts.length,
+        sessionId
       });
     } catch (error) {
       console.error("Error saving prompts and starting analysis:", error);
@@ -432,40 +792,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Start full analysis
+  // Re-run analysis on existing prompts
   app.post("/api/analysis/start", async (req, res) => {
     try {
-      const { settings } = req.body;
-      const sessionId = `analysis_${Date.now()}`;
-      
-      // Check if we have recent prompts to use
+      const { brandUrl } = req.body || {};
+
       const existingPrompts = await storage.getPrompts();
-      const useExistingPrompts = existingPrompts.length > 0;
-      
-      // Start analysis in background
-      const analysisWorker = new BrandAnalyzer((progress) => {
-        analysisProgress.set(sessionId, progress);
-      });
-      
-      // Don't await - run in background
-      analysisWorker.runFullAnalysis(useExistingPrompts, undefined, settings).catch(error => {
-        console.error("Analysis failed:", error);
-        analysisProgress.set(sessionId, {
-          status: 'error',
-          message: error.message,
-          progress: 0
-        });
-      });
-      
-      const totalPrompts = settings ? settings.promptsPerTopic * settings.numberOfTopics : 100;
-      res.json({ 
-        success: true, 
+      if (existingPrompts.length === 0) {
+        return res.status(400).json({ error: "No prompts found. Use the Prompt Generator first." });
+      }
+
+      // brandUrl from client localStorage, or launchAnalysis will recover from DB
+      const sessionId = await launchAnalysis(brandUrl || undefined, undefined);
+
+      res.json({
+        success: true,
         sessionId,
-        message: useExistingPrompts ? "Analysis started with saved prompts" : `Analysis started with ${totalPrompts} new prompts` 
+        message: `Analysis started with ${existingPrompts.length} existing prompts`
       });
     } catch (error) {
       console.error("Error starting analysis:", error);
       res.status(500).json({ error: "Failed to start analysis" });
+    }
+  });
+
+  // List all analysis runs
+  app.get("/api/analysis/runs", async (req, res) => {
+    try {
+      const runs = await storage.getAnalysisRuns();
+      // Include response count per run, filter out empty runs
+      const runsWithCounts = await Promise.all(
+        runs.map(async (run) => {
+          const responses = await storage.getResponsesWithPrompts(run.id);
+          return { ...run, responseCount: responses.length };
+        })
+      );
+      res.json(runsWithCounts.filter(r => r.responseCount > 0));
+    } catch (error) {
+      console.error("Error fetching analysis runs:", error);
+      res.status(500).json({ error: "Failed to fetch analysis runs" });
     }
   });
 
@@ -483,6 +848,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching analysis progress:", error);
       res.status(500).json({ error: "Failed to fetch analysis progress" });
+    }
+  });
+
+  // Settings - Get brand info
+  // API usage statistics
+  app.get("/api/usage", async (req, res) => {
+    try {
+      const { apiUsage, analysisRuns } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { sql, eq, desc } = await import("drizzle-orm");
+
+      // Get last 10 runs that have usage data
+      const recentRunIds = await db
+        .select({ id: analysisRuns.id })
+        .from(analysisRuns)
+        .orderBy(desc(analysisRuns.startedAt))
+        .limit(10);
+      const runIds = recentRunIds.map(r => r.id);
+
+      // Per-run totals (only recent runs + null for outside-run calls)
+      const allPerRun = await db
+        .select({
+          analysisRunId: apiUsage.analysisRunId,
+          model: apiUsage.model,
+          inputTokens: sql<number>`sum(${apiUsage.inputTokens})`,
+          outputTokens: sql<number>`sum(${apiUsage.outputTokens})`,
+          calls: sql<number>`count(*)`,
+        })
+        .from(apiUsage)
+        .groupBy(apiUsage.analysisRunId, apiUsage.model);
+
+      const perRun = allPerRun.filter(row =>
+        row.analysisRunId === null || runIds.includes(row.analysisRunId)
+      );
+
+      // Grand totals
+      const [totals] = await db
+        .select({
+          inputTokens: sql<number>`coalesce(sum(${apiUsage.inputTokens}), 0)`,
+          outputTokens: sql<number>`coalesce(sum(${apiUsage.outputTokens}), 0)`,
+          calls: sql<number>`count(*)`,
+        })
+        .from(apiUsage);
+
+      // Get run info for display
+      const runs = await db.select().from(analysisRuns).orderBy(desc(analysisRuns.startedAt));
+      const runMap = new Map(runs.map(r => [r.id, r]));
+
+      const perRunWithInfo = perRun.map(row => ({
+        ...row,
+        inputTokens: Number(row.inputTokens),
+        outputTokens: Number(row.outputTokens),
+        calls: Number(row.calls),
+        run: row.analysisRunId ? runMap.get(row.analysisRunId) : null,
+      }));
+
+      res.json({
+        totals: {
+          inputTokens: Number(totals.inputTokens),
+          outputTokens: Number(totals.outputTokens),
+          totalTokens: Number(totals.inputTokens) + Number(totals.outputTokens),
+          calls: Number(totals.calls),
+        },
+        perRun: perRunWithInfo,
+      });
+    } catch (error) {
+      console.error("Error fetching usage:", error);
+      res.status(500).json({ error: "Failed to fetch usage data" });
+    }
+  });
+
+  app.get("/api/settings/brand", async (req, res) => {
+    try {
+      const brandUrl = await storage.getSetting('brandUrl');
+      const brandName = await storage.getSetting('brandName');
+      res.json({ brandUrl, brandName });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch brand settings" });
+    }
+  });
+
+  // Settings - Competitor subdomain prefixes
+  app.get("/api/settings/competitor-subdomains", async (req, res) => {
+    try {
+      const value = await storage.getSetting('competitorSubdomains');
+      // Default to "docs" if not set
+      const prefixes = value ? value.split(',').map(s => s.trim()).filter(Boolean) : ['docs'];
+      res.json({ prefixes });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch subdomain settings" });
+    }
+  });
+
+  app.post("/api/settings/competitor-subdomains", async (req, res) => {
+    try {
+      const { prefixes } = req.body;
+      if (!Array.isArray(prefixes)) {
+        return res.status(400).json({ error: "prefixes must be an array of strings" });
+      }
+      const cleaned = prefixes.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+      await storage.setSetting('competitorSubdomains', cleaned.join(','));
+      res.json({ success: true, prefixes: cleaned });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save subdomain settings" });
     }
   });
 
@@ -569,46 +1038,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Analysis Progress - Start new analysis
-  app.post("/api/analysis/start", async (req, res) => {
-    try {
-      const { brandName, brandUrl } = req.body;
-      
-      if (!brandName || typeof brandName !== 'string' || !brandName.trim()) {
-        return res.status(400).json({ error: "Brand name is required" });
-      }
-
-      // Initialize new analysis with the brand analyzer
-      const progressCallback = (progress: any) => {
-        // In a real implementation, this would broadcast progress via WebSocket
-        console.log('Analysis progress:', progress);
-      };
-
-      // Start analysis in background
-      setTimeout(async () => {
-        try {
-          const { analyzer } = await import('./services/analyzer');
-          analyzer.progressCallback = progressCallback;
-          analyzer.setBrandName(brandName.trim());
-          if (brandUrl) {
-            analyzer.setBrandUrl(brandUrl.trim());
-          }
-          await analyzer.runFullAnalysis();
-        } catch (error) {
-          console.error('Analysis failed:', error);
-        }
-      }, 100);
-
-      res.json({ 
-        success: true, 
-        message: "Analysis started successfully",
-        status: 'initializing'
-      });
-    } catch (error) {
-      console.error("Error starting analysis:", error);
-      res.status(500).json({ error: "Failed to start analysis" });
-    }
-  });
-
   // Export data
   app.get("/api/export", async (req, res) => {
     try {

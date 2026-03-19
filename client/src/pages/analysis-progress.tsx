@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 interface AnalysisProgress {
-  status: 'initializing' | 'scraping' | 'generating_prompts' | 'testing_prompts' | 'analyzing' | 'complete' | 'error';
+  status: 'idle' | 'initializing' | 'scraping' | 'generating_prompts' | 'testing_prompts' | 'analyzing' | 'complete' | 'error';
   message: string;
   progress: number;
   totalPrompts?: number;
@@ -25,8 +25,6 @@ interface AnalysisProgress {
 
 export default function AnalysisProgressPage() {
   const [isRunning, setIsRunning] = useState(false);
-  const [promptsPerTopic, setPromptsPerTopic] = useState(20);
-  const [numberOfTopics, setNumberOfTopics] = useState(5);
 
   const { data: progress, refetch, isLoading } = useQuery<AnalysisProgress>({
     queryKey: ['/api/analysis/progress'],
@@ -40,12 +38,7 @@ export default function AnalysisProgressPage() {
       const response = await fetch('/api/analysis/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          settings: {
-            promptsPerTopic,
-            numberOfTopics
-          }
-        })
+        body: JSON.stringify({})
       });
       
       if (response.ok) {
@@ -74,9 +67,9 @@ export default function AnalysisProgressPage() {
   };
 
   useEffect(() => {
-    if (progress?.status === 'complete' || progress?.status === 'error') {
+    if (!progress?.status || progress.status === 'idle' || progress.status === 'complete' || progress.status === 'error') {
       setIsRunning(false);
-    } else if (progress?.status === 'initializing' || progress?.status === 'generating_prompts' || progress?.status === 'testing_prompts' || progress?.status === 'analyzing') {
+    } else {
       setIsRunning(true);
     }
   }, [progress]);
@@ -116,6 +109,7 @@ export default function AnalysisProgressPage() {
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Testing Prompts</Badge>;
       case 'analyzing':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200">Analyzing Results</Badge>;
+      case 'idle':
       default:
         return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">Ready</Badge>;
     }
@@ -230,77 +224,6 @@ export default function AnalysisProgressPage() {
             </div>
 
             <div className="pt-4 border-t space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Prompts per Topic
-                  </label>
-                  <input
-                    type="number"
-                    min="5"
-                    max="50"
-                    value={promptsPerTopic}
-                    onChange={(e) => setPromptsPerTopic(parseInt(e.target.value) || 20)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={isRunning}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Number of Topics
-                  </label>
-                  <input
-                    type="number"
-                    min="3"
-                    max="10"
-                    value={numberOfTopics}
-                    onChange={(e) => setNumberOfTopics(parseInt(e.target.value) || 5)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    disabled={isRunning}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">
-                  Data Management
-                </label>
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={async () => {
-                      if (confirm('This will clear all prompts and responses. Are you sure?')) {
-                        try {
-                          const response = await fetch('/api/data/clear', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: 'all' })
-                          });
-                          if (response.ok) {
-                            alert('All data cleared successfully');
-                            window.location.reload();
-                          }
-                        } catch (error) {
-                          console.error('Error clearing data:', error);
-                        }
-                      }
-                    }}
-                    className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50"
-                    disabled={isRunning}
-                  >
-                    Clear All Data
-                  </button>
-                  <span className="text-xs text-gray-500">
-                    Use this to reset the analysis and start fresh
-                  </span>
-                </div>
-              </div>
-              
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <p className="text-sm text-gray-600">
-                  Total prompts to generate: <span className="font-medium">{promptsPerTopic * numberOfTopics}</span>
-                </p>
-              </div>
-
               <div className="flex gap-3">
                 <Button 
                   onClick={startAnalysis}

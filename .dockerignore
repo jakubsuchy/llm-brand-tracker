@@ -1,6 +1,7 @@
 node_modules
+dist
 build
-npm-debug.log
+.git
 .env
 .DS_Store
-.claude
+npm-debug.log

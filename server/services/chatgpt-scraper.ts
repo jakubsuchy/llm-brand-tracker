@@ -228,7 +228,7 @@ export class ChatGPTScraper {
     const { analyzePromptResponse } = await import('./openai');
     
     try {
-      const fallbackResult = await analyzePromptResponse(prompt);
+      const fallbackResult = await analyzePromptResponse(prompt, this.brandName);
       
       // Generate realistic sources based on prompt content
       const sources = await this.generateRealisticSources(prompt, fallbackResult.response);

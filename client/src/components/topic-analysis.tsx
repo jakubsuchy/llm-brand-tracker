@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,9 +22,11 @@ const topicColors = [
   { bg: "bg-green-500", ring: "ring-green-200" },
 ];
 
-export default function TopicAnalysis() {
+export default function TopicAnalysis({ runId }: { runId?: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const runParam = runId ? `?runId=${runId}` : '';
   const { data: topics, isLoading, error } = useQuery<TopicAnalysis[]>({
-    queryKey: ["/api/topics/analysis"],
+    queryKey: [`/api/topics/analysis${runParam}`],
   });
 
   if (isLoading) {
@@ -61,9 +64,16 @@ export default function TopicAnalysis() {
       <CardContent className="p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-slate-900">Brand Mentions by Topic</h3>
-          <Button variant="ghost" size="sm" className="text-indigo-600 hover:text-indigo-700">
-            View All
-          </Button>
+          {sortedTopics.length > 5 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-indigo-600 hover:text-indigo-700"
+              onClick={() => setShowAll(!showAll)}
+            >
+              {showAll ? 'Show Less' : 'View All'}
+            </Button>
+          )}
         </div>
 
         {sortedTopics.length === 0 ? (
@@ -73,7 +83,7 @@ export default function TopicAnalysis() {
           </div>
         ) : (
           <div className="space-y-3">
-            {sortedTopics.slice(0, 5).map((topic, index) => {
+            {(showAll ? sortedTopics : sortedTopics.slice(0, 5)).map((topic, index) => {
               const color = topicColors[index % topicColors.length];
               const progressWidth = Math.max(topic.mentionRate, 2); // Minimum 2% for visibility
               
@@ -81,7 +91,7 @@ export default function TopicAnalysis() {
                 <div key={topic.topicId} className="flex items-center justify-between py-1">
                   <div className="flex items-center space-x-2">
                     <div className={`w-2 h-2 ${color.bg} rounded-full`}></div>
-                    <span className="text-sm text-slate-700 truncate max-w-[140px]">{topic.topicName}</span>
+                    <span className="text-sm text-slate-700">{topic.topicName}</span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className="text-sm font-medium text-slate-900 min-w-[32px] text-right">

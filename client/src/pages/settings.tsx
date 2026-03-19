@@ -1,12 +1,31 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Key, Save, CheckCircle, XCircle } from "lucide-react";
+import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus } from "lucide-react";
+
+interface UsageData {
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    calls: number;
+  };
+  perRun: Array<{
+    analysisRunId: number | null;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    calls: number;
+    run: { id: number; startedAt: string; brandName: string | null; status: string } | null;
+  }>;
+}
 
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
@@ -184,6 +203,10 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <CompetitorSubdomainsCard />
+
+        <ApiUsageCard />
+
         <Card>
           <CardHeader>
             <CardTitle>Analysis Configuration</CardTitle>
@@ -236,5 +259,210 @@ export default function SettingsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function CompetitorSubdomainsCard() {
+  const { toast } = useToast();
+  const [newPrefix, setNewPrefix] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const { data, refetch } = useQuery<{ prefixes: string[] }>({
+    queryKey: ['/api/settings/competitor-subdomains'],
+  });
+
+  const prefixes = data?.prefixes || ['docs'];
+
+  const addPrefix = () => {
+    const cleaned = newPrefix.trim().toLowerCase();
+    if (!cleaned || prefixes.includes(cleaned)) {
+      setNewPrefix('');
+      return;
+    }
+    savePrefixes([...prefixes, cleaned]);
+    setNewPrefix('');
+  };
+
+  const removePrefix = (prefix: string) => {
+    savePrefixes(prefixes.filter(p => p !== prefix));
+  };
+
+  const savePrefixes = async (updated: string[]) => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings/competitor-subdomains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefixes: updated }),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+      refetch();
+      toast({ title: "Saved", description: "Subdomain prefixes updated" });
+    } catch {
+      toast({ title: "Error", description: "Failed to save subdomain settings", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Globe className="h-5 w-5" />
+          Competitor Subdomain Recognition
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          Automatically recognize subdomains as competitor sources. For example, if "docs" is listed and paypal.com is a known competitor, then docs.paypal.com will also be classified as a competitor source.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {prefixes.map(prefix => (
+            <Badge key={prefix} variant="secondary" className="text-sm gap-1 pl-3 pr-1 py-1">
+              {prefix}.*
+              <button
+                onClick={() => removePrefix(prefix)}
+                className="hover:bg-gray-300 rounded-full p-0.5 ml-1"
+                disabled={saving}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Add subdomain prefix (e.g. api, blog, support)"
+            value={newPrefix}
+            onChange={(e) => setNewPrefix(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addPrefix()}
+            className="flex-1"
+          />
+          <Button variant="outline" onClick={addPrefix} disabled={!newPrefix.trim() || saving}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add
+          </Button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Common prefixes: docs, api, blog, support, developer, learn, help
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ApiUsageCard() {
+  const { data: usage, isLoading } = useQuery<UsageData>({
+    queryKey: ['/api/usage'],
+  });
+
+  const formatNumber = (n: number) => n.toLocaleString();
+
+  // Rough cost estimate: GPT-4o pricing ($2.50/1M input, $10/1M output)
+  const estimateCost = (input: number, output: number) => {
+    const cost = (input / 1_000_000) * 2.50 + (output / 1_000_000) * 10;
+    return cost < 0.01 ? '< $0.01' : `$${cost.toFixed(2)}`;
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="animate-pulse space-y-3">
+            <div className="h-6 bg-gray-200 rounded w-1/3"></div>
+            <div className="h-20 bg-gray-200 rounded"></div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!usage) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5" />
+          API Usage
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          OpenAI token usage across all analysis runs
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Totals */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-blue-50 p-3 rounded-lg text-center">
+            <div className="text-xl font-bold text-blue-700">{formatNumber(usage.totals.totalTokens)}</div>
+            <div className="text-xs text-blue-600">Total Tokens</div>
+          </div>
+          <div className="bg-green-50 p-3 rounded-lg text-center">
+            <div className="text-xl font-bold text-green-700">{formatNumber(usage.totals.inputTokens)}</div>
+            <div className="text-xs text-green-600">Input Tokens</div>
+          </div>
+          <div className="bg-purple-50 p-3 rounded-lg text-center">
+            <div className="text-xl font-bold text-purple-700">{formatNumber(usage.totals.outputTokens)}</div>
+            <div className="text-xs text-purple-600">Output Tokens</div>
+          </div>
+          <div className="bg-amber-50 p-3 rounded-lg text-center">
+            <div className="text-xl font-bold text-amber-700">{estimateCost(usage.totals.inputTokens, usage.totals.outputTokens)}</div>
+            <div className="text-xs text-amber-600">Est. Cost (GPT-4o)</div>
+          </div>
+        </div>
+
+        <div className="text-xs text-gray-500 text-right">
+          {formatNumber(usage.totals.calls)} API calls total
+        </div>
+
+        {/* Per-run breakdown */}
+        {usage.perRun.length > 0 && (
+          <div className="pt-4 border-t">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Per-run breakdown</h4>
+            <div className="bg-white rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Run</TableHead>
+                    <TableHead>Model</TableHead>
+                    <TableHead className="text-right">Input</TableHead>
+                    <TableHead className="text-right">Output</TableHead>
+                    <TableHead className="text-right">Calls</TableHead>
+                    <TableHead className="text-right">Est. Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {usage.perRun.map((row, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="text-sm">
+                        {row.run ? (
+                          <span>
+                            {new Date(row.run.startedAt).toLocaleDateString()}{' '}
+                            {new Date(row.run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {row.run.brandName && <span className="text-gray-500 ml-1">({row.run.brandName})</span>}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">Outside run</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">{row.model}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-sm">{formatNumber(row.inputTokens)}</TableCell>
+                      <TableCell className="text-right text-sm">{formatNumber(row.outputTokens)}</TableCell>
+                      <TableCell className="text-right text-sm">{row.calls}</TableCell>
+                      <TableCell className="text-right text-sm text-amber-600">
+                        {estimateCost(row.inputTokens, row.outputTokens)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

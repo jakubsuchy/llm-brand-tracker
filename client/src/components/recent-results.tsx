@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Check, X, Clock } from "lucide-react";
+import { Check, X, Clock, ExternalLink } from "lucide-react";
 
 interface PromptResult {
   id: number;
@@ -29,12 +30,15 @@ interface PromptResult {
 
 type FilterType = 'all' | 'mentioned' | 'not-mentioned';
 
-export default function RecentResults() {
+const PAGE_SIZE = 5;
+
+export default function RecentResults({ runId }: { runId?: string }) {
   const [filter, setFilter] = useState<FilterType>('all');
-  const [limit, setLimit] = useState(10);
+  const [page, setPage] = useState(0);
+  const runParam = runId ? `&runId=${runId}` : '';
 
   const { data: results, isLoading, error } = useQuery<PromptResult[]>({
-    queryKey: ["/api/responses", { limit }],
+    queryKey: [`/api/responses?limit=1000&full=true${runParam}`],
   });
 
   if (isLoading) {
@@ -65,11 +69,18 @@ export default function RecentResults() {
     );
   }
 
-  const filteredResults = (results || []).filter(result => {
+  const allResults = results || [];
+  const mentionedCount = allResults.filter(r => r.brandMentioned).length;
+  const notMentionedCount = allResults.filter(r => !r.brandMentioned).length;
+
+  const filteredResults = allResults.filter(result => {
     if (filter === 'mentioned') return result.brandMentioned;
     if (filter === 'not-mentioned') return !result.brandMentioned;
     return true;
   });
+
+  const totalPages = Math.ceil(filteredResults.length / PAGE_SIZE);
+  const paginatedResults = filteredResults.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const formatTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
@@ -99,26 +110,26 @@ export default function RecentResults() {
             <Button
               variant={filter === 'all' ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => setFilter('all')}
+              onClick={() => { setFilter('all'); setPage(0); }}
               className={filter === 'all' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600'}
             >
-              All
+              All ({allResults.length})
             </Button>
             <Button
               variant={filter === 'mentioned' ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => setFilter('mentioned')}
+              onClick={() => { setFilter('mentioned'); setPage(0); }}
               className={filter === 'mentioned' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600'}
             >
-              Mentioned
+              Mentioned ({mentionedCount})
             </Button>
             <Button
               variant={filter === 'not-mentioned' ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => setFilter('not-mentioned')}
+              onClick={() => { setFilter('not-mentioned'); setPage(0); }}
               className={filter === 'not-mentioned' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600'}
             >
-              Not Mentioned
+              Not Mentioned ({notMentionedCount})
             </Button>
           </div>
         </div>
@@ -130,7 +141,7 @@ export default function RecentResults() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredResults.slice(0, 5).map((result) => (
+            {paginatedResults.map((result) => (
               <div key={result.id} className="border border-slate-200 rounded-lg p-3 hover:bg-slate-50 transition-colors">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1">
@@ -146,49 +157,50 @@ export default function RecentResults() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 ml-2">
-                    <Badge 
+                    <Badge
                       variant={result.brandMentioned ? "default" : "destructive"}
-                      className={result.brandMentioned 
-                        ? "bg-green-100 text-green-800" 
+                      className={result.brandMentioned
+                        ? "bg-green-100 text-green-800"
                         : "bg-red-100 text-red-800"
                       }
                     >
-                      {result.brandMentioned ? (
-                        <span>Yes</span>
-                      ) : (
-                        <span>No</span>
-                      )}
+                      {result.brandMentioned ? 'Yes' : 'No'}
                     </Badge>
                   </div>
                 </div>
-                
+
                 <div className="text-xs text-slate-600 bg-slate-50 rounded p-2 mb-2">
                   {truncateText(result.text, 100)}
                 </div>
-                
+
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3 text-xs text-slate-500">
-                    <span>Sources: {result.sources?.length || 0}</span>
                     <span>Competitors: {result.competitorsMentioned?.length || 0}</span>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-indigo-600 hover:text-indigo-700 text-xs h-6 px-2">
-                    Details
-                  </Button>
+                  <Link href={`/prompt-results?promptId=${result.id}${runId ? `&runId=${runId}` : ''}`}>
+                    <span className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer">
+                      View details <ExternalLink className="h-3 w-3" />
+                    </span>
+                  </Link>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {filteredResults.length > 0 && (
-          <div className="mt-6 text-center">
-            <Button 
-              variant="ghost" 
-              onClick={() => setLimit(limit + 10)}
-              className="text-indigo-600 hover:text-indigo-700"
-            >
-              Load More Results
-            </Button>
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between">
+            <span className="text-xs text-slate-500">
+              {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, filteredResults.length)} of {filteredResults.length}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage(p => p - 1)} disabled={page === 0}>
+                Prev
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1}>
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>

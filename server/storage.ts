@@ -17,11 +17,16 @@ import {
   type InsertCompetitor,
   type InsertSource,
   type InsertAnalytics,
+  type InsertCompetitorMention,
+  type AnalysisRun,
+  type InsertAnalysisRun,
   type PromptWithTopic,
   type ResponseWithPrompt,
   type TopicAnalysis,
   type CompetitorAnalysis,
-  type SourceAnalysis
+  type SourceAnalysis,
+  type MergeSuggestion,
+  type MergeHistoryEntry
 } from "@shared/schema";
 
 export interface IStorage {
@@ -29,6 +34,7 @@ export interface IStorage {
   getTopics(): Promise<Topic[]>;
   createTopic(topic: InsertTopic): Promise<Topic>;
   getTopicById(id: number): Promise<Topic | undefined>;
+  softDeleteTopic(id: number): Promise<void>;
 
   // Prompts
   getPrompts(): Promise<Prompt[]>;
@@ -36,13 +42,15 @@ export interface IStorage {
   getPromptById(id: number): Promise<Prompt | undefined>;
   getPromptsWithTopics(): Promise<PromptWithTopic[]>;
   getPromptsByTopic(topicId: number): Promise<Prompt[]>;
+  softDeletePrompt(id: number): Promise<void>;
+  updateCompetitorDomain(id: number, domain: string): Promise<void>;
 
   // Responses
   getResponses(): Promise<Response[]>;
   createResponse(response: InsertResponse): Promise<Response>;
   getResponseById(id: number): Promise<Response | undefined>;
-  getResponsesWithPrompts(): Promise<ResponseWithPrompt[]>;
-  getRecentResponses(limit?: number): Promise<ResponseWithPrompt[]>;
+  getResponsesWithPrompts(runId?: number): Promise<ResponseWithPrompt[]>;
+  getRecentResponses(limit?: number, runId?: number): Promise<ResponseWithPrompt[]>;
 
   // Competitors
   getCompetitors(): Promise<Competitor[]>;
@@ -55,6 +63,24 @@ export interface IStorage {
   createSource(source: InsertSource): Promise<Source>;
   getSourceByDomain(domain: string): Promise<Source | undefined>;
   updateSourceCitationCount(domain: string, increment: number): Promise<void>;
+  addSourceUrls(domain: string, urls: string[], analysisRunId?: number): Promise<void>;
+  getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number): Promise<string[]>;
+
+  // Competitor mentions
+  createCompetitorMention(mention: InsertCompetitorMention): Promise<void>;
+  getCompetitorAnalysisByRun(runId: number): Promise<{ competitorId: number; name: string; category: string | null; mentionCount: number }[]>;
+  getCompetitorAnalysisAllRuns(): Promise<{ competitorId: number; name: string; category: string | null; mentionCount: number }[]>;
+
+  // Analysis runs
+  createAnalysisRun(run: InsertAnalysisRun): Promise<AnalysisRun>;
+  completeAnalysisRun(id: number, status: string): Promise<void>;
+  getAnalysisRuns(): Promise<AnalysisRun[]>;
+  getLatestAnalysisRun(): Promise<AnalysisRun | undefined>;
+  updateAnalysisRunProgress(id: number, completedPrompts: number): Promise<void>;
+
+  // Settings
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
 
   // Analytics
   getLatestAnalytics(): Promise<Analytics | undefined>;
@@ -68,6 +94,13 @@ export interface IStorage {
   // Latest analysis results only
   getLatestResponses(): Promise<ResponseWithPrompt[]>;
   getLatestPrompts(): Promise<Prompt[]>;
+
+  // Competitor merging
+  mergeCompetitors(primaryId: number, absorbedIds: number[]): Promise<number>;
+  unmergeCompetitor(competitorId: number): Promise<void>;
+  getMergeSuggestions(): Promise<MergeSuggestion[]>;
+  getMergeHistory(): Promise<MergeHistoryEntry[]>;
+  getAllCompetitorsIncludingMerged(): Promise<Competitor[]>;
 
   // Data clearing methods
   clearAllPrompts(): Promise<void>;
@@ -134,8 +167,26 @@ export class MemStorage implements IStorage {
     return this.topics.get(id);
   }
 
+  async softDeleteTopic(id: number): Promise<void> {
+    const topic = this.topics.get(id);
+    if (topic) topic.deleted = true;
+    for (const p of this.prompts.values()) {
+      if (p.topicId === id) p.deleted = true;
+    }
+  }
+
   async getPrompts(): Promise<Prompt[]> {
-    return Array.from(this.prompts.values());
+    return Array.from(this.prompts.values()).filter(p => !p.deleted);
+  }
+
+  async softDeletePrompt(id: number): Promise<void> {
+    const prompt = this.prompts.get(id);
+    if (prompt) prompt.deleted = true;
+  }
+
+  async updateCompetitorDomain(id: number, domain: string): Promise<void> {
+    const comp = this.competitors.get(id);
+    if (comp && !comp.domain) comp.domain = domain;
   }
 
   async createPrompt(prompt: InsertPrompt): Promise<Prompt> {
@@ -210,23 +261,30 @@ export class MemStorage implements IStorage {
   }
 
   async getCompetitors(): Promise<Competitor[]> {
-    return Array.from(this.competitors.values());
+    return Array.from(this.competitors.values()).filter(c => !c.mergedInto);
   }
 
   async createCompetitor(competitor: InsertCompetitor): Promise<Competitor> {
+    const nameKey = competitor.name.toLowerCase().trim();
+    const existing = await this.getCompetitorByName(competitor.name);
+    if (existing) return existing;
     const newCompetitor: Competitor = {
       id: this.currentCompetitorId++,
       name: competitor.name,
+      nameKey,
       category: competitor.category || null,
       mentionCount: competitor.mentionCount || null,
       lastMentioned: null,
+      mergedInto: null,
+      domain: competitor.domain || null,
     };
     this.competitors.set(newCompetitor.id, newCompetitor);
     return newCompetitor;
   }
 
   async getCompetitorByName(name: string): Promise<Competitor | undefined> {
-    return Array.from(this.competitors.values()).find(c => c.name === name);
+    const key = name.toLowerCase().trim();
+    return Array.from(this.competitors.values()).find(c => c.nameKey === key);
   }
 
   async updateCompetitorMentionCount(name: string, increment: number): Promise<void> {
@@ -266,6 +324,85 @@ export class MemStorage implements IStorage {
       source.lastCited = new Date();
       this.sources.set(source.id, source);
     }
+  }
+
+  private sourceUrlsMap = new Map<number, Set<string>>();
+
+  async addSourceUrls(domain: string, urls: string[], _analysisRunId?: number): Promise<void> {
+    const source = await this.getSourceByDomain(domain);
+    if (!source) return;
+    if (!this.sourceUrlsMap.has(source.id)) {
+      this.sourceUrlsMap.set(source.id, new Set([source.url]));
+    }
+    const set = this.sourceUrlsMap.get(source.id)!;
+    for (const url of urls) set.add(url);
+  }
+
+  async getSourceUrlsBySourceId(sourceId: number, _analysisRunId?: number): Promise<string[]> {
+    return Array.from(this.sourceUrlsMap.get(sourceId) || []);
+  }
+
+  private competitorMentionsList: InsertCompetitorMention[] = [];
+
+  async createCompetitorMention(mention: InsertCompetitorMention): Promise<void> {
+    this.competitorMentionsList.push(mention);
+  }
+
+  async getCompetitorAnalysisByRun(runId: number) {
+    const mentions = this.competitorMentionsList.filter(m => m.analysisRunId === runId);
+    const counts = new Map<number, number>();
+    for (const m of mentions) counts.set(m.competitorId, (counts.get(m.competitorId) || 0) + 1);
+    return [...counts.entries()].map(([competitorId, count]) => {
+      const comp = [...this.competitors.values()].find(c => c.id === competitorId);
+      return { competitorId, name: comp?.name || 'Unknown', category: comp?.category || null, mentionCount: count };
+    });
+  }
+
+  async getCompetitorAnalysisAllRuns() {
+    const counts = new Map<number, number>();
+    for (const m of this.competitorMentionsList) counts.set(m.competitorId, (counts.get(m.competitorId) || 0) + 1);
+    return [...counts.entries()].map(([competitorId, count]) => {
+      const comp = [...this.competitors.values()].find(c => c.id === competitorId);
+      return { competitorId, name: comp?.name || 'Unknown', category: comp?.category || null, mentionCount: count };
+    });
+  }
+
+  private analysisRunsMap = new Map<number, AnalysisRun>();
+  private analysisRunIdCounter = 0;
+
+  async createAnalysisRun(run: InsertAnalysisRun): Promise<AnalysisRun> {
+    const id = ++this.analysisRunIdCounter;
+    const record: AnalysisRun = { id, startedAt: new Date(), completedAt: null, status: run.status || 'running', brandName: run.brandName || null, brandUrl: run.brandUrl || null, totalPrompts: run.totalPrompts || 0, completedPrompts: 0 };
+    this.analysisRunsMap.set(id, record);
+    return record;
+  }
+
+  async completeAnalysisRun(id: number, status: string): Promise<void> {
+    const run = this.analysisRunsMap.get(id);
+    if (run) { run.status = status; run.completedAt = new Date(); }
+  }
+
+  async getAnalysisRuns(): Promise<AnalysisRun[]> {
+    return Array.from(this.analysisRunsMap.values()).sort((a, b) => new Date(b.startedAt!).getTime() - new Date(a.startedAt!).getTime());
+  }
+
+  async getLatestAnalysisRun(): Promise<AnalysisRun | undefined> {
+    return (await this.getAnalysisRuns())[0];
+  }
+
+  async updateAnalysisRunProgress(id: number, completedPrompts: number): Promise<void> {
+    const run = this.analysisRunsMap.get(id);
+    if (run) run.completedPrompts = completedPrompts;
+  }
+
+  private settingsMap = new Map<string, string>();
+
+  async getSetting(key: string): Promise<string | null> {
+    return this.settingsMap.get(key) ?? null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    this.settingsMap.set(key, value);
   }
 
   async getLatestAnalytics(): Promise<Analytics | undefined> {
@@ -353,6 +490,35 @@ export class MemStorage implements IStorage {
     
     return Array.from(sourceAnalysis.values())
       .sort((a, b) => b.citationCount - a.citationCount);
+  }
+
+  async mergeCompetitors(primaryId: number, absorbedIds: number[]): Promise<number> {
+    let count = 0;
+    for (const id of absorbedIds) {
+      const comp = this.competitors.get(id);
+      if (comp) {
+        comp.mergedInto = primaryId;
+        count++;
+      }
+    }
+    return count;
+  }
+
+  async unmergeCompetitor(competitorId: number): Promise<void> {
+    const comp = this.competitors.get(competitorId);
+    if (comp) comp.mergedInto = null;
+  }
+
+  async getMergeSuggestions(): Promise<MergeSuggestion[]> {
+    return [];
+  }
+
+  async getMergeHistory(): Promise<MergeHistoryEntry[]> {
+    return [];
+  }
+
+  async getAllCompetitorsIncludingMerged(): Promise<Competitor[]> {
+    return Array.from(this.competitors.values());
   }
 
   async clearAllPrompts(): Promise<void> {

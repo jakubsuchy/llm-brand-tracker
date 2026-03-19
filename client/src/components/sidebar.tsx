@@ -1,14 +1,15 @@
 import { Link, useLocation } from "wouter";
-import { 
-  ChartLine, 
-  Home, 
-  MessageSquare, 
-  Users, 
-  ExternalLink, 
-  Settings, 
+import {
+  ChartLine,
+  Home,
+  MessageSquare,
+  Users,
+  ExternalLink,
+  Settings,
   User,
   Activity,
-  Zap
+  Zap,
+  Scale
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -19,6 +20,7 @@ export default function Sidebar() {
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
     { id: "prompt-results", label: "Prompt Results", icon: MessageSquare, path: "/prompt-results" },
     { id: "competitors", label: "Competitors", icon: Users, path: "/competitors" },
+    { id: "compare", label: "Compare", icon: Scale, path: "/compare" },
     { id: "sources", label: "Sources", icon: ExternalLink, path: "/sources" },
     { id: "analysis", label: "Analysis Progress", icon: Activity, path: "/analysis-progress" },
     { id: "settings", label: "Settings", icon: Settings, path: "/settings" },

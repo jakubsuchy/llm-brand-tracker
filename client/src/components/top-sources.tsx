@@ -40,7 +40,7 @@ const getDomainLabel = (domain: string) => {
   return 'Website';
 };
 
-export default function TopSources() {
+export default function TopSources({ runId }: { runId?: string }) {
   const { toast } = useToast();
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);

@@ -4,121 +4,43 @@ import TopicAnalysis from "@/components/topic-analysis";
 import CompetitorAnalysis from "@/components/competitor-analysis";
 import RecentResults from "@/components/recent-results";
 import TopSources from "@/components/top-sources";
-import { Button } from "@/components/ui/button";
-import { RefreshCw, Play } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useEffect } from "react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { Input } from "@/components/ui/input";
+import { useSearch, useLocation } from "wouter";
+
+interface AnalysisRun {
+  id: number;
+  startedAt: string;
+  completedAt: string | null;
+  status: string;
+  brandName: string | null;
+  totalPrompts: number;
+  completedPrompts: number;
+}
 
 export default function Dashboard() {
-  const [brandName, setBrandName] = useState(() => localStorage.getItem('brandName') || '');
-  const [brandUrl, setBrandUrl] = useState(() => localStorage.getItem('brandUrl') || '');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(null);
-  const { toast } = useToast();
+  const [brandName, setBrandName] = useState('');
+  const searchString = useSearch();
+  const [, setLocation] = useLocation();
 
-  useEffect(() => {
-    localStorage.setItem('brandName', brandName);
-  }, [brandName]);
+  const urlRunId = new URLSearchParams(searchString).get('runId');
 
-  useEffect(() => {
-    localStorage.setItem('brandUrl', brandUrl);
-  }, [brandUrl]);
+  const { data: analysisRuns } = useQuery<AnalysisRun[]>({
+    queryKey: ['/api/analysis/runs'],
+  });
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      // Invalidate all queries to force refresh
-      await queryClient.invalidateQueries();
-      toast({
-        title: "Data Refreshed",
-        description: "All data has been refreshed successfully.",
-      });
-    } catch (error) {
-      toast({
-        title: "Refresh Failed",
-        description: "Failed to refresh data. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
+  const selectedRunId = urlRunId || 'all';
+
+  const setSelectedRunId = (id: string) => {
+    setLocation(`/?runId=${id}`);
   };
 
-  const handleRunAnalysis = async () => {
-    if (!brandName.trim()) {
-      toast({
-        title: "Brand Name Required",
-        description: "Please enter your brand name before running analysis.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setIsAnalyzing(true);
-    try {
-      const response = await apiRequest("POST", "/api/analysis/start", { 
-        brandName,
-        brandUrl: brandUrl.trim() || undefined
-      });
-      const result = await response.json();
-      
-      if (result.success) {
-        setAnalysisSessionId(result.sessionId);
-        toast({
-          title: "Analysis Started",
-          description: "Brand analysis is running in the background.",
-        });
-        
-        // Poll for progress (simplified - in production you'd use WebSockets)
-        const pollProgress = setInterval(async () => {
-          try {
-            const progressResponse = await apiRequest("GET", `/api/analysis/${result.sessionId}/progress`);
-            const progress = await progressResponse.json();
-            
-            if (progress.status === 'complete') {
-              clearInterval(pollProgress);
-              setIsAnalyzing(false);
-              setAnalysisSessionId(null);
-              await queryClient.invalidateQueries();
-              toast({
-                title: "Analysis Complete",
-                description: "Brand analysis has finished successfully.",
-              });
-            } else if (progress.status === 'error') {
-              clearInterval(pollProgress);
-              setIsAnalyzing(false);
-              setAnalysisSessionId(null);
-              toast({
-                title: "Analysis Failed",
-                description: progress.message || "Analysis failed with an error.",
-                variant: "destructive",
-              });
-            }
-          } catch (error) {
-            console.error("Error polling progress:", error);
-          }
-        }, 2000);
-        
-        // Clear polling after 5 minutes max
-        setTimeout(() => {
-          clearInterval(pollProgress);
-          if (isAnalyzing) {
-            setIsAnalyzing(false);
-            setAnalysisSessionId(null);
-          }
-        }, 300000);
-      }
-    } catch (error) {
-      toast({
-        title: "Analysis Failed",
-        description: "Failed to start analysis. Please try again.",
-        variant: "destructive",
-      });
-      setIsAnalyzing(false);
-    }
-  };
+  // Load brand name from DB
+  useEffect(() => {
+    fetch('/api/settings/brand').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.brandName) setBrandName(data.brandName);
+    }).catch(() => {});
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -132,46 +54,37 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2 items-center">
-          <Input
-            placeholder="Enter your brand name"
-            value={brandName}
-            onChange={e => setBrandName(e.target.value)}
-            className="w-48"
-          />
-          <Input
-            placeholder="Brand URL (optional)"
-            value={brandUrl}
-            onChange={e => setBrandUrl(e.target.value)}
-            className="w-48"
-          />
-          <Button
-            variant="outline"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            onClick={handleRunAnalysis}
-            disabled={isAnalyzing}
-          >
-            <Play className="h-4 w-4 mr-2" />
-            {isAnalyzing ? 'Running...' : 'Run Analysis'}
-          </Button>
+          {analysisRuns && analysisRuns.length > 0 && (
+            <Select value={selectedRunId} onValueChange={setSelectedRunId}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Select analysis run" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Runs</SelectItem>
+                {analysisRuns
+                  .filter(r => r.status === 'complete')
+                  .map(run => (
+                    <SelectItem key={run.id} value={run.id.toString()}>
+                      {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {run.brandName ? ` — ${run.brandName}` : ''}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 
-      <MetricsOverview />
-      
+      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TopicAnalysis />
-        <CompetitorAnalysis />
+        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
       </div>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentResults />
-        <TopSources />
+        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { storage } from "../storage";
 import { analyzePromptResponse, generatePromptsForTopic } from "./openai";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
+import { setCurrentRunId } from "./llm";
 import type { 
   InsertPrompt, 
   InsertResponse, 
@@ -22,8 +23,8 @@ export interface AnalysisProgress {
 let analysisStartTime = Date.now();
 let targetPrompts = 100; // Default value, will be updated based on user settings
 let currentProgress: AnalysisProgress = {
-  status: 'initializing',
-  message: 'Ready to start analysis...',
+  status: 'idle' as any,
+  message: 'Ready to start analysis',
   progress: 0,
   totalPrompts: 0,
   completedPrompts: 0
@@ -52,6 +53,7 @@ export class BrandAnalyzer {
   public progressCallback?: (progress: AnalysisProgress) => void;
   private brandName: string = '';
   private brandUrl: string = '';
+  private analysisRunId: number | null = null;
 
   constructor(progressCallback?: (progress: AnalysisProgress) => void) {
     this.progressCallback = progressCallback;
@@ -59,6 +61,11 @@ export class BrandAnalyzer {
 
   setBrandName(brandName: string) {
     this.brandName = brandName;
+  }
+
+  setAnalysisRunId(id: number) {
+    this.analysisRunId = id;
+    setCurrentRunId(id);
   }
 
   setBrandUrl(brandUrl: string) {
@@ -120,15 +127,7 @@ export class BrandAnalyzer {
           progress: 5
         });
         
-        console.log(`[${new Date().toISOString()}] Clearing existing data (useExistingPrompts branch)...`);
-        const competitorsBefore = await storage.getCompetitors();
-        console.log(`[${new Date().toISOString()}] Found ${competitorsBefore.length} competitors before clearing`);
-        await storage.clearAllPrompts();
-        await storage.clearAllResponses();
-        await storage.clearAllCompetitors();
-        const competitorsAfter = await storage.getCompetitors();
-        console.log(`[${new Date().toISOString()}] Found ${competitorsAfter.length} competitors after clearing`);
-        console.log(`[${new Date().toISOString()}] Data cleared successfully (useExistingPrompts branch)`);
+        console.log(`[${new Date().toISOString()}] Preparing analysis (savedPrompts provided, keeping historical data)`);
       } else if (!useExistingPrompts) {
         // For new analysis, don't clear existing data - append to it
         this.updateProgress({
@@ -147,34 +146,42 @@ export class BrandAnalyzer {
           message: 'Clearing previous data and loading saved prompts...',
           progress: 10
         });
-        
-        console.log(`[${new Date().toISOString()}] Clearing existing data (savedPrompts branch)...`);
-        const competitorsBefore = await storage.getCompetitors();
-        console.log(`[${new Date().toISOString()}] Found ${competitorsBefore.length} competitors before clearing`);
-        await storage.clearAllPrompts();
-        await storage.clearAllResponses();
-        await storage.clearAllCompetitors();
-        const competitorsAfter = await storage.getCompetitors();
-        console.log(`[${new Date().toISOString()}] Found ${competitorsAfter.length} competitors after clearing`);
-        console.log(`[${new Date().toISOString()}] Data cleared successfully (savedPrompts branch)`);
-        
+
+        console.log(`[${new Date().toISOString()}] Loading saved prompts (keeping historical data)`);
+
         this.updateProgress({
           status: 'testing_prompts',
           message: 'Processing saved prompts...',
           progress: 20
         });
-        
-        allPrompts = savedPrompts.map(p => ({ text: p.text, topicId: p.topicId || null }));
+
+        // Deduplicate by text and mark as existing (they already have DB records)
+        const seen = new Set<string>();
+        allPrompts = savedPrompts.filter(p => {
+          const key = p.text.toLowerCase().trim();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).map(p => ({ id: p.id, text: p.text, topicId: p.topicId || null, _existing: true }));
       } else if (useExistingPrompts) {
-        // Use existing prompts from the database
+        // Use existing prompts from the database — clear old responses only
         this.updateProgress({
           status: 'testing_prompts',
           message: 'Using existing prompts for analysis...',
           progress: 20
         });
-        
+
         const existingPrompts = await storage.getPrompts();
-        allPrompts = existingPrompts.map(p => ({ text: p.text, topicId: p.topicId }));
+        // Deduplicate by text — keep the first occurrence of each prompt
+        const seen = new Set<string>();
+        const uniquePrompts = existingPrompts.filter(p => {
+          const key = p.text.toLowerCase().trim();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        // Mark these as already-saved so processPrompt skips createPrompt
+        allPrompts = uniquePrompts.map(p => ({ id: p.id, text: p.text, topicId: p.topicId, _existing: true }));
       } else {
         // Step 1: Scrape brand website content
         this.updateProgress({
@@ -227,196 +234,182 @@ export class BrandAnalyzer {
       let completedCount = 0;
       
       // Process prompts sequentially to avoid rate limits
-      console.log(`[${new Date().toISOString()}] Starting to process ${allPrompts.length} prompts`);
-      
-      for (let i = 0; i < allPrompts.length; i++) {
-        // Check for cancellation before each prompt
-        if (!isAnalysisRunning) {
-          console.log(`[${new Date().toISOString()}] Analysis cancelled by user at prompt ${i + 1}`);
-          this.updateProgress({
-            status: 'error',
-            message: 'Analysis cancelled by user',
-            progress: 0
-          });
-          return;
-        }
-        
-        const promptData = allPrompts[i];
-        
-        try {
-          console.log(`[${new Date().toISOString()}] Starting prompt ${i + 1}/${allPrompts.length}`);
-          
-          // Create prompt record
-          const prompt = await storage.createPrompt(promptData);
-          
+      console.log(`[${new Date().toISOString()}] Starting to process ${allPrompts.length} prompts (concurrency: 3)`);
+
+      const CONCURRENCY = 3;
+      let nextIndex = 0;
+
+      const processPrompt = async (promptData: any, idx: number): Promise<void> => {
+        if (!isAnalysisRunning) return;
+
+        console.log(`[${new Date().toISOString()}] Processing prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
+
+        let prompt;
+        if (promptData._existing && promptData.id) {
+          // Reuse existing prompt record
+          prompt = { id: promptData.id, text: promptData.text, topicId: promptData.topicId };
+        } else {
+          prompt = await storage.createPrompt(promptData);
           if (!prompt) {
             console.error('Failed to create prompt:', promptData.text);
-            continue;
+            return;
           }
-          
-          console.log(`[${new Date().toISOString()}] Processing prompt: ${promptData.text.substring(0, 50)}...`);
-          
-          // Add delay before API call to avoid rate limits
-          if (i > 0) {
-            console.log(`[${new Date().toISOString()}] Waiting 2 seconds before next API call...`);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
-          }
-          
-          let analysis;
-          try {
-            console.log(`[${new Date().toISOString()}] Calling OpenAI API for prompt analysis...`);
-            analysis = await analyzePromptResponse(promptData.text);
-            console.log(`[${new Date().toISOString()}] OpenAI API call successful`);
-          } catch (error) {
-            console.error(`[${new Date().toISOString()}] OpenAI API failed, using fallback analysis:`, error);
-            // Generate realistic fallback analysis based on prompt content
-            const lowerPrompt = promptData.text.toLowerCase();
-            const brandMentioned = Math.random() < 0.15; // 15% realistic mention rate
-            const competitors: string[] = [];
-            
-            // Dynamic competitor detection based on prompt content
-            // Use AI to extract competitor mentions from the prompt
-            try {
-              const { extractCompetitorsFromText } = await import("./openai");
-              const extractedCompetitors = await extractCompetitorsFromText(promptData.text, this.brandName);
-              competitors.push(...extractedCompetitors);
-            } catch (error) {
-              console.error("Failed to extract competitors from text:", error);
-              // Fallback: look for common deployment/hosting keywords
-              const deploymentKeywords = ['deploy', 'hosting', 'platform', 'cloud', 'service'];
-              if (deploymentKeywords.some(keyword => lowerPrompt.includes(keyword))) {
-                // Let the analysis discover competitors naturally
-                console.log("Using fallback competitor detection");
-              }
-            }
-            
-            // If no specific competitors found but deployment/hosting mentioned, 
-            // let the analysis discover competitors naturally rather than using hardcoded fallbacks
-            
-            analysis = {
-              response: `Based on your ${promptData.text.toLowerCase()}, I'd recommend considering ${competitors.join(', ')} for your deployment needs.${brandMentioned ? ' There are also other good options for simple deployments.' : ''}`,
-              brandMentioned,
-              competitors: Array.from(new Set(competitors)), // Remove duplicates with Array.from
-              sources: [
-                'https://stackoverflow.com/questions/deployment',
-                'https://docs.aws.amazon.com',
-                'https://github.com/features/actions',
-                'https://docs.github.com/en/actions',
-                'https://vercel.com/docs',
-                'https://netlify.com/docs',
-                'https://docs.docker.com',
-                'https://kubernetes.io/docs'
-              ]
-            };
-          }
-          
-          console.log(`[${new Date().toISOString()}] Analysis result: Brand mentioned: ${analysis.brandMentioned}, Competitors: ${analysis.competitors.join(', ')}`);
-        
-          // Process competitors from analysis response
-          console.log(`[${new Date().toISOString()}] Processing ${analysis.competitors.length} competitors...`);
-          for (const competitorName of analysis.competitors) {
-            try {
-              let competitor = await storage.getCompetitorByName(competitorName);
-              if (!competitor) {
-                console.log(`[${new Date().toISOString()}] Creating new competitor: ${competitorName}`);
-                // Add delay before competitor categorization to avoid rate limits
-                await new Promise(resolve => setTimeout(resolve, 500));
-                competitor = await storage.createCompetitor({
-                  name: competitorName,
-                  category: await this.categorizeCompetitor(competitorName),
-                  mentionCount: 0
-                });
-              }
-              await storage.updateCompetitorMentionCount(competitorName, 1);
-            } catch (error) {
-              console.error(`[${new Date().toISOString()}] Error processing competitor ${competitorName}:`, error);
-            }
-          }
-          
-          // Process sources from analysis response
-          console.log(`[${new Date().toISOString()}] Processing sources...`);
-          
-          // Extract URLs from the response text, analysis sources, and even the prompt itself
-          const responseUrls = extractUrlsFromText(analysis.response);
-          const analysisSources = analysis.sources || [];
-          const promptUrls = extractUrlsFromText(promptData.text);
-          
-          // Combine and deduplicate all URLs
-          const allUrls = Array.from(new Set([...responseUrls, ...analysisSources, ...promptUrls]));
-          
-          console.log(`[${new Date().toISOString()}] Found ${allUrls.length} unique URLs to process`);
-          
-          // Group URLs by domain for better processing
-          const urlsByDomain = new Map<string, string[]>();
-          
-          for (const url of allUrls) {
-            try {
-              const domain = extractDomainFromUrl(url);
-              if (!domain || domain.length < 3) continue; // Skip invalid domains
-              
-              // Only skip obviously invalid domains
-              if (domain === 'example.com' || domain === 'localhost') {
-                continue;
-              }
-              
-              if (!urlsByDomain.has(domain)) {
-                urlsByDomain.set(domain, []);
-              }
-              urlsByDomain.get(domain)!.push(url);
-            } catch (error) {
-              console.error(`[${new Date().toISOString()}] Error processing URL ${url}:`, error);
-            }
-          }
-          
-          // Process each domain with its URLs
-          const domains = Array.from(urlsByDomain.keys());
-          for (const domain of domains) {
-            try {
-              const urls = urlsByDomain.get(domain)!;
-              // Get the most representative URL for this domain (prefer docs, api, etc.)
-              const primaryUrl = urls.find((url: string) => 
-                url.includes('/docs') || 
-                url.includes('/api') || 
-                url.includes('/developer') ||
-                url.includes('/guide') ||
-                url.includes('/tutorial')
-              ) || urls[0];
-              
-              let source = await storage.getSourceByDomain(domain);
-              if (!source) {
-                // Create a better title based on the domain
-                const title = this.generateSourceTitle(domain, primaryUrl);
-                
-                source = await storage.createSource({
-                  domain,
-                  url: primaryUrl,
-                  title,
-                  citationCount: 0
-                });
-                console.log(`[${new Date().toISOString()}] Created new source: ${domain} (${title})`);
-              }
-              await storage.updateSourceCitationCount(domain, 1);
-            } catch (error) {
-              console.error(`[${new Date().toISOString()}] Error processing source domain ${domain}:`, error);
-            }
-          }
-          
-          // Create response record with analysis data
-          console.log(`[${new Date().toISOString()}] Creating response record...`);
-          await storage.createResponse({
-            promptId: prompt.id,
-            text: analysis.response,
-            brandMentioned: analysis.brandMentioned,
-            competitorsMentioned: analysis.competitors,
-            sources: analysis.sources
-          });
-          
-          completedCount++;
-          console.log(`[${new Date().toISOString()}] Completed prompt ${i + 1}/${allPrompts.length} (${completedCount} total completed)`);
-        } catch (error) {
-          console.error(`[${new Date().toISOString()}] Error processing prompt: ${promptData.text}`, error);
         }
-        
+
+        // Analyze with rate-limit retry
+        let analysis;
+        let retries = 0;
+        while (true) {
+          try {
+            const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
+            analysis = await analyzePromptResponse(promptData.text, this.brandName, knownCompetitors);
+            break;
+          } catch (error: any) {
+            // Quota exhaustion — stop entirely, don't retry
+            const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
+            if (isQuota) {
+              console.error(`[${new Date().toISOString()}] Quota exceeded on prompt ${idx + 1} — stopping. Check billing.`);
+              return; // Skip this prompt, don't retry
+            }
+
+            const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
+            if (isRateLimit && retries < 5) {
+              const backoff = Math.pow(3, retries) * 5000; // 5s, 15s, 45s, 135s, 405s
+              console.log(`[${new Date().toISOString()}] Rate limited on prompt ${idx + 1}, retrying in ${Math.round(backoff / 1000)}s (attempt ${retries + 1}/5)`);
+              await new Promise(resolve => setTimeout(resolve, backoff));
+              retries++;
+              continue;
+            }
+            console.error(`[${new Date().toISOString()}] OpenAI API failed for prompt ${idx + 1}:`, error.message);
+            return; // Skip this prompt
+          }
+        }
+
+        // Filter out our own brand, then normalize generic names to existing records
+        const brandLower = (this.brandName || '').toLowerCase();
+        const knownCompetitors = await storage.getCompetitors();
+        const filteredCompetitors: string[] = [];
+
+        for (const name of analysis.competitors) {
+          const nameLower = name.toLowerCase();
+
+          // Skip our own brand
+          if (brandLower && (nameLower.includes(brandLower) || brandLower.includes(nameLower))) continue;
+
+          // Try to match short/generic names to existing full names
+          // e.g. "AWS" matches "AWS Elastic Load Balancing"
+          const existingMatch = knownCompetitors.find(c =>
+            c.name.toLowerCase().startsWith(nameLower + ' ') ||
+            c.name.toLowerCase().startsWith(nameLower + '-')
+          );
+          if (existingMatch) {
+            filteredCompetitors.push(existingMatch.name);
+          } else if (name.length >= 2) {
+            filteredCompetitors.push(name);
+          }
+        }
+
+        // Deduplicate after normalization
+        const uniqueCompetitors = [...new Set(filteredCompetitors)];
+
+        // Ensure competitor records exist — lookup first, only categorize if new
+        const resolvedCompetitors: { name: string; id: number }[] = [];
+        for (const competitorName of uniqueCompetitors) {
+          try {
+            let competitor = await storage.getCompetitorByName(competitorName);
+            if (!competitor) {
+              competitor = await storage.createCompetitor({
+                name: competitorName,
+                category: await this.categorizeCompetitor(competitorName),
+                mentionCount: 0
+              });
+            }
+            resolvedCompetitors.push({ name: competitor.name, id: competitor.id });
+          } catch (error) {
+            console.error(`Error resolving competitor ${competitorName}:`, error);
+          }
+        }
+
+        // Process sources
+        const responseUrls = extractUrlsFromText(analysis.response);
+        const analysisSources = analysis.sources || [];
+        const promptUrls = extractUrlsFromText(promptData.text);
+        const allUrls = Array.from(new Set([...responseUrls, ...analysisSources, ...promptUrls]));
+
+        const urlsByDomain = new Map<string, string[]>();
+        for (const url of allUrls) {
+          try {
+            const domain = extractDomainFromUrl(url);
+            if (!domain || domain.length < 3 || domain === 'example.com' || domain === 'localhost') continue;
+            if (!urlsByDomain.has(domain)) urlsByDomain.set(domain, []);
+            urlsByDomain.get(domain)!.push(url);
+          } catch {}
+        }
+
+        for (const [domain, urls] of urlsByDomain) {
+          try {
+            const primaryUrl = urls.find((u: string) =>
+              u.includes('/docs') || u.includes('/api') || u.includes('/developer') || u.includes('/guide') || u.includes('/tutorial')
+            ) || urls[0];
+
+            let source = await storage.getSourceByDomain(domain);
+            if (!source) {
+              source = await storage.createSource({
+                domain,
+                url: primaryUrl,
+                title: this.generateSourceTitle(domain, primaryUrl),
+                citationCount: 0
+              });
+            }
+            await storage.addSourceUrls(domain, urls, this.analysisRunId || undefined);
+            await storage.updateSourceCitationCount(domain, 1);
+
+            // Auto-populate competitor domain if this source matches a competitor by name
+            const domainBase = domain.toLowerCase().split('.')[0];
+            for (const comp of resolvedCompetitors) {
+              if (!comp.name) continue;
+              const compWords = comp.name.toLowerCase().split(/\s+/);
+              if (compWords.some(w => domainBase.includes(w) || w.includes(domainBase))) {
+                await storage.updateCompetitorDomain(comp.id, domain);
+              }
+            }
+          } catch {}
+        }
+
+        // Create response record
+        const responseRecord = await storage.createResponse({
+          promptId: prompt.id,
+          analysisRunId: this.analysisRunId,
+          text: analysis.response,
+          brandMentioned: analysis.brandMentioned,
+          competitorsMentioned: uniqueCompetitors.map(name => {
+            const resolved = resolvedCompetitors.find(r => r.name.toLowerCase() === name.toLowerCase());
+            return resolved?.name || name;
+          }),
+          sources: analysis.sources
+        });
+
+        // Create competitor mention records for this run
+        if (this.analysisRunId) {
+          for (const comp of resolvedCompetitors) {
+            try {
+              await storage.createCompetitorMention({
+                competitorId: comp.id,
+                analysisRunId: this.analysisRunId,
+                responseId: responseRecord.id,
+              });
+            } catch {}
+          }
+        }
+
+        completedCount++;
+        console.log(`[${new Date().toISOString()}] Completed prompt ${idx + 1}/${allPrompts.length} (${completedCount} total)`);
+
+        // Update run progress in DB
+        if (this.analysisRunId) {
+          await storage.updateAnalysisRunProgress(this.analysisRunId, completedCount);
+        }
+
         this.updateProgress({
           status: 'testing_prompts',
           message: `Testing prompts with ChatGPT... (${completedCount}/${allPrompts.length})`,
@@ -424,7 +417,20 @@ export class BrandAnalyzer {
           totalPrompts: allPrompts.length,
           completedPrompts: completedCount
         });
-      }
+      };
+
+      // Run with concurrency pool
+      const workers = Array.from({ length: CONCURRENCY }, async () => {
+        while (nextIndex < allPrompts.length && isAnalysisRunning) {
+          const idx = nextIndex++;
+          try {
+            await processPrompt(allPrompts[idx], idx);
+          } catch (error) {
+            console.error(`[${new Date().toISOString()}] Error processing prompt ${idx + 1}:`, error);
+          }
+        }
+      });
+      await Promise.all(workers);
 
       // Step 4: Generate analytics
       this.updateProgress({
@@ -435,8 +441,9 @@ export class BrandAnalyzer {
 
       await this.generateAnalytics();
 
+      setCurrentRunId(null);
       console.log(`[${new Date().toISOString()}] Analysis completed successfully. Processed ${completedCount} out of ${allPrompts.length} prompts`);
-      
+
       this.updateProgress({
         status: 'complete',
         message: 'Analysis complete!',
@@ -535,57 +542,35 @@ export class BrandAnalyzer {
   }
 
   private async categorizeCompetitor(name: string): Promise<string> {
-    // Try to get existing competitor to see if it already has a category
     const existingCompetitor = await storage.getCompetitorByName(name);
     if (existingCompetitor?.category) {
       return existingCompetitor.category;
     }
-    
-    // Use AI to dynamically categorize the competitor based on brand context
+
     try {
       console.log(`[${new Date().toISOString()}] Categorizing competitor: ${name}`);
-      
-      const OpenAI = await import("openai");
-      const client = new OpenAI.default({ 
-        apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key" 
-      });
-      
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Competitor categorization timeout')), 15000)
-      );
-      
-      const response = await Promise.race([
-        client.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert at categorizing companies and competitors. 
-              Given a competitor name and the context of the main brand, determine the most appropriate category.
-              Return only the category name as a single word or short phrase (e.g., "E-commerce", "Social Media", "Finance", "Healthcare", "Education", "Entertainment", "Technology", "Retail", "Food & Beverage", "Transportation", etc.).
-              Do not include explanations or additional text.`
-            },
-            {
-              role: "user",
-              content: `Brand: ${this.brandName || 'Unknown'}
-              Competitor: ${name}
-              
-              What category does this competitor belong to?`
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 20
-        }),
-        timeoutPromise
-      ]) as any;
+      const { chatCompletion } = await import("./llm");
+      const response = await chatCompletion({
+        model: "gpt-5.4-mini",
+        messages: [
+          {
+            role: "system",
+            content: `Categorize this company/product. Return only the category name as a single word or short phrase (e.g. "Technology", "Cloud Platform", "Networking", etc.). No explanation.`
+          },
+          {
+            role: "user",
+            content: `Brand: ${this.brandName || 'Unknown'}\nCompetitor: ${name}\nCategory?`
+          }
+        ],
+        temperature: 0.1,
+        max_completion_tokens: 32
+      }, { timeoutMs: 15000 });
 
       const category = response.choices[0].message.content?.trim() || 'Technology';
       console.log(`[${new Date().toISOString()}] Categorized ${name} as: ${category}`);
       return category;
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error categorizing competitor ${name} with AI:`, error);
-      // Fallback to generic category
+      console.error(`Error categorizing competitor ${name}:`, error);
       return 'Technology';
     }
   }

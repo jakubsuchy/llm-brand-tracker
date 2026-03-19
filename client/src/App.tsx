@@ -8,6 +8,7 @@ import Dashboard from "@/pages/dashboard";
 import PromptGeneratorPage from "@/pages/prompt-generator";
 import PromptResultsPage from "@/pages/prompts";
 import CompetitorsPage from "@/pages/competitors";
+import ComparePage from "@/pages/compare";
 import SourcesPage from "@/pages/sources";
 import SettingsPage from "@/pages/settings";
 import AnalysisProgressPage from "@/pages/analysis-progress";
@@ -21,6 +22,7 @@ function Router() {
         <Route path="/" component={Dashboard} />
         <Route path="/prompt-results" component={PromptResultsPage} />
         <Route path="/competitors" component={CompetitorsPage} />
+        <Route path="/compare" component={ComparePage} />
         <Route path="/sources" component={SourcesPage} />
         <Route path="/analysis-progress" component={AnalysisProgressPage} />
         <Route path="/settings" component={SettingsPage} />
