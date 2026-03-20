@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, ChevronDown, ChevronUp, Merge, X } from "lucide-react";
+import { Building2, ChevronDown, ChevronUp, Merge, X, ShieldX } from "lucide-react";
 import type { CompetitorAnalysis, MergeSuggestion, MergeHistoryEntry } from "@shared/schema";
 
 interface AnalysisRun {
@@ -171,6 +171,22 @@ export default function CompetitorsPage() {
       invalidateAll();
     } catch (error) {
       toast({ title: "Unmerge failed", description: (error as Error).message, variant: "destructive" });
+    }
+  };
+
+  const handleNotACompetitor = async (competitorId: number, name: string) => {
+    if (!confirm(`Remove "${name}" from competitors? It will be reclassified as a neutral source and excluded from future analysis.`)) return;
+    try {
+      const res = await fetch('/api/competitors/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitorId }),
+      });
+      if (!res.ok) throw new Error('Failed to reclassify');
+      toast({ title: "Reclassified", description: `"${name}" removed from competitors.` });
+      invalidateAll();
+    } catch (error) {
+      toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
     }
   };
 
@@ -355,6 +371,16 @@ export default function CompetitorsPage() {
                       {competitor.promptPercentage.toFixed(1)}%
                     </div>
                     <div className="text-xs text-gray-500">of prompts</div>
+                    {!mergeMode && (
+                      <button
+                        onClick={() => handleNotACompetitor(competitor.competitorId, competitor.name)}
+                        className="text-xs text-gray-400 hover:text-red-500 mt-1 flex items-center gap-0.5 ml-auto"
+                        title="Not a competitor — reclassify as neutral"
+                      >
+                        <ShieldX className="h-3 w-3" />
+                        Not a competitor
+                      </button>
+                    )}
                   </div>
                 </div>
               </CardHeader>

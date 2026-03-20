@@ -414,14 +414,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Derive source type dynamically from brand name and competitor list
       // Include merged competitors so their domains still match for classification
+      // Exclude self-merged (blocked/reclassified) competitors
       const brandName = (currentBrandName || await storage.getSetting('brandName') || '').toLowerCase();
-      const allCompetitors = await storage.getAllCompetitorsIncludingMerged();
+      const allCompetitors = (await storage.getAllCompetitorsIncludingMerged())
+        .filter(c => c.mergedInto !== c.id);
 
-      // Load subdomain prefixes setting (default: "docs")
+      // Load subdomain recognition setting (default: "docs")
+      // Entries without dots are prefixes (e.g. "docs" matches docs.*.com)
+      // Entries with dots are exact domains (e.g. "techdocs.f5.com" maps to f5.com)
       const subdomainSetting = await storage.getSetting('competitorSubdomains');
-      const subdomainPrefixes = subdomainSetting
+      const subdomainEntries = (subdomainSetting
         ? subdomainSetting.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-        : ['docs'];
+        : ['docs']);
+      const subdomainPrefixes = subdomainEntries.filter(e => !e.includes('.'));
+      const exactSubdomainMap = new Map<string, string>(); // full domain → base domain
+      for (const entry of subdomainEntries.filter(e => e.includes('.'))) {
+        // "techdocs.f5.com" → strip first segment → "f5.com"
+        const parts = entry.split('.');
+        if (parts.length >= 3) {
+          exactSubdomainMap.set(entry, parts.slice(1).join('.'));
+        }
+      }
 
       // Build lookup: competitor domains (if set) + name-based matching
       const competitorDomains = new Set<string>();
@@ -431,8 +444,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         competitorNameWords.push(c.name.toLowerCase().split(/\s+/));
       }
 
-      // Strip recognized subdomain prefixes to get the base domain for matching
+      // Strip recognized subdomain prefixes or resolve exact domains to base
       const stripSubdomain = (domain: string): string => {
+        // Check exact domain map first
+        const exact = exactSubdomainMap.get(domain);
+        if (exact) return exact;
+        // Then check prefixes
         for (const prefix of subdomainPrefixes) {
           if (domain.startsWith(prefix + '.')) {
             return domain.slice(prefix.length + 1);
@@ -952,6 +969,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, prefixes: cleaned });
     } catch (error) {
       res.status(500).json({ error: "Failed to save subdomain settings" });
+    }
+  });
+
+  // Settings - Competitor blocklist
+  const DEFAULT_BLOCKLIST = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
+
+  app.get("/api/settings/competitor-blocklist", async (req, res) => {
+    try {
+      const value = await storage.getSetting('competitorBlocklist');
+      const entries = value ? value.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_BLOCKLIST;
+      res.json({ entries });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch blocklist" });
+    }
+  });
+
+  app.post("/api/settings/competitor-blocklist", async (req, res) => {
+    try {
+      const { entries } = req.body;
+      if (!Array.isArray(entries)) {
+        return res.status(400).json({ error: "entries must be an array of strings" });
+      }
+      const cleaned = entries.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+      await storage.setSetting('competitorBlocklist', cleaned.join(','));
+      res.json({ success: true, entries: cleaned });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save blocklist" });
+    }
+  });
+
+  // Block a competitor: add to blocklist + soft-remove from competitor data
+  app.post("/api/competitors/block", async (req, res) => {
+    try {
+      const { competitorId } = req.body;
+      if (!competitorId) {
+        return res.status(400).json({ error: "competitorId is required" });
+      }
+
+      // Get competitor name
+      const allComps = await storage.getAllCompetitorsIncludingMerged();
+      const comp = allComps.find(c => c.id === competitorId);
+      if (!comp) {
+        return res.status(404).json({ error: "Competitor not found" });
+      }
+
+      // Add to blocklist
+      const value = await storage.getSetting('competitorBlocklist');
+      const current = value ? value.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_BLOCKLIST;
+      const nameLower = comp.name.toLowerCase();
+      if (!current.includes(nameLower)) {
+        current.push(nameLower);
+        await storage.setSetting('competitorBlocklist', current.join(','));
+      }
+
+      // Soft-remove: set merged_into to a sentinel value (-1) to hide from queries
+      // We reuse the merged_into mechanism — setting it to the competitor's own id marks it as blocked
+      const { db } = await import("./db");
+      const { competitors, competitorMentions } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      // Delete mentions so they don't count in analysis
+      await db.delete(competitorMentions).where(eq(competitorMentions.competitorId, competitorId));
+
+      // Also handle anything merged into this competitor
+      const mergedInto = allComps.filter(c => c.mergedInto === competitorId);
+      for (const m of mergedInto) {
+        await db.delete(competitorMentions).where(eq(competitorMentions.competitorId, m.id));
+        await db.update(competitors).set({ mergedInto: competitorId }).where(eq(competitors.id, m.id));
+      }
+
+      // Mark competitor as blocked by setting merged_into to its own id
+      await db.update(competitors).set({ mergedInto: competitorId }).where(eq(competitors.id, competitorId));
+
+      res.json({ success: true, blocked: comp.name });
+    } catch (error) {
+      console.error("Error blocking competitor:", error);
+      res.status(500).json({ error: "Failed to block competitor" });
     }
   });
 

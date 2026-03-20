@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import type { SourceAnalysis } from "@shared/schema";
 
 interface AnalysisRun {
@@ -40,6 +41,55 @@ export default function SourcesPage() {
   const [selectedRun, setSelectedRun] = useState<string>('all');
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [expandedView, setExpandedView] = useState<'prompts' | 'pages' | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const reclassifyAsCompetitor = async (domain: string) => {
+    // Add the domain to the subdomain recognition setting
+    // For subdomains like "techdocs.f5.com", this maps it to "f5.com" → competitor
+    // For root domains, the user should add it manually via Settings
+    try {
+      const res = await fetch('/api/settings/competitor-subdomains');
+      const { prefixes } = await res.json();
+      if (!prefixes.includes(domain)) {
+        await fetch('/api/settings/competitor-subdomains', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: [...prefixes, domain] }),
+        });
+      }
+      queryClient.invalidateQueries({ predicate: (q) => {
+        const key = q.queryKey[0] as string;
+        return typeof key === 'string' && key.startsWith('/api/sources');
+      }});
+      toast({ title: "Reclassified", description: `${domain} will now be recognized as a competitor source.` });
+    } catch {
+      toast({ title: "Error", description: "Failed to reclassify domain", variant: "destructive" });
+    }
+  };
+
+  const reclassifyAsNeutral = async (domain: string) => {
+    // Remove domain from subdomain recognition if present
+    try {
+      const res = await fetch('/api/settings/competitor-subdomains');
+      const { prefixes } = await res.json();
+      const updated = prefixes.filter((p: string) => p !== domain);
+      if (updated.length !== prefixes.length) {
+        await fetch('/api/settings/competitor-subdomains', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: updated }),
+        });
+      }
+      queryClient.invalidateQueries({ predicate: (q) => {
+        const key = q.queryKey[0] as string;
+        return typeof key === 'string' && key.startsWith('/api/sources');
+      }});
+      toast({ title: "Reclassified", description: `${domain} is now a neutral source.` });
+    } catch {
+      toast({ title: "Error", description: "Failed to reclassify domain", variant: "destructive" });
+    }
+  };
 
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
@@ -293,7 +343,7 @@ export default function SourcesPage() {
                         <TableRow key={`${domain.domain}-detail`}>
                           <TableCell colSpan={6} className="bg-gray-50 p-0">
                             <div className="border-b">
-                              <div className="flex gap-0">
+                              <div className="flex gap-0 items-center">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setExpandedView('prompts'); }}
                                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -316,6 +366,25 @@ export default function SourcesPage() {
                                   <FileText className="h-3 w-3 inline mr-1.5 -mt-0.5" />
                                   Pages ({domain.urls.length})
                                 </button>
+                                <div className="ml-auto pr-3">
+                                  {domain.sourceType !== 'competitor' ? (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); reclassifyAsCompetitor(domain.domain); }}
+                                      className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1"
+                                    >
+                                      <ArrowRightLeft className="h-3 w-3" />
+                                      Reclassify as competitor
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); reclassifyAsNeutral(domain.domain); }}
+                                      className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
+                                    >
+                                      <ArrowRightLeft className="h-3 w-3" />
+                                      Reclassify as neutral
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                             {expandedView === 'prompts' && (

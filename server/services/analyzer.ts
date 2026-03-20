@@ -285,9 +285,18 @@ export class BrandAnalyzer {
           }
         }
 
-        // Filter out our own brand, then normalize generic names to existing records
+        // Filter out our own brand and blocklisted names, then normalize generic names
         const brandLower = (this.brandName || '').toLowerCase();
         const knownCompetitors = await storage.getCompetitors();
+
+        // Load competitor blocklist
+        const blocklistSetting = await storage.getSetting('competitorBlocklist');
+        const defaultBlocklist = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
+        const blocklist = new Set(
+          (blocklistSetting ? blocklistSetting.split(',') : defaultBlocklist)
+            .map(s => s.trim().toLowerCase()).filter(Boolean)
+        );
+
         const filteredCompetitors: string[] = [];
 
         for (const name of analysis.competitors) {
@@ -295,6 +304,12 @@ export class BrandAnalyzer {
 
           // Skip our own brand
           if (brandLower && (nameLower.includes(brandLower) || brandLower.includes(nameLower))) continue;
+
+          // Skip blocklisted names (match by name or domain-style match)
+          if (blocklist.has(nameLower) || [...blocklist].some(b => {
+            const bBase = b.replace(/\.com$|\.org$|\.io$|\.net$/, '');
+            return nameLower === bBase || nameLower.includes(bBase) || bBase.includes(nameLower);
+          })) continue;
 
           // Try to match short/generic names to existing full names
           // e.g. "AWS" matches "AWS Elastic Load Balancing"
