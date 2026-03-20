@@ -407,6 +407,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reclassify a source domain as competitor or neutral
+  app.post("/api/sources/reclassify", async (req, res) => {
+    try {
+      const { domain, sourceType } = req.body;
+      if (!domain || !sourceType) {
+        return res.status(400).json({ error: "domain and sourceType are required" });
+      }
+
+      if (sourceType === 'competitor') {
+        // Check if it's a subdomain (3+ parts like techdocs.f5.com)
+        const parts = domain.split('.');
+        if (parts.length >= 3) {
+          // Add to subdomain recognition setting
+          const value = await storage.getSetting('competitorSubdomains');
+          const entries = value ? value.split(',').map((s: string) => s.trim()).filter(Boolean) : ['docs'];
+          if (!entries.includes(domain.toLowerCase())) {
+            entries.push(domain.toLowerCase());
+            await storage.setSetting('competitorSubdomains', entries.join(','));
+          }
+        } else {
+          // Root domain — create/find a competitor record with this domain
+          const domainBase = parts[0]; // "radware" from "radware.com"
+          const name = domainBase.charAt(0).toUpperCase() + domainBase.slice(1); // "Radware"
+          let competitor = await storage.getCompetitorByName(name);
+          if (!competitor) {
+            competitor = await storage.createCompetitor({
+              name,
+              category: null,
+              mentionCount: 0,
+            });
+          }
+          // Force-set the domain on the competitor record
+          const { db: database } = await import("./db");
+          const { competitors: competitorsTable } = await import("@shared/schema");
+          const { eq: eqOp } = await import("drizzle-orm");
+          await database.update(competitorsTable).set({ domain: domain.toLowerCase() }).where(eqOp(competitorsTable.id, competitor.id));
+        }
+        res.json({ success: true, message: `${domain} classified as competitor` });
+      } else if (sourceType === 'neutral') {
+        // Remove from subdomain recognition if present
+        const value = await storage.getSetting('competitorSubdomains');
+        if (value) {
+          const entries = value.split(',').map((s: string) => s.trim()).filter(Boolean);
+          const updated = entries.filter((e: string) => e !== domain.toLowerCase());
+          if (updated.length !== entries.length) {
+            await storage.setSetting('competitorSubdomains', updated.join(','));
+          }
+        }
+        res.json({ success: true, message: `${domain} classified as neutral` });
+      } else {
+        res.status(400).json({ error: "sourceType must be 'competitor' or 'neutral'" });
+      }
+    } catch (error) {
+      console.error("Error reclassifying source:", error);
+      res.status(500).json({ error: "Failed to reclassify source" });
+    }
+  });
+
   app.get("/api/sources/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;

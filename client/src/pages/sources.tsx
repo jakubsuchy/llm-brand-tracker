@@ -44,48 +44,24 @@ export default function SourcesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const reclassifyAsCompetitor = async (domain: string) => {
-    // Add the domain to the subdomain recognition setting
-    // For subdomains like "techdocs.f5.com", this maps it to "f5.com" → competitor
-    // For root domains, the user should add it manually via Settings
+  const reclassifySource = async (domain: string, sourceType: 'competitor' | 'neutral') => {
     try {
-      const res = await fetch('/api/settings/competitor-subdomains');
-      const { prefixes } = await res.json();
-      if (!prefixes.includes(domain)) {
-        await fetch('/api/settings/competitor-subdomains', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prefixes: [...prefixes, domain] }),
-        });
-      }
+      const res = await fetch('/api/sources/reclassify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain, sourceType }),
+      });
+      if (!res.ok) throw new Error('Failed to reclassify');
       queryClient.invalidateQueries({ predicate: (q) => {
         const key = q.queryKey[0] as string;
-        return typeof key === 'string' && key.startsWith('/api/sources');
+        return typeof key === 'string' && (key.startsWith('/api/sources') || key.startsWith('/api/competitors'));
       }});
-      toast({ title: "Reclassified", description: `${domain} will now be recognized as a competitor source.` });
-    } catch {
-      toast({ title: "Error", description: "Failed to reclassify domain", variant: "destructive" });
-    }
-  };
-
-  const reclassifyAsNeutral = async (domain: string) => {
-    // Remove domain from subdomain recognition if present
-    try {
-      const res = await fetch('/api/settings/competitor-subdomains');
-      const { prefixes } = await res.json();
-      const updated = prefixes.filter((p: string) => p !== domain);
-      if (updated.length !== prefixes.length) {
-        await fetch('/api/settings/competitor-subdomains', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prefixes: updated }),
-        });
-      }
-      queryClient.invalidateQueries({ predicate: (q) => {
-        const key = q.queryKey[0] as string;
-        return typeof key === 'string' && key.startsWith('/api/sources');
-      }});
-      toast({ title: "Reclassified", description: `${domain} is now a neutral source.` });
+      toast({
+        title: "Reclassified",
+        description: sourceType === 'competitor'
+          ? `${domain} is now a competitor source.`
+          : `${domain} is now a neutral source.`,
+      });
     } catch {
       toast({ title: "Error", description: "Failed to reclassify domain", variant: "destructive" });
     }
@@ -369,7 +345,7 @@ export default function SourcesPage() {
                                 <div className="ml-auto pr-3">
                                   {domain.sourceType !== 'competitor' ? (
                                     <button
-                                      onClick={(e) => { e.stopPropagation(); reclassifyAsCompetitor(domain.domain); }}
+                                      onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'competitor'); }}
                                       className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1"
                                     >
                                       <ArrowRightLeft className="h-3 w-3" />
@@ -377,7 +353,7 @@ export default function SourcesPage() {
                                     </button>
                                   ) : (
                                     <button
-                                      onClick={(e) => { e.stopPropagation(); reclassifyAsNeutral(domain.domain); }}
+                                      onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'neutral'); }}
                                       className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
                                     >
                                       <ArrowRightLeft className="h-3 w-3" />
