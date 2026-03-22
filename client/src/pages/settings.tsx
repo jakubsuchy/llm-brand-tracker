@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus, ShieldX } from "lucide-react";
+import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus, ShieldX, Monitor, Cpu } from "lucide-react";
 
 interface UsageData {
   totals: {
@@ -203,6 +203,8 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <ResponseMethodCard />
+
         <CompetitorSubdomainsCard />
 
         <CompetitorExclusionsCard />
@@ -261,6 +263,83 @@ export default function SettingsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function ResponseMethodCard() {
+  const { toast } = useToast();
+  const { data, refetch } = useQuery<{ method: string; browserAvailable: boolean }>({
+    queryKey: ['/api/settings/response-method'],
+  });
+
+  const method = data?.method || 'api';
+  const browserAvailable = data?.browserAvailable || false;
+
+  const setMethod = async (newMethod: string) => {
+    try {
+      const res = await fetch('/api/settings/response-method', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: newMethod }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error);
+      }
+      refetch();
+      toast({ title: "Saved", description: `Response method set to ${newMethod === 'browser' ? 'ChatGPT Browser' : 'OpenAI API'}` });
+    } catch (error) {
+      toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Monitor className="h-5 w-5" />
+          Response Method
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          Choose how prompts are sent to ChatGPT for analysis
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            onClick={() => setMethod('api')}
+            className={`p-4 rounded-lg border-2 text-left transition-colors ${
+              method === 'api' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Cpu className="h-4 w-4" />
+              <span className="font-medium">OpenAI API</span>
+            </div>
+            <p className="text-xs text-gray-500">
+              Fast, uses Responses API with web search. ~3-5s per prompt. Requires OpenAI API credits.
+            </p>
+          </button>
+          <button
+            onClick={() => browserAvailable ? setMethod('browser') : null}
+            className={`p-4 rounded-lg border-2 text-left transition-colors ${
+              method === 'browser' ? 'border-blue-500 bg-blue-50'
+                : browserAvailable ? 'border-gray-200 hover:border-gray-300'
+                : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Monitor className="h-4 w-4" />
+              <span className="font-medium">ChatGPT Browser</span>
+              {!browserAvailable && <Badge variant="outline" className="text-xs">Credentials needed</Badge>}
+            </div>
+            <p className="text-xs text-gray-500">
+              Uses real ChatGPT web UI with web search and real sources. ~60-120s per prompt. Requires CHATGPT_EMAIL/PASSWORD env vars.
+            </p>
+          </button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

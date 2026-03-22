@@ -233,30 +233,34 @@ export class BrandAnalyzer {
 
       let completedCount = 0;
       
-      // Process prompts sequentially to avoid rate limits
-      console.log(`[${new Date().toISOString()}] Starting to process ${allPrompts.length} prompts (concurrency: 3)`);
+      // Process prompts — browser mode is single-threaded (slow, one browser session)
+      const { getResponseMethod } = await import('./openai');
+      const CONCURRENCY = getResponseMethod() === 'browser' ? 1 : 3;
+      console.log(`[${new Date().toISOString()}] Starting to process ${allPrompts.length} prompts (concurrency: ${CONCURRENCY}, method: ${getResponseMethod()})`);
 
-      const CONCURRENCY = 3;
       let nextIndex = 0;
 
-      const processPrompt = async (promptData: any, idx: number): Promise<void> => {
-        if (!isAnalysisRunning) return;
+      // Background processing tasks that run while the next browser call is in flight
+      const backgroundTasks: Promise<void>[] = [];
 
-        console.log(`[${new Date().toISOString()}] Processing prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
+      // Phase 1: Fetch response (slow — browser or API)
+      const fetchResponse = async (promptData: any, idx: number) => {
+        if (!isAnalysisRunning) return null;
+
+        console.log(`[${new Date().toISOString()}] Fetching prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
 
         let prompt;
         if (promptData._existing && promptData.id) {
-          // Reuse existing prompt record
           prompt = { id: promptData.id, text: promptData.text, topicId: promptData.topicId };
         } else {
           prompt = await storage.createPrompt(promptData);
           if (!prompt) {
             console.error('Failed to create prompt:', promptData.text);
-            return;
+            return null;
           }
         }
 
-        // Analyze with rate-limit retry
+        // Get response with retry
         let analysis;
         let retries = 0;
         while (true) {
@@ -265,27 +269,29 @@ export class BrandAnalyzer {
             analysis = await analyzePromptResponse(promptData.text, this.brandName, knownCompetitors);
             break;
           } catch (error: any) {
-            // Quota exhaustion — stop entirely, don't retry
             const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
             if (isQuota) {
-              console.error(`[${new Date().toISOString()}] Quota exceeded on prompt ${idx + 1} — stopping. Check billing.`);
-              return; // Skip this prompt, don't retry
+              console.error(`[${new Date().toISOString()}] Quota exceeded on prompt ${idx + 1} — stopping.`);
+              return null;
             }
-
             const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
             if (isRateLimit && retries < 5) {
-              const backoff = Math.pow(3, retries) * 5000; // 5s, 15s, 45s, 135s, 405s
+              const backoff = Math.pow(3, retries) * 5000;
               console.log(`[${new Date().toISOString()}] Rate limited on prompt ${idx + 1}, retrying in ${Math.round(backoff / 1000)}s (attempt ${retries + 1}/5)`);
               await new Promise(resolve => setTimeout(resolve, backoff));
               retries++;
               continue;
             }
-            console.error(`[${new Date().toISOString()}] OpenAI API failed for prompt ${idx + 1}:`, error.message);
-            return; // Skip this prompt
+            console.error(`[${new Date().toISOString()}] Failed prompt ${idx + 1}:`, error.message);
+            return null;
           }
         }
 
-        // Filter out our own brand and blocklisted names, then normalize generic names
+        return { prompt, analysis, idx };
+      };
+
+      // Phase 2: Process result (fast — runs in background while next fetch starts)
+      const processResult = async (prompt: any, analysis: any, idx: number) => {
         const brandLower = (this.brandName || '').toLowerCase();
         const knownCompetitors = await storage.getCompetitors();
 
@@ -301,18 +307,12 @@ export class BrandAnalyzer {
 
         for (const name of analysis.competitors) {
           const nameLower = name.toLowerCase();
-
-          // Skip our own brand
           if (brandLower && (nameLower.includes(brandLower) || brandLower.includes(nameLower))) continue;
-
-          // Skip blocklisted names (match by name or domain-style match)
           if (blocklist.has(nameLower) || [...blocklist].some(b => {
             const bBase = b.replace(/\.com$|\.org$|\.io$|\.net$/, '');
             return nameLower === bBase || nameLower.includes(bBase) || bBase.includes(nameLower);
           })) continue;
 
-          // Try to match short/generic names to existing full names
-          // e.g. "AWS" matches "AWS Elastic Load Balancing"
           const existingMatch = knownCompetitors.find(c =>
             c.name.toLowerCase().startsWith(nameLower + ' ') ||
             c.name.toLowerCase().startsWith(nameLower + '-')
@@ -324,10 +324,9 @@ export class BrandAnalyzer {
           }
         }
 
-        // Deduplicate after normalization
         const uniqueCompetitors = [...new Set(filteredCompetitors)];
 
-        // Ensure competitor records exist — lookup first, only categorize if new
+        // Resolve competitor records
         const resolvedCompetitors: { name: string; id: number }[] = [];
         for (const competitorName of uniqueCompetitors) {
           try {
@@ -348,8 +347,7 @@ export class BrandAnalyzer {
         // Process sources
         const responseUrls = extractUrlsFromText(analysis.response);
         const analysisSources = analysis.sources || [];
-        const promptUrls = extractUrlsFromText(promptData.text);
-        const allUrls = Array.from(new Set([...responseUrls, ...analysisSources, ...promptUrls]));
+        const allUrls = Array.from(new Set([...responseUrls, ...analysisSources]));
 
         const urlsByDomain = new Map<string, string[]>();
         for (const url of allUrls) {
@@ -379,7 +377,6 @@ export class BrandAnalyzer {
             await storage.addSourceUrls(domain, urls, this.analysisRunId || undefined);
             await storage.updateSourceCitationCount(domain, 1);
 
-            // Auto-populate competitor domain if this source matches a competitor by name
             const domainBase = domain.toLowerCase().split('.')[0];
             for (const comp of resolvedCompetitors) {
               if (!comp.name) continue;
@@ -404,7 +401,7 @@ export class BrandAnalyzer {
           sources: analysis.sources
         });
 
-        // Create competitor mention records for this run
+        // Create competitor mention records
         if (this.analysisRunId) {
           for (const comp of resolvedCompetitors) {
             try {
@@ -418,9 +415,8 @@ export class BrandAnalyzer {
         }
 
         completedCount++;
-        console.log(`[${new Date().toISOString()}] Completed prompt ${idx + 1}/${allPrompts.length} (${completedCount} total)`);
+        console.log(`[${new Date().toISOString()}] Saved prompt ${idx + 1}/${allPrompts.length} (${completedCount} total)`);
 
-        // Update run progress in DB
         if (this.analysisRunId) {
           await storage.updateAnalysisRunProgress(this.analysisRunId, completedCount);
         }
@@ -432,6 +428,17 @@ export class BrandAnalyzer {
           totalPrompts: allPrompts.length,
           completedPrompts: completedCount
         });
+      };
+
+      // Combined: fetch sequentially, process in background
+      const processPrompt = async (promptData: any, idx: number): Promise<void> => {
+        const result = await fetchResponse(promptData, idx);
+        if (!result) return;
+
+        // Fire off processing in background — don't await it here
+        const task = processResult(result.prompt, result.analysis, result.idx)
+          .catch(err => console.error(`[${new Date().toISOString()}] Background processing error for prompt ${idx + 1}:`, err.message));
+        backgroundTasks.push(task);
       };
 
       // Run with concurrency pool
@@ -446,6 +453,12 @@ export class BrandAnalyzer {
         }
       });
       await Promise.all(workers);
+
+      // Wait for any remaining background processing tasks to finish
+      if (backgroundTasks.length > 0) {
+        console.log(`[${new Date().toISOString()}] Waiting for ${backgroundTasks.length} background tasks to complete...`);
+        await Promise.all(backgroundTasks);
+      }
 
       // Step 4: Generate analytics
       this.updateProgress({

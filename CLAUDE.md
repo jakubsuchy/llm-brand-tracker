@@ -118,7 +118,9 @@ analytics (id, date, total_prompts, brand_mention_rate, top_competitor, ...)
 ```
 DATABASE_URL=postgresql://admin:password@db:5432/brand_tracker
 OPENAI_API_KEY=sk-...
+CHATGPT_EMAIL=user@example.com        # Optional: for browser scraper mode
+CHATGPT_PASSWORD=...                   # Optional: for browser scraper mode
 NODE_ENV=production
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+HEADLESS=true
+BROWSER_PROFILE_PATH=/tmp/browser-profile
 ```

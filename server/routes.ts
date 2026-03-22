@@ -87,6 +87,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Load persisted brand name from DB
   await loadBrandName();
 
+  // Load persisted response method
+  try {
+    const { setResponseMethod } = await import('./services/openai');
+    const savedMethod = await storage.getSetting('responseMethod');
+    if (savedMethod === 'browser' || savedMethod === 'api') {
+      setResponseMethod(savedMethod);
+    }
+  } catch {}
+
   // Test analysis endpoint - process just one prompt
   app.post("/api/test-analysis", async (req, res) => {
     try {
@@ -1027,6 +1036,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, prefixes: cleaned });
     } catch (error) {
       res.status(500).json({ error: "Failed to save subdomain settings" });
+    }
+  });
+
+  // Settings - Response method (browser vs API)
+  app.get("/api/settings/response-method", async (req, res) => {
+    try {
+      const { getResponseMethod } = await import('./services/openai');
+      const method = getResponseMethod();
+      const hasCreds = !!(process.env.CHATGPT_EMAIL && process.env.CHATGPT_PASSWORD);
+      res.json({ method, browserAvailable: hasCreds });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch response method" });
+    }
+  });
+
+  app.post("/api/settings/response-method", async (req, res) => {
+    try {
+      const { method } = req.body;
+      if (method !== 'browser' && method !== 'api') {
+        return res.status(400).json({ error: "method must be 'browser' or 'api'" });
+      }
+      if (method === 'browser' && (!process.env.CHATGPT_EMAIL || !process.env.CHATGPT_PASSWORD)) {
+        return res.status(400).json({ error: "CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for browser mode" });
+      }
+      const { setResponseMethod } = await import('./services/openai');
+      setResponseMethod(method);
+      await storage.setSetting('responseMethod', method);
+      res.json({ success: true, method });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to set response method" });
     }
   });
 

@@ -16,6 +16,23 @@ services:
       timeout: 5s
       retries: 5
 
+  camoufox:
+    build: ./camoufox
+    restart: unless-stopped
+    ports:
+      - "5900:5900"
+      - "6080:6080"
+    environment:
+      CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
+    volumes:
+      - browser-profile:/tmp/browser-profile
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   app:
     build: .
     restart: unless-stopped
@@ -24,12 +41,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      camoufox:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://admin:password@db:5432/brand_tracker
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHATGPT_EMAIL: ${CHATGPT_EMAIL:-}
+      CHATGPT_PASSWORD: ${CHATGPT_PASSWORD:-}
+      CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
+      CAMOUFOX_URL: http://camoufox:8888
       NODE_ENV: production
-      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
-      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
 
 volumes:
   pgdata:
+  browser-profile:

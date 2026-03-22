@@ -8,62 +8,58 @@ export interface PromptAnalysisResult {
   sources: string[];
 }
 
+// Response method: 'browser' uses ChatGPT web UI, 'api' uses OpenAI Responses API
+export type ResponseMethod = 'browser' | 'api';
+let activeResponseMethod: ResponseMethod = 'api';
+
+export function setResponseMethod(method: ResponseMethod) {
+  activeResponseMethod = method;
+  console.log(`[Response Method] Set to: ${method}`);
+}
+
+export function getResponseMethod(): ResponseMethod {
+  return activeResponseMethod;
+}
+
 export async function analyzePromptResponse(prompt: string, brandName?: string, knownCompetitors?: string[]): Promise<PromptAnalysisResult> {
-  try {
-    // Step 1: Generate response using Responses API with web search
-    const responsesResult = await openai.responses.create({
-      model: "gpt-5.4",
-      tools: [{ type: "web_search" as any }],
-      input: [
-        {
-          role: "developer" as any,
-          content: `You are a helpful AI assistant answering questions about various products and services.
-Provide practical, unbiased recommendations focusing on the most popular and widely-used options.
-Be natural and conversational in your responses.`,
-        },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.7,
-      max_output_tokens: 2048,
-    } as any);
+  // Step 1: Get response text + sources via browser or API
+  let responseText = "";
+  let sources: string[] = [];
+  const startTime = Date.now();
 
-    // Extract response text and sources from annotations
-    let responseText = "";
-    const sources: string[] = [];
-    for (const item of (responsesResult as any).output) {
-      if (item.type === "message") {
-        for (const content of item.content) {
-          if (content.type === "output_text") {
-            responseText += content.text;
-            if (content.annotations) {
-              for (const ann of content.annotations) {
-                if (ann.type === "url_citation" && ann.url) {
-                  sources.push(ann.url);
-                }
-              }
-            }
-          }
-        }
+  console.log(`[analyzePromptResponse] Method: ${activeResponseMethod} | Prompt: "${prompt.substring(0, 80)}..."`);
+
+  if (activeResponseMethod === 'browser') {
+    try {
+      responseText = await getResponseViaBrowser(prompt);
+      // Sources are embedded in the response text as markdown links — extract them
+      const urlPattern = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
+      let match;
+      while ((match = urlPattern.exec(responseText)) !== null) {
+        sources.push(match[2]);
       }
+      // Also extract footnote-style links: [1]: https://...
+      const footnotePattern = /^\[(\d+)\]:\s*(https?:\/\/\S+)/gm;
+      while ((match = footnotePattern.exec(responseText)) !== null) {
+        sources.push(match[2]);
+      }
+      sources = [...new Set(sources)];
+      console.log(`[analyzePromptResponse] Browser response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+    } catch (browserError) {
+      console.error('[analyzePromptResponse] Browser scraper failed, falling back to API:', (browserError as Error).message);
+      const apiResult = await getResponseViaAPI(prompt);
+      responseText = apiResult.responseText;
+      sources = apiResult.sources;
     }
+  } else {
+    const apiResult = await getResponseViaAPI(prompt);
+    responseText = apiResult.responseText;
+    sources = apiResult.sources;
+    console.log(`[analyzePromptResponse] API response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+  }
 
-    // Record token usage if available
-    const usage = (responsesResult as any).usage;
-    if (usage) {
-      try {
-        const { db } = await import("../db");
-        const { apiUsage } = await import("@shared/schema");
-        const { getCurrentRunId } = await import("./llm");
-        await db.insert(apiUsage).values({
-          analysisRunId: getCurrentRunId(),
-          model: (responsesResult as any).model || "gpt-5.4",
-          inputTokens: usage.input_tokens || 0,
-          outputTokens: usage.output_tokens || 0,
-        });
-      } catch {}
-    }
-
-    // Step 2: Analyze for brand/competitor mentions
+  // Step 2: Analyze for brand/competitor mentions (always via API — fast structured extraction)
+  try {
     const brandContext = brandName
       ? `\nOUR BRAND: "${brandName}" — any mention of this brand (including variations like ${brandName}.com, ${brandName}.org, ${brandName}.io, open-source ${brandName}, etc.) counts as a brand mention, NOT a competitor.`
       : '';
@@ -109,12 +105,86 @@ Rules:
       response: responseText,
       brandMentioned: analysis.brandMentioned || false,
       competitors: analysis.competitors || [],
-      sources: [...new Set(sources)], // deduplicate
+      sources,
     };
   } catch (error) {
     console.error("Error analyzing prompt response:", error);
     throw new Error("Failed to analyze prompt response: " + (error as Error).message);
   }
+}
+
+// --- Browser method: just ask the question, ChatGPT handles everything ---
+
+async function getResponseViaBrowser(prompt: string): Promise<string> {
+  const email = process.env.CHATGPT_EMAIL;
+  const password = process.env.CHATGPT_PASSWORD;
+  if (!email || !password) {
+    throw new Error('CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for browser mode');
+  }
+
+  const { askChatGPT } = await import('./chatgpt-browser');
+  const result = await askChatGPT(prompt, { email, password });
+
+  console.log(`[Browser] Got response: ${result.answer.length} chars, ${result.sources.length} sources`);
+  return result.answer;
+}
+
+// --- API method: OpenAI Responses API with web search ---
+
+async function getResponseViaAPI(prompt: string): Promise<{ responseText: string; sources: string[] }> {
+  console.log(`[API] Calling Responses API for: "${prompt.substring(0, 60)}..."`);
+  const responsesResult = await openai.responses.create({
+    model: "gpt-5.4",
+    tools: [{ type: "web_search" as any }],
+    input: [
+      {
+        role: "developer" as any,
+        content: `You are a helpful AI assistant answering questions about various products and services.
+Provide practical, unbiased recommendations focusing on the most popular and widely-used options.
+Be natural and conversational in your responses.`,
+      },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.7,
+    max_output_tokens: 2048,
+  } as any);
+
+  let responseText = "";
+  const sources: string[] = [];
+  for (const item of (responsesResult as any).output) {
+    if (item.type === "message") {
+      for (const content of item.content) {
+        if (content.type === "output_text") {
+          responseText += content.text;
+          if (content.annotations) {
+            for (const ann of content.annotations) {
+              if (ann.type === "url_citation" && ann.url) {
+                sources.push(ann.url);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Record token usage
+  const usage = (responsesResult as any).usage;
+  if (usage) {
+    try {
+      const { db } = await import("../db");
+      const { apiUsage } = await import("@shared/schema");
+      const { getCurrentRunId } = await import("./llm");
+      await db.insert(apiUsage).values({
+        analysisRunId: getCurrentRunId(),
+        model: (responsesResult as any).model || "gpt-5.4",
+        inputTokens: usage.input_tokens || 0,
+        outputTokens: usage.output_tokens || 0,
+      });
+    } catch {}
+  }
+
+  return { responseText, sources: [...new Set(sources)] };
 }
 
 export async function generatePromptsForTopic(topicName: string, topicDescription: string, count: number = 5, competitors: string[] = []): Promise<string[]> {
