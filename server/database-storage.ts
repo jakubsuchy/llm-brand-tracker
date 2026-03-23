@@ -225,12 +225,11 @@ export class DatabaseStorage implements IStorage {
       .where(eq(sources.domain, domain));
   }
 
-  async addSourceUrls(domain: string, urls: string[], analysisRunId?: number): Promise<void> {
+  async addSourceUrls(domain: string, urls: string[], analysisRunId?: number, provider?: string): Promise<void> {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     for (const url of urls) {
-      // Always insert — each run gets its own records
-      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null });
+      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, provider: provider || null });
     }
   }
 

@@ -6,6 +6,7 @@ export interface PromptAnalysisResult {
   brandMentioned: boolean;
   competitors: string[];
   sources: string[];
+  provider: string;
 }
 
 // Response method: 'browser' uses ChatGPT web UI, 'api' uses OpenAI Responses API
@@ -21,42 +22,36 @@ export function getResponseMethod(): ResponseMethod {
   return activeResponseMethod;
 }
 
-export async function analyzePromptResponse(prompt: string, brandName?: string, knownCompetitors?: string[]): Promise<PromptAnalysisResult> {
-  // Step 1: Get response text + sources via browser or API
+export async function analyzePromptResponse(
+  prompt: string,
+  brandName?: string,
+  knownCompetitors?: string[],
+  provider: string = activeResponseMethod
+): Promise<PromptAnalysisResult> {
   let responseText = "";
   let sources: string[] = [];
   const startTime = Date.now();
+  const effectiveProvider = provider;
 
-  console.log(`[analyzePromptResponse] Method: ${activeResponseMethod} | Prompt: "${prompt.substring(0, 80)}..."`);
+  console.log(`[analyzePromptResponse] Provider: ${effectiveProvider} | Prompt: "${prompt.substring(0, 80)}..."`);
 
-  if (activeResponseMethod === 'browser') {
-    try {
-      responseText = await getResponseViaBrowser(prompt);
-      // Sources are embedded in the response text as markdown links — extract them
-      const urlPattern = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
-      let match;
-      while ((match = urlPattern.exec(responseText)) !== null) {
-        sources.push(match[2]);
-      }
-      // Also extract footnote-style links: [1]: https://...
-      const footnotePattern = /^\[(\d+)\]:\s*(https?:\/\/\S+)/gm;
-      while ((match = footnotePattern.exec(responseText)) !== null) {
-        sources.push(match[2]);
-      }
-      sources = [...new Set(sources)];
-      console.log(`[analyzePromptResponse] Browser response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
-    } catch (browserError) {
-      console.error('[analyzePromptResponse] Browser scraper failed, falling back to API:', (browserError as Error).message);
-      const apiResult = await getResponseViaAPI(prompt);
-      responseText = apiResult.responseText;
-      sources = apiResult.sources;
-    }
-  } else {
+  if (effectiveProvider === 'api') {
     const apiResult = await getResponseViaAPI(prompt);
     responseText = apiResult.responseText;
     sources = apiResult.sources;
-    console.log(`[analyzePromptResponse] API response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+  } else {
+    // Browser provider (chatgpt, perplexity, etc.)
+    try {
+      const result = await getResponseViaBrowser(prompt, effectiveProvider);
+      responseText = result.responseText;
+      sources = result.sources;
+    } catch (browserError) {
+      console.error(`[analyzePromptResponse] Browser ${effectiveProvider} failed:`, (browserError as Error).message);
+      throw browserError; // Don't fallback silently — let the caller decide
+    }
   }
+
+  console.log(`[analyzePromptResponse] ${effectiveProvider} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
   // Step 2: Analyze for brand/competitor mentions (always via API — fast structured extraction)
   try {
@@ -106,6 +101,7 @@ Rules:
       brandMentioned: analysis.brandMentioned || false,
       competitors: analysis.competitors || [],
       sources,
+      provider: effectiveProvider,
     };
   } catch (error) {
     console.error("Error analyzing prompt response:", error);
@@ -113,20 +109,42 @@ Rules:
   }
 }
 
-// --- Browser method: just ask the question, ChatGPT handles everything ---
+// --- Browser method: send to camoufox container, supports multiple providers ---
 
-async function getResponseViaBrowser(prompt: string): Promise<string> {
-  const email = process.env.CHATGPT_EMAIL;
-  const password = process.env.CHATGPT_PASSWORD;
-  if (!email || !password) {
-    throw new Error('CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for browser mode');
+async function getResponseViaBrowser(prompt: string, provider: string): Promise<{ responseText: string; sources: string[] }> {
+  const { askBrowser } = await import('./chatgpt-browser');
+
+  // Only chatgpt requires credentials
+  const credentials = provider === 'chatgpt' ? {
+    email: process.env.CHATGPT_EMAIL || '',
+    password: process.env.CHATGPT_PASSWORD || '',
+  } : undefined;
+
+  if (provider === 'chatgpt' && (!credentials?.email || !credentials?.password)) {
+    throw new Error('CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for ChatGPT browser mode');
   }
 
-  const { askChatGPT } = await import('./chatgpt-browser');
-  const result = await askChatGPT(prompt, { email, password });
+  const result = await askBrowser(prompt, provider as any, credentials);
 
-  console.log(`[Browser] Got response: ${result.answer.length} chars, ${result.sources.length} sources`);
-  return result.answer;
+  // Extract URLs from markdown links in the response text
+  const urlSources: string[] = [];
+  const urlPattern = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
+  let match;
+  while ((match = urlPattern.exec(result.answer)) !== null) {
+    urlSources.push(match[2]);
+  }
+  // Footnote-style links: [1]: https://...
+  const footnotePattern = /^\[(\d+)\]:\s*(https?:\/\/\S+)/gm;
+  while ((match = footnotePattern.exec(result.answer)) !== null) {
+    urlSources.push(match[2]);
+  }
+  // Also include sources from the sidebar extraction
+  const sidebarSources = result.sources.map(s => s.href).filter(Boolean);
+
+  return {
+    responseText: result.answer,
+    sources: [...new Set([...sidebarSources, ...urlSources])],
+  };
 }
 
 // --- API method: OpenAI Responses API with web search ---

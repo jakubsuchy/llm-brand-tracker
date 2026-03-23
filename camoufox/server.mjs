@@ -84,6 +84,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/providers') {
+    const list = Object.entries(providers).map(([name, mod]) => ({
+      name,
+      requiresAuth: mod.config.requiresAuth,
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ providers: list }));
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/ask') {
     if (busy) {
       res.writeHead(429, { 'Content-Type': 'application/json' });

@@ -63,7 +63,7 @@ export interface IStorage {
   createSource(source: InsertSource): Promise<Source>;
   getSourceByDomain(domain: string): Promise<Source | undefined>;
   updateSourceCitationCount(domain: string, increment: number): Promise<void>;
-  addSourceUrls(domain: string, urls: string[], analysisRunId?: number): Promise<void>;
+  addSourceUrls(domain: string, urls: string[], analysisRunId?: number, provider?: string): Promise<void>;
   getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number): Promise<string[]>;
 
   // Competitor mentions
@@ -328,7 +328,7 @@ export class MemStorage implements IStorage {
 
   private sourceUrlsMap = new Map<number, Set<string>>();
 
-  async addSourceUrls(domain: string, urls: string[], _analysisRunId?: number): Promise<void> {
+  async addSourceUrls(domain: string, urls: string[], _analysisRunId?: number, _provider?: string): Promise<void> {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     if (!this.sourceUrlsMap.has(source.id)) {

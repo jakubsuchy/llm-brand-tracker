@@ -232,22 +232,56 @@ export class BrandAnalyzer {
       });
 
       let completedCount = 0;
-      
-      // Process prompts — browser mode is single-threaded (slow, one browser session)
+
+      // Determine which providers to use
       const { getResponseMethod } = await import('./openai');
-      const CONCURRENCY = getResponseMethod() === 'browser' ? 1 : 3;
-      console.log(`[${new Date().toISOString()}] Starting to process ${allPrompts.length} prompts (concurrency: ${CONCURRENCY}, method: ${getResponseMethod()})`);
+      let activeProviders: string[] = [];
+
+      // Try to fetch available browser providers from camoufox container
+      try {
+        const camoufoxUrl = process.env.CAMOUFOX_URL || 'http://camoufox:8888';
+        const providersRes = await fetch(`${camoufoxUrl}/providers`);
+        if (providersRes.ok) {
+          const { providers } = await providersRes.json() as { providers: { name: string; requiresAuth: boolean }[] };
+          // Include all browser providers that have credentials (or don't need them)
+          for (const p of providers) {
+            if (!p.requiresAuth || (process.env.CHATGPT_EMAIL && process.env.CHATGPT_PASSWORD)) {
+              activeProviders.push(p.name);
+            }
+          }
+        }
+      } catch {
+        console.log(`[${new Date().toISOString()}] Camoufox not available, skipping browser providers`);
+      }
+
+      // Always include the API provider
+      activeProviders.push('api');
+      // Deduplicate
+      activeProviders = [...new Set(activeProviders)];
+
+      const totalTasks = allPrompts.length * activeProviders.length;
+      const hasBrowserProviders = activeProviders.some(p => p !== 'api');
+      const CONCURRENCY = hasBrowserProviders ? 1 : 3;
+      console.log(`[${new Date().toISOString()}] Starting: ${allPrompts.length} prompts × ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks, concurrency: ${CONCURRENCY}`);
 
       let nextIndex = 0;
 
-      // Background processing tasks that run while the next browser call is in flight
+      // Background processing tasks that run while the next fetch starts
       const backgroundTasks: Promise<void>[] = [];
 
-      // Phase 1: Fetch response (slow — browser or API)
-      const fetchResponse = async (promptData: any, idx: number) => {
+      // Build work items: one per (prompt, provider) pair
+      const workItems: { promptData: any; promptIdx: number; provider: string }[] = [];
+      for (let i = 0; i < allPrompts.length; i++) {
+        for (const provider of activeProviders) {
+          workItems.push({ promptData: allPrompts[i], promptIdx: i, provider });
+        }
+      }
+
+      // Phase 1: Fetch response for a specific provider
+      const fetchResponse = async (promptData: any, idx: number, provider: string) => {
         if (!isAnalysisRunning) return null;
 
-        console.log(`[${new Date().toISOString()}] Fetching prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
+        console.log(`[${new Date().toISOString()}] [${provider}] Fetching prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
 
         let prompt;
         if (promptData._existing && promptData.id) {
@@ -266,32 +300,32 @@ export class BrandAnalyzer {
         while (true) {
           try {
             const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
-            analysis = await analyzePromptResponse(promptData.text, this.brandName, knownCompetitors);
+            analysis = await analyzePromptResponse(promptData.text, this.brandName, knownCompetitors, provider);
             break;
           } catch (error: any) {
             const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
             if (isQuota) {
-              console.error(`[${new Date().toISOString()}] Quota exceeded on prompt ${idx + 1} — stopping.`);
+              console.error(`[${new Date().toISOString()}] [${provider}] Quota exceeded on prompt ${idx + 1} — skipping.`);
               return null;
             }
             const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
             if (isRateLimit && retries < 5) {
               const backoff = Math.pow(3, retries) * 5000;
-              console.log(`[${new Date().toISOString()}] Rate limited on prompt ${idx + 1}, retrying in ${Math.round(backoff / 1000)}s (attempt ${retries + 1}/5)`);
+              console.log(`[${new Date().toISOString()}] [${provider}] Rate limited on prompt ${idx + 1}, retrying in ${Math.round(backoff / 1000)}s`);
               await new Promise(resolve => setTimeout(resolve, backoff));
               retries++;
               continue;
             }
-            console.error(`[${new Date().toISOString()}] Failed prompt ${idx + 1}:`, error.message);
+            console.error(`[${new Date().toISOString()}] [${provider}] Failed prompt ${idx + 1}:`, error.message);
             return null;
           }
         }
 
-        return { prompt, analysis, idx };
+        return { prompt, analysis, idx, provider };
       };
 
       // Phase 2: Process result (fast — runs in background while next fetch starts)
-      const processResult = async (prompt: any, analysis: any, idx: number) => {
+      const processResult = async (prompt: any, analysis: any, idx: number, provider?: string) => {
         const brandLower = (this.brandName || '').toLowerCase();
         const knownCompetitors = await storage.getCompetitors();
 
@@ -374,7 +408,7 @@ export class BrandAnalyzer {
                 citationCount: 0
               });
             }
-            await storage.addSourceUrls(domain, urls, this.analysisRunId || undefined);
+            await storage.addSourceUrls(domain, urls, this.analysisRunId || undefined, provider);
             await storage.updateSourceCitationCount(domain, 1);
 
             const domainBase = domain.toLowerCase().split('.')[0];
@@ -392,6 +426,7 @@ export class BrandAnalyzer {
         const responseRecord = await storage.createResponse({
           promptId: prompt.id,
           analysisRunId: this.analysisRunId,
+          provider: provider || analysis.provider || null,
           text: analysis.response,
           brandMentioned: analysis.brandMentioned,
           competitorsMentioned: uniqueCompetitors.map(name => {
@@ -415,7 +450,7 @@ export class BrandAnalyzer {
         }
 
         completedCount++;
-        console.log(`[${new Date().toISOString()}] Saved prompt ${idx + 1}/${allPrompts.length} (${completedCount} total)`);
+        console.log(`[${new Date().toISOString()}] [${provider || 'unknown'}] Saved prompt ${idx + 1}/${allPrompts.length} (${completedCount}/${totalTasks} total)`);
 
         if (this.analysisRunId) {
           await storage.updateAnalysisRunProgress(this.analysisRunId, completedCount);
@@ -423,30 +458,30 @@ export class BrandAnalyzer {
 
         this.updateProgress({
           status: 'testing_prompts',
-          message: `Testing prompts with ChatGPT... (${completedCount}/${allPrompts.length})`,
-          progress: 30 + (completedCount / allPrompts.length) * 50,
-          totalPrompts: allPrompts.length,
+          message: `Testing prompts... (${completedCount}/${totalTasks})`,
+          progress: 30 + (completedCount / totalTasks) * 50,
+          totalPrompts: totalTasks,
           completedPrompts: completedCount
         });
       };
 
       // Combined: fetch sequentially, process in background
-      const processPrompt = async (promptData: any, idx: number): Promise<void> => {
-        const result = await fetchResponse(promptData, idx);
+      const processWorkItem = async (item: { promptData: any; promptIdx: number; provider: string }): Promise<void> => {
+        const result = await fetchResponse(item.promptData, item.promptIdx, item.provider);
         if (!result) return;
 
         // Fire off processing in background — don't await it here
-        const task = processResult(result.prompt, result.analysis, result.idx)
-          .catch(err => console.error(`[${new Date().toISOString()}] Background processing error for prompt ${idx + 1}:`, err.message));
+        const task = processResult(result.prompt, result.analysis, result.idx, result.provider)
+          .catch(err => console.error(`[${new Date().toISOString()}] [${item.provider}] Background processing error for prompt ${item.promptIdx + 1}:`, err.message));
         backgroundTasks.push(task);
       };
 
-      // Run with concurrency pool
+      // Run with concurrency pool over work items (prompt × provider pairs)
       const workers = Array.from({ length: CONCURRENCY }, async () => {
-        while (nextIndex < allPrompts.length && isAnalysisRunning) {
+        while (nextIndex < workItems.length && isAnalysisRunning) {
           const idx = nextIndex++;
           try {
-            await processPrompt(allPrompts[idx], idx);
+            await processWorkItem(workItems[idx]);
           } catch (error) {
             console.error(`[${new Date().toISOString()}] Error processing prompt ${idx + 1}:`, error);
           }

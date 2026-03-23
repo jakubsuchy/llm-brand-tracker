@@ -22,6 +22,7 @@ export const responses = pgTable("responses", {
   id: serial("id").primaryKey(),
   promptId: integer("prompt_id").references(() => prompts.id).notNull(),
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id),
+  provider: text("provider"),
   text: text("text").notNull(),
   brandMentioned: boolean("brand_mentioned").default(false),
   competitorsMentioned: text("competitors_mentioned").array(),
@@ -53,6 +54,7 @@ export const sourceUrls = pgTable("source_urls", {
   id: serial("id").primaryKey(),
   sourceId: integer("source_id").references(() => sources.id).notNull(),
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id),
+  provider: text("provider"),
   url: text("url").notNull(),
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
 });
