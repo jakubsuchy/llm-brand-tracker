@@ -24,6 +24,7 @@ services:
       - "6080:6080"
     environment:
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
+      CAMOUFOX_API_KEY: ${CAMOUFOX_API_KEY:-}
     volumes:
       - browser-profile:/tmp/browser-profile
     healthcheck:
@@ -50,6 +51,7 @@ services:
       CHATGPT_PASSWORD: ${CHATGPT_PASSWORD:-}
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
       CAMOUFOX_URL: http://camoufox:8888
+      CAMOUFOX_API_KEY: ${CAMOUFOX_API_KEY:-}
       NODE_ENV: production
 
 volumes:

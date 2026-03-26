@@ -7,10 +7,12 @@ import { readdirSync } from 'fs';
 
 const port = parseInt(process.env.CAMOUFOX_PORT || '8888');
 const profileDir = resolve(process.env.BROWSER_PROFILE_PATH || '/tmp/browser-profile');
+const apiKey = process.env.CAMOUFOX_API_KEY || '';
 
 console.log(`[Camoufox] Starting on port ${port}`);
 console.log(`[Camoufox] DISPLAY=${process.env.DISPLAY}`);
 console.log(`[Camoufox] Profile: ${profileDir}`);
+console.log(`[Camoufox] Auth: ${apiKey ? 'enabled' : 'disabled (set CAMOUFOX_API_KEY to enable)'}`);
 
 // ─── Load providers ───────────────────────────────────────────────
 
@@ -82,6 +84,17 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', busy, providers: Object.keys(providers) }));
     return;
+  }
+
+  // Auth check — all endpoints below require the API key (if set)
+  if (apiKey) {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (token !== apiKey) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized — invalid or missing CAMOUFOX_API_KEY' }));
+      return;
+    }
   }
 
   if (req.method === 'GET' && req.url === '/providers') {

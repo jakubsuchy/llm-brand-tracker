@@ -157,7 +157,9 @@ export class BrandAnalyzer {
 
       try {
         const camoufoxUrl = process.env.CAMOUFOX_URL || 'http://camoufox:8888';
-        const providersRes = await fetch(`${camoufoxUrl}/providers`);
+        const fetchHeaders: Record<string, string> = {};
+        if (process.env.CAMOUFOX_API_KEY) fetchHeaders['Authorization'] = `Bearer ${process.env.CAMOUFOX_API_KEY}`;
+        const providersRes = await fetch(`${camoufoxUrl}/providers`, { headers: fetchHeaders });
         if (providersRes.ok) {
           const { providers } = await providersRes.json() as { providers: { name: string; requiresAuth: boolean }[] };
           for (const p of providers) {

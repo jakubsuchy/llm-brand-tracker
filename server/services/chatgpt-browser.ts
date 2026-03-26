@@ -28,9 +28,13 @@ export async function askBrowser(
     body.password = credentials.password;
   }
 
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const camoufoxApiKey = process.env.CAMOUFOX_API_KEY;
+  if (camoufoxApiKey) headers['Authorization'] = `Bearer ${camoufoxApiKey}`;
+
   const response = await fetch(`${camoufoxUrl}/ask`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(300000),
   });
