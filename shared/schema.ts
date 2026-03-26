@@ -110,6 +110,23 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
 });
 
+export const jobQueue = pgTable("job_queue", {
+  id: serial("id").primaryKey(),
+  analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id).notNull(),
+  promptId: integer("prompt_id").references(() => prompts.id),
+  promptText: text("prompt_text").notNull(),
+  promptTopicId: integer("prompt_topic_id"),
+  promptIsExisting: boolean("prompt_is_existing").default(false),
+  provider: text("provider").notNull(),
+  status: text("status").notNull().default('pending'),
+  attempts: integer("attempts").default(0),
+  maxAttempts: integer("max_attempts").default(3),
+  lastError: text("last_error"),
+  lockedAt: timestamp("locked_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertTopicSchema = createInsertSchema(topics).omit({
   id: true,
@@ -157,6 +174,13 @@ export const insertAnalyticsSchema = createInsertSchema(analytics).omit({
   date: true,
 });
 
+export const insertJobQueueSchema = createInsertSchema(jobQueue).omit({
+  id: true,
+  createdAt: true,
+  lockedAt: true,
+  completedAt: true,
+});
+
 // Types
 export type Topic = typeof topics.$inferSelect;
 export type InsertTopic = z.infer<typeof insertTopicSchema>;
@@ -186,6 +210,9 @@ export type Analytics = typeof analytics.$inferSelect;
 export type InsertAnalytics = z.infer<typeof insertAnalyticsSchema>;
 
 export type CompetitorMerge = typeof competitorMerges.$inferSelect;
+
+export type JobQueueItem = typeof jobQueue.$inferSelect;
+export type InsertJobQueueItem = z.infer<typeof insertJobQueueSchema>;
 
 // Extended types for API responses
 export type PromptWithTopic = Prompt & { topic: Topic | null };
@@ -219,6 +246,14 @@ export type SourceAnalysis = {
 export type MergeSuggestion = {
   competitors: { id: number; name: string; mentionCount: number }[];
   similarity: number;
+};
+
+export type JobQueueProgress = {
+  total: number;
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
 };
 
 export type MergeHistoryEntry = {

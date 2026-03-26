@@ -1,12 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { analyzer, BrandAnalyzer, stopCurrentAnalysis, getCurrentProgress } from "./services/analyzer";
+import { analyzer, BrandAnalyzer, cancelAnalysisRun, getAnalysisProgressFromDB, isAnalysisRunningInDB } from "./services/analyzer";
 import { generatePromptsForTopic } from "./services/openai";
 import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
-
-// Store active analysis sessions
-const analysisProgress = new Map<string, any>();
 
 // Brand name for filtering — loaded from DB on startup, persisted on change
 let currentBrandName: string = '';
@@ -57,9 +54,7 @@ async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   console.log(`[DEBUG] Created analysis run #${analysisRun.id}`);
 
   const sessionId = `analysis_${analysisRun.id}`;
-  const analysisWorker = new BrandAnalyzer((progress) => {
-    analysisProgress.set(sessionId, progress);
-  });
+  const analysisWorker = new BrandAnalyzer();
   analysisWorker.setBrandName(brandName);
   analysisWorker.setAnalysisRunId(analysisRun.id);
   if (brandUrl) {
@@ -73,11 +68,6 @@ async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   }).catch(async (error) => {
     await storage.completeAnalysisRun(analysisRun.id, 'error');
     console.error("Analysis failed:", error);
-    analysisProgress.set(sessionId, {
-      status: 'error',
-      message: `Analysis failed: ${error.message}`,
-      progress: 0
-    });
   });
 
   return sessionId;
@@ -95,6 +85,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       setResponseMethod(savedMethod);
     }
   } catch {}
+
+  // --- Crash recovery ---
+  try {
+    const recovered = await storage.recoverStalledJobs();
+    if (recovered > 0) {
+      console.log(`[RECOVERY] Reset ${recovered} stalled jobs back to pending`);
+    }
+
+    const latestRun = await storage.getLatestAnalysisRun();
+    if (latestRun && latestRun.status === 'running') {
+      const progress = await storage.getJobQueueProgress(latestRun.id);
+      if (progress.pending > 0 || progress.processing > 0) {
+        // Resume the worker loop in the background
+        console.log(`[RECOVERY] Resuming analysis run #${latestRun.id} (${progress.pending} pending, ${progress.processing} processing)`);
+        const resumeWorker = new BrandAnalyzer();
+        resumeWorker.setBrandName(latestRun.brandName || currentBrandName);
+        resumeWorker.setAnalysisRunId(latestRun.id);
+        if (latestRun.brandUrl) resumeWorker.setBrandUrl(latestRun.brandUrl);
+
+        const hasBrowserProviders = false; // Conservative: we don't know, use API concurrency
+        const concurrency = hasBrowserProviders ? 1 : 3;
+        resumeWorker.runWorkerLoop(latestRun.id, concurrency).then(async () => {
+          await resumeWorker.generateAnalytics();
+          await storage.completeAnalysisRun(latestRun.id, 'complete');
+          console.log(`[RECOVERY] Analysis run #${latestRun.id} completed after resume`);
+        }).catch(async (error) => {
+          await storage.completeAnalysisRun(latestRun.id, 'error');
+          console.error(`[RECOVERY] Analysis run #${latestRun.id} failed after resume:`, error);
+        });
+      } else if (progress.total > 0) {
+        // All jobs done but run still marked 'running' — complete it
+        console.log(`[RECOVERY] Analysis run #${latestRun.id} has all jobs done, marking complete`);
+        await storage.completeAnalysisRun(latestRun.id, 'complete');
+      }
+    }
+  } catch (error) {
+    console.error('[RECOVERY] Crash recovery failed:', error);
+  }
 
   // Test analysis endpoint - process just one prompt
   app.post("/api/test-analysis", async (req, res) => {
@@ -918,16 +946,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get analysis progress
+  // Get analysis progress for a specific session (reads from job_queue)
   app.get("/api/analysis/:sessionId/progress", async (req, res) => {
     try {
-      const { sessionId } = req.params;
-      const progress = analysisProgress.get(sessionId);
-      
-      if (!progress) {
-        return res.status(404).json({ error: "Analysis session not found" });
-      }
-      
+      // sessionId format: "analysis_<runId>"
+      const progress = await getAnalysisProgressFromDB();
       res.json(progress);
     } catch (error) {
       console.error("Error fetching analysis progress:", error);
@@ -1201,11 +1224,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Analysis Progress - Get current progress
+  // Analysis Progress - Get current progress (reads from job_queue table)
   app.get("/api/analysis/progress", async (req, res) => {
     try {
-      const { getCurrentProgress } = await import('./services/analyzer');
-      const progress = await getCurrentProgress();
+      const progress = await getAnalysisProgressFromDB();
       res.json(progress);
     } catch (error) {
       console.error("Error fetching analysis progress:", error);
@@ -1213,14 +1235,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Cancel analysis
+  // Cancel analysis (DB-based)
   app.post("/api/analysis/cancel", async (req, res) => {
     try {
-      const { stopCurrentAnalysis } = await import('./services/analyzer');
-      stopCurrentAnalysis();
-      res.json({ 
-        success: true, 
-        message: "Analysis cancelled successfully" 
+      await cancelAnalysisRun();
+      res.json({
+        success: true,
+        message: "Analysis cancelled successfully"
       });
     } catch (error) {
       console.error("Error cancelling analysis:", error);

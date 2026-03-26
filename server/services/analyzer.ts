@@ -2,13 +2,13 @@ import { storage } from "../storage";
 import { analyzePromptResponse, generatePromptsForTopic } from "./openai";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
 import { setCurrentRunId } from "./llm";
-import type { 
-  InsertPrompt, 
-  InsertResponse, 
+import type {
   Analytics,
   TopicAnalysis,
   CompetitorAnalysis,
-  SourceAnalysis 
+  SourceAnalysis,
+  JobQueueItem,
+  InsertJobQueueItem,
 } from "@shared/schema";
 
 export interface AnalysisProgress {
@@ -19,45 +19,66 @@ export interface AnalysisProgress {
   completedPrompts?: number;
 }
 
-// Track ongoing analysis state
-let analysisStartTime = Date.now();
-let targetPrompts = 100; // Default value, will be updated based on user settings
-let currentProgress: AnalysisProgress = {
-  status: 'idle' as any,
-  message: 'Ready to start analysis',
-  progress: 0,
-  totalPrompts: 0,
-  completedPrompts: 0
-};
+/**
+ * Check if an analysis is currently running by looking at the DB.
+ */
+export async function isAnalysisRunningInDB(): Promise<boolean> {
+  const latestRun = await storage.getLatestAnalysisRun();
+  if (!latestRun || latestRun.status !== 'running') return false;
+  const progress = await storage.getJobQueueProgress(latestRun.id);
+  return progress.pending > 0 || progress.processing > 0;
+}
 
-// Track if analysis is currently running
-let isAnalysisRunning = false;
+/**
+ * Cancel the current analysis run via DB.
+ */
+export async function cancelAnalysisRun(): Promise<void> {
+  const latestRun = await storage.getLatestAnalysisRun();
+  if (!latestRun || latestRun.status !== 'running') return;
+  await storage.cancelJobsForRun(latestRun.id);
+  await storage.completeAnalysisRun(latestRun.id, 'cancelled');
+  console.log(`[${new Date().toISOString()}] Analysis run #${latestRun.id} cancelled`);
+}
 
-// Function to force stop current analysis
-export function stopCurrentAnalysis() {
-  isAnalysisRunning = false;
-  currentProgress = {
-    status: 'error',
-    message: 'Analysis cancelled by user',
-    progress: 0,
-    totalPrompts: 0,
-    completedPrompts: 0
+/**
+ * Get current analysis progress from DB.
+ */
+export async function getAnalysisProgressFromDB(): Promise<AnalysisProgress> {
+  const latestRun = await storage.getLatestAnalysisRun();
+  if (!latestRun) {
+    return { status: 'complete' as any, message: 'No analysis runs', progress: 0, totalPrompts: 0, completedPrompts: 0 };
+  }
+
+  if (latestRun.status === 'complete') {
+    return { status: 'complete', message: 'Analysis complete!', progress: 100, totalPrompts: latestRun.totalPrompts || 0, completedPrompts: latestRun.totalPrompts || 0 };
+  }
+
+  if (latestRun.status === 'error' || latestRun.status === 'cancelled') {
+    return { status: 'error', message: `Analysis ${latestRun.status}`, progress: 0, totalPrompts: 0, completedPrompts: 0 };
+  }
+
+  // Running — read from job queue
+  const progress = await storage.getJobQueueProgress(latestRun.id);
+  if (progress.total === 0) {
+    return { status: 'initializing', message: 'Preparing analysis...', progress: 10, totalPrompts: 0, completedPrompts: 0 };
+  }
+
+  const completedCount = progress.completed + progress.failed;
+  const pct = 30 + (completedCount / progress.total) * 55;
+
+  return {
+    status: 'testing_prompts',
+    message: `Testing prompts... (${completedCount}/${progress.total})`,
+    progress: Math.min(pct, 85),
+    totalPrompts: progress.total,
+    completedPrompts: completedCount,
   };
 }
 
-export async function getCurrentProgress(): Promise<AnalysisProgress> {
-  return currentProgress;
-}
-
 export class BrandAnalyzer {
-  public progressCallback?: (progress: AnalysisProgress) => void;
   private brandName: string = '';
   private brandUrl: string = '';
   private analysisRunId: number | null = null;
-
-  constructor(progressCallback?: (progress: AnalysisProgress) => void) {
-    this.progressCallback = progressCallback;
-  }
 
   setBrandName(brandName: string) {
     this.brandName = brandName;
@@ -72,88 +93,18 @@ export class BrandAnalyzer {
     this.brandUrl = brandUrl;
   }
 
-  private updateProgress(update: Partial<AnalysisProgress>) {
-    currentProgress = { ...currentProgress, ...update };
-    if (this.progressCallback) {
-      this.progressCallback(currentProgress);
-    }
-  }
-
-  private resetProgress() {
-    currentProgress = {
-      status: 'initializing',
-      message: 'Starting analysis...',
-      progress: 0,
-      totalPrompts: 0,
-      completedPrompts: 0
-    };
-    analysisStartTime = Date.now();
-  }
-
   async runFullAnalysis(useExistingPrompts: boolean = false, savedPrompts?: any[], settings?: { promptsPerTopic: number; numberOfTopics: number }): Promise<void> {
     try {
       // Prevent multiple simultaneous analyses
-      if (isAnalysisRunning) {
+      if (await isAnalysisRunningInDB()) {
         console.log('Analysis already running, skipping new request');
         return;
-      }
-      
-      isAnalysisRunning = true;
-      
-      // Update target prompts based on user settings
-      if (settings) {
-        targetPrompts = settings.promptsPerTopic * settings.numberOfTopics;
-      } else if (savedPrompts && savedPrompts.length > 0) {
-        targetPrompts = savedPrompts.length;
-      }
-      
-      // Reset progress state for fresh analysis
-      this.resetProgress();
-      
-      this.updateProgress({
-        status: 'initializing',
-        message: 'Starting brand analysis...',
-        progress: 0
-      });
-
-      // Add delay to ensure reset progress is visible
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Only clear data if explicitly requested or using saved prompts
-      if (savedPrompts && savedPrompts.length > 0) {
-        this.updateProgress({
-          status: 'initializing',
-          message: 'Clearing previous data and loading saved prompts...',
-          progress: 5
-        });
-        
-        console.log(`[${new Date().toISOString()}] Preparing analysis (savedPrompts provided, keeping historical data)`);
-      } else if (!useExistingPrompts) {
-        // For new analysis, don't clear existing data - append to it
-        this.updateProgress({
-          status: 'initializing',
-          message: 'Preparing for new analysis...',
-          progress: 5
-        });
       }
 
       let allPrompts: any[] = [];
 
       if (savedPrompts && savedPrompts.length > 0) {
-        // Clear existing data before using saved prompts
-        this.updateProgress({
-          status: 'initializing',
-          message: 'Clearing previous data and loading saved prompts...',
-          progress: 10
-        });
-
         console.log(`[${new Date().toISOString()}] Loading saved prompts (keeping historical data)`);
-
-        this.updateProgress({
-          status: 'testing_prompts',
-          message: 'Processing saved prompts...',
-          progress: 20
-        });
 
         // Deduplicate by text and mark as existing (they already have DB records)
         const seen = new Set<string>();
@@ -164,15 +115,7 @@ export class BrandAnalyzer {
           return true;
         }).map(p => ({ id: p.id, text: p.text, topicId: p.topicId || null, _existing: true }));
       } else if (useExistingPrompts) {
-        // Use existing prompts from the database — clear old responses only
-        this.updateProgress({
-          status: 'testing_prompts',
-          message: 'Using existing prompts for analysis...',
-          progress: 20
-        });
-
         const existingPrompts = await storage.getPrompts();
-        // Deduplicate by text — keep the first occurrence of each prompt
         const seen = new Set<string>();
         const uniquePrompts = existingPrompts.filter(p => {
           const key = p.text.toLowerCase().trim();
@@ -180,39 +123,26 @@ export class BrandAnalyzer {
           seen.add(key);
           return true;
         });
-        // Mark these as already-saved so processPrompt skips createPrompt
         allPrompts = uniquePrompts.map(p => ({ id: p.id, text: p.text, topicId: p.topicId, _existing: true }));
       } else {
-        // Step 1: Scrape brand website content
-        this.updateProgress({
-          status: 'scraping',
-          message: 'Analyzing brand website...',
-          progress: 10
-        });
-
+        // Scrape brand website content
+        console.log(`[${new Date().toISOString()}] Scraping brand website...`);
         const content = await scrapeBrandWebsite(this.brandUrl || 'https://example.com');
         const generatedTopics = await generateTopicsFromContent(content);
 
-        // Step 2: Generate prompts for each topic
-        this.updateProgress({
-          status: 'generating_prompts',
-          message: 'Generating test prompts...',
-          progress: 20
-        });
-
+        console.log(`[${new Date().toISOString()}] Generating test prompts...`);
         for (const topic of generatedTopics) {
-          let topicRecord = await storage.getTopics().then(topics => 
+          let topicRecord = await storage.getTopics().then(topics =>
             topics.find(t => t.name === topic.name)
           );
-          
+
           if (!topicRecord) {
             topicRecord = await storage.createTopic(topic);
           }
 
-          // Generate prompts for this topic using user settings or defaults
           const promptsPerTopic = settings?.promptsPerTopic || 20;
           const promptTexts = await generatePromptsForTopic(topic.name, topic.description, promptsPerTopic);
-          
+
           for (const promptText of promptTexts) {
             allPrompts.push({
               text: promptText,
@@ -222,28 +152,14 @@ export class BrandAnalyzer {
         }
       }
 
-      // Step 3: Test prompts with ChatGPT
-      this.updateProgress({
-        status: 'testing_prompts',
-        message: 'Testing prompts with ChatGPT...',
-        progress: 30,
-        totalPrompts: allPrompts.length,
-        completedPrompts: 0
-      });
-
-      let completedCount = 0;
-
       // Determine which providers to use
-      const { getResponseMethod } = await import('./openai');
       let activeProviders: string[] = [];
 
-      // Try to fetch available browser providers from camoufox container
       try {
         const camoufoxUrl = process.env.CAMOUFOX_URL || 'http://camoufox:8888';
         const providersRes = await fetch(`${camoufoxUrl}/providers`);
         if (providersRes.ok) {
           const { providers } = await providersRes.json() as { providers: { name: string; requiresAuth: boolean }[] };
-          // Include all browser providers that have credentials (or don't need them)
           for (const p of providers) {
             if (!p.requiresAuth || (process.env.CHATGPT_EMAIL && process.env.CHATGPT_PASSWORD)) {
               activeProviders.push(p.name);
@@ -254,285 +170,280 @@ export class BrandAnalyzer {
         console.log(`[${new Date().toISOString()}] Camoufox not available, skipping browser providers`);
       }
 
-      // Always include the API provider
       activeProviders.push('api');
-      // Deduplicate
       activeProviders = [...new Set(activeProviders)];
+
+      // Enqueue jobs
+      await this.enqueueJobs(allPrompts, activeProviders, this.analysisRunId!);
 
       const totalTasks = allPrompts.length * activeProviders.length;
       const hasBrowserProviders = activeProviders.some(p => p !== 'api');
-      const CONCURRENCY = hasBrowserProviders ? 1 : 3;
-      console.log(`[${new Date().toISOString()}] Starting: ${allPrompts.length} prompts × ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks, concurrency: ${CONCURRENCY}`);
+      const concurrency = hasBrowserProviders ? 1 : 3;
+      console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks, concurrency: ${concurrency}`);
 
-      let nextIndex = 0;
+      // Run worker loop
+      await this.runWorkerLoop(this.analysisRunId!, concurrency);
 
-      // Background processing tasks that run while the next fetch starts
-      const backgroundTasks: Promise<void>[] = [];
-
-      // Build work items: one per (prompt, provider) pair
-      const workItems: { promptData: any; promptIdx: number; provider: string }[] = [];
-      for (let i = 0; i < allPrompts.length; i++) {
-        for (const provider of activeProviders) {
-          workItems.push({ promptData: allPrompts[i], promptIdx: i, provider });
-        }
-      }
-
-      // Phase 1: Fetch response for a specific provider
-      const fetchResponse = async (promptData: any, idx: number, provider: string) => {
-        if (!isAnalysisRunning) return null;
-
-        console.log(`[${new Date().toISOString()}] [${provider}] Fetching prompt ${idx + 1}/${allPrompts.length}: ${promptData.text.substring(0, 50)}...`);
-
-        let prompt;
-        if (promptData._existing && promptData.id) {
-          prompt = { id: promptData.id, text: promptData.text, topicId: promptData.topicId };
-        } else {
-          prompt = await storage.createPrompt(promptData);
-          if (!prompt) {
-            console.error('Failed to create prompt:', promptData.text);
-            return null;
-          }
-        }
-
-        // Get response with retry
-        let analysis;
-        let retries = 0;
-        while (true) {
-          try {
-            const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
-            analysis = await analyzePromptResponse(promptData.text, this.brandName, knownCompetitors, provider);
-            break;
-          } catch (error: any) {
-            const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
-            if (isQuota) {
-              console.error(`[${new Date().toISOString()}] [${provider}] Quota exceeded on prompt ${idx + 1} — skipping.`);
-              return null;
-            }
-            const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
-            if (isRateLimit && retries < 5) {
-              const backoff = Math.pow(3, retries) * 5000;
-              console.log(`[${new Date().toISOString()}] [${provider}] Rate limited on prompt ${idx + 1}, retrying in ${Math.round(backoff / 1000)}s`);
-              await new Promise(resolve => setTimeout(resolve, backoff));
-              retries++;
-              continue;
-            }
-            console.error(`[${new Date().toISOString()}] [${provider}] Failed prompt ${idx + 1}:`, error.message);
-            return null;
-          }
-        }
-
-        return { prompt, analysis, idx, provider };
-      };
-
-      // Phase 2: Process result (fast — runs in background while next fetch starts)
-      const processResult = async (prompt: any, analysis: any, idx: number, provider?: string) => {
-        const brandLower = (this.brandName || '').toLowerCase();
-        const knownCompetitors = await storage.getCompetitors();
-
-        // Load competitor blocklist
-        const blocklistSetting = await storage.getSetting('competitorBlocklist');
-        const defaultBlocklist = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
-        const blocklist = new Set(
-          (blocklistSetting ? blocklistSetting.split(',') : defaultBlocklist)
-            .map(s => s.trim().toLowerCase()).filter(Boolean)
-        );
-
-        const filteredCompetitors: string[] = [];
-
-        for (const name of analysis.competitors) {
-          const nameLower = name.toLowerCase();
-          if (brandLower && (nameLower.includes(brandLower) || brandLower.includes(nameLower))) continue;
-          if (blocklist.has(nameLower) || [...blocklist].some(b => {
-            const bBase = b.replace(/\.com$|\.org$|\.io$|\.net$/, '');
-            return nameLower === bBase || nameLower.includes(bBase) || bBase.includes(nameLower);
-          })) continue;
-
-          const existingMatch = knownCompetitors.find(c =>
-            c.name.toLowerCase().startsWith(nameLower + ' ') ||
-            c.name.toLowerCase().startsWith(nameLower + '-')
-          );
-          if (existingMatch) {
-            filteredCompetitors.push(existingMatch.name);
-          } else if (name.length >= 2) {
-            filteredCompetitors.push(name);
-          }
-        }
-
-        const uniqueCompetitors = [...new Set(filteredCompetitors)];
-
-        // Resolve competitor records
-        const resolvedCompetitors: { name: string; id: number }[] = [];
-        for (const competitorName of uniqueCompetitors) {
-          try {
-            let competitor = await storage.getCompetitorByName(competitorName);
-            if (!competitor) {
-              competitor = await storage.createCompetitor({
-                name: competitorName,
-                category: await this.categorizeCompetitor(competitorName),
-                mentionCount: 0
-              });
-            }
-            resolvedCompetitors.push({ name: competitor.name, id: competitor.id });
-          } catch (error) {
-            console.error(`Error resolving competitor ${competitorName}:`, error);
-          }
-        }
-
-        // Process sources
-        const responseUrls = extractUrlsFromText(analysis.response);
-        const analysisSources = analysis.sources || [];
-        const allUrls = Array.from(new Set([...responseUrls, ...analysisSources]));
-
-        const urlsByDomain = new Map<string, string[]>();
-        for (const url of allUrls) {
-          try {
-            const domain = extractDomainFromUrl(url);
-            if (!domain || domain.length < 3 || domain === 'example.com' || domain === 'localhost') continue;
-            if (!urlsByDomain.has(domain)) urlsByDomain.set(domain, []);
-            urlsByDomain.get(domain)!.push(url);
-          } catch {}
-        }
-
-        for (const [domain, urls] of urlsByDomain) {
-          try {
-            const primaryUrl = urls.find((u: string) =>
-              u.includes('/docs') || u.includes('/api') || u.includes('/developer') || u.includes('/guide') || u.includes('/tutorial')
-            ) || urls[0];
-
-            let source = await storage.getSourceByDomain(domain);
-            if (!source) {
-              source = await storage.createSource({
-                domain,
-                url: primaryUrl,
-                title: this.generateSourceTitle(domain, primaryUrl),
-                citationCount: 0
-              });
-            }
-            await storage.addSourceUrls(domain, urls, this.analysisRunId || undefined, provider);
-            await storage.updateSourceCitationCount(domain, 1);
-
-            const domainBase = domain.toLowerCase().split('.')[0];
-            for (const comp of resolvedCompetitors) {
-              if (!comp.name) continue;
-              const compWords = comp.name.toLowerCase().split(/\s+/);
-              if (compWords.some(w => domainBase.includes(w) || w.includes(domainBase))) {
-                await storage.updateCompetitorDomain(comp.id, domain);
-              }
-            }
-          } catch {}
-        }
-
-        // Create response record
-        const responseRecord = await storage.createResponse({
-          promptId: prompt.id,
-          analysisRunId: this.analysisRunId,
-          provider: provider || analysis.provider || null,
-          text: analysis.response,
-          brandMentioned: analysis.brandMentioned,
-          competitorsMentioned: uniqueCompetitors.map(name => {
-            const resolved = resolvedCompetitors.find(r => r.name.toLowerCase() === name.toLowerCase());
-            return resolved?.name || name;
-          }),
-          sources: analysis.sources
-        });
-
-        // Create competitor mention records
-        if (this.analysisRunId) {
-          for (const comp of resolvedCompetitors) {
-            try {
-              await storage.createCompetitorMention({
-                competitorId: comp.id,
-                analysisRunId: this.analysisRunId,
-                responseId: responseRecord.id,
-              });
-            } catch {}
-          }
-        }
-
-        completedCount++;
-        console.log(`[${new Date().toISOString()}] [${provider || 'unknown'}] Saved prompt ${idx + 1}/${allPrompts.length} (${completedCount}/${totalTasks} total)`);
-
-        if (this.analysisRunId) {
-          await storage.updateAnalysisRunProgress(this.analysisRunId, completedCount);
-        }
-
-        this.updateProgress({
-          status: 'testing_prompts',
-          message: `Testing prompts... (${completedCount}/${totalTasks})`,
-          progress: 30 + (completedCount / totalTasks) * 50,
-          totalPrompts: totalTasks,
-          completedPrompts: completedCount
-        });
-      };
-
-      // Combined: fetch sequentially, process in background
-      const processWorkItem = async (item: { promptData: any; promptIdx: number; provider: string }): Promise<void> => {
-        const result = await fetchResponse(item.promptData, item.promptIdx, item.provider);
-        if (!result) return;
-
-        // Fire off processing in background — don't await it here
-        const task = processResult(result.prompt, result.analysis, result.idx, result.provider)
-          .catch(err => console.error(`[${new Date().toISOString()}] [${item.provider}] Background processing error for prompt ${item.promptIdx + 1}:`, err.message));
-        backgroundTasks.push(task);
-      };
-
-      // Run with concurrency pool over work items (prompt × provider pairs)
-      const workers = Array.from({ length: CONCURRENCY }, async () => {
-        while (nextIndex < workItems.length && isAnalysisRunning) {
-          const idx = nextIndex++;
-          try {
-            await processWorkItem(workItems[idx]);
-          } catch (error) {
-            console.error(`[${new Date().toISOString()}] Error processing prompt ${idx + 1}:`, error);
-          }
-        }
-      });
-      await Promise.all(workers);
-
-      // Wait for any remaining background processing tasks to finish
-      if (backgroundTasks.length > 0) {
-        console.log(`[${new Date().toISOString()}] Waiting for ${backgroundTasks.length} background tasks to complete...`);
-        await Promise.all(backgroundTasks);
-      }
-
-      // Step 4: Generate analytics
-      this.updateProgress({
-        status: 'analyzing',
-        message: 'Generating analytics...',
-        progress: 85
-      });
-
+      // Generate analytics
       await this.generateAnalytics();
 
       setCurrentRunId(null);
-      console.log(`[${new Date().toISOString()}] Analysis completed successfully. Processed ${completedCount} out of ${allPrompts.length} prompts`);
-
-      this.updateProgress({
-        status: 'complete',
-        message: 'Analysis complete!',
-        progress: 100
-      });
+      console.log(`[${new Date().toISOString()}] Analysis completed successfully.`);
 
     } catch (error) {
       console.error("Analysis failed:", error);
-      this.updateProgress({
-        status: 'error',
-        message: `Analysis failed: ${(error as Error).message}`,
-        progress: 0
-      });
       throw error;
-    } finally {
-      // Reset analysis running flag when complete or failed
-      isAnalysisRunning = false;
     }
   }
 
+  /**
+   * Bulk insert one job per (prompt, provider) pair.
+   */
+  async enqueueJobs(allPrompts: any[], activeProviders: string[], analysisRunId: number): Promise<void> {
+    const jobs: InsertJobQueueItem[] = [];
+    for (const promptData of allPrompts) {
+      for (const provider of activeProviders) {
+        jobs.push({
+          analysisRunId,
+          promptId: promptData._existing && promptData.id ? promptData.id : null,
+          promptText: promptData.text,
+          promptTopicId: promptData.topicId || null,
+          promptIsExisting: !!(promptData._existing && promptData.id),
+          provider,
+          status: 'pending',
+          attempts: 0,
+          maxAttempts: 3,
+          lastError: null,
+        });
+      }
+    }
+
+    await storage.enqueueJobs(jobs);
+
+    // Update total_prompts on the analysis run
+    await storage.updateAnalysisRunProgress(analysisRunId, 0);
+    // We use a raw approach to set totalPrompts since updateAnalysisRunProgress only sets completedPrompts
+    const { db } = await import("../db");
+    const { analysisRuns } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(analysisRuns).set({ totalPrompts: jobs.length }).where(eq(analysisRuns.id, analysisRunId));
+  }
+
+  /**
+   * Spawn N worker promises that poll the job queue.
+   */
+  async runWorkerLoop(analysisRunId: number, concurrency: number): Promise<void> {
+    const POLL_INTERVAL_MS = 500;
+    const STALL_TIMEOUT_MS = 300000; // 5 minutes
+
+    const workers = Array.from({ length: concurrency }, async (_, workerIdx) => {
+      let idleCount = 0;
+      while (true) {
+        // Check for cancellation
+        const latestRun = await storage.getLatestAnalysisRun();
+        if (!latestRun || latestRun.status === 'cancelled' || latestRun.status === 'error') {
+          console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: run status is ${latestRun?.status}, exiting`);
+          break;
+        }
+
+        const job = await storage.dequeueJob(analysisRunId);
+        if (!job) {
+          // Check if we should exit: no pending and no processing jobs
+          const progress = await storage.getJobQueueProgress(analysisRunId);
+          if (progress.pending === 0 && progress.processing === 0) {
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: no more jobs, exiting`);
+            break;
+          }
+          // Other workers are processing — wait and retry
+          idleCount++;
+          if (idleCount * POLL_INTERVAL_MS > STALL_TIMEOUT_MS) {
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: stall timeout exceeded, exiting`);
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+          continue;
+        }
+
+        idleCount = 0; // Reset idle counter on successful dequeue
+
+        try {
+          await this.processJob(job);
+          await storage.completeJob(job.id);
+        } catch (error: any) {
+          const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
+          const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
+          const shouldRetry = isRateLimit && !isQuota;
+          await storage.failJob(job.id, error.message || 'Unknown error', shouldRetry);
+          console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message}`);
+
+          if (isRateLimit) {
+            // Back off before picking up next job
+            const backoff = Math.pow(2, Math.min(job.attempts, 5)) * 2000;
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: rate limited, backing off ${Math.round(backoff / 1000)}s`);
+            await new Promise(resolve => setTimeout(resolve, backoff));
+          }
+        }
+
+        // Update run progress
+        const progress = await storage.getJobQueueProgress(analysisRunId);
+        const completedCount = progress.completed + progress.failed;
+        await storage.updateAnalysisRunProgress(analysisRunId, completedCount);
+      }
+    });
+
+    await Promise.all(workers);
+  }
+
+  /**
+   * Process a single job: fetch response from provider, analyze, save to DB.
+   */
+  private async processJob(job: JobQueueItem): Promise<void> {
+    const { provider, promptText, promptId, promptIsExisting, promptTopicId } = job;
+    const analysisRunId = job.analysisRunId;
+
+    console.log(`[${new Date().toISOString()}] [${provider}] Processing job ${job.id}: ${promptText.substring(0, 50)}...`);
+
+    // Resolve prompt record
+    let prompt: { id: number; text: string; topicId: number | null };
+    if (promptIsExisting && promptId) {
+      prompt = { id: promptId, text: promptText, topicId: promptTopicId };
+    } else {
+      const created = await storage.createPrompt({ text: promptText, topicId: promptTopicId });
+      prompt = { id: created.id, text: created.text, topicId: created.topicId };
+      // Update the job's promptId for reference (fire-and-forget)
+    }
+
+    // Get response from LLM
+    const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
+    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, provider);
+
+    // Process competitors
+    const brandLower = (this.brandName || '').toLowerCase();
+    const knownCompetitorRecords = await storage.getCompetitors();
+
+    const blocklistSetting = await storage.getSetting('competitorBlocklist');
+    const defaultBlocklist = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
+    const blocklist = new Set(
+      (blocklistSetting ? blocklistSetting.split(',') : defaultBlocklist)
+        .map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    const filteredCompetitors: string[] = [];
+    for (const name of analysis.competitors) {
+      const nameLower = name.toLowerCase();
+      if (brandLower && (nameLower.includes(brandLower) || brandLower.includes(nameLower))) continue;
+      if (blocklist.has(nameLower) || [...blocklist].some(b => {
+        const bBase = b.replace(/\.com$|\.org$|\.io$|\.net$/, '');
+        return nameLower === bBase || nameLower.includes(bBase) || bBase.includes(nameLower);
+      })) continue;
+
+      const existingMatch = knownCompetitorRecords.find(c =>
+        c.name.toLowerCase().startsWith(nameLower + ' ') ||
+        c.name.toLowerCase().startsWith(nameLower + '-')
+      );
+      if (existingMatch) {
+        filteredCompetitors.push(existingMatch.name);
+      } else if (name.length >= 2) {
+        filteredCompetitors.push(name);
+      }
+    }
+
+    const uniqueCompetitors = [...new Set(filteredCompetitors)];
+
+    // Resolve competitor records
+    const resolvedCompetitors: { name: string; id: number }[] = [];
+    for (const competitorName of uniqueCompetitors) {
+      try {
+        let competitor = await storage.getCompetitorByName(competitorName);
+        if (!competitor) {
+          competitor = await storage.createCompetitor({
+            name: competitorName,
+            category: await this.categorizeCompetitor(competitorName),
+            mentionCount: 0
+          });
+        }
+        resolvedCompetitors.push({ name: competitor.name, id: competitor.id });
+      } catch (error) {
+        console.error(`Error resolving competitor ${competitorName}:`, error);
+      }
+    }
+
+    // Process sources
+    const responseUrls = extractUrlsFromText(analysis.response);
+    const analysisSources = analysis.sources || [];
+    const allUrls = Array.from(new Set([...responseUrls, ...analysisSources]));
+
+    const urlsByDomain = new Map<string, string[]>();
+    for (const url of allUrls) {
+      try {
+        const domain = extractDomainFromUrl(url);
+        if (!domain || domain.length < 3 || domain === 'example.com' || domain === 'localhost') continue;
+        if (!urlsByDomain.has(domain)) urlsByDomain.set(domain, []);
+        urlsByDomain.get(domain)!.push(url);
+      } catch {}
+    }
+
+    for (const [domain, urls] of urlsByDomain) {
+      try {
+        const primaryUrl = urls.find((u: string) =>
+          u.includes('/docs') || u.includes('/api') || u.includes('/developer') || u.includes('/guide') || u.includes('/tutorial')
+        ) || urls[0];
+
+        let source = await storage.getSourceByDomain(domain);
+        if (!source) {
+          source = await storage.createSource({
+            domain,
+            url: primaryUrl,
+            title: this.generateSourceTitle(domain, primaryUrl),
+            citationCount: 0
+          });
+        }
+        await storage.addSourceUrls(domain, urls, analysisRunId || undefined, provider);
+        await storage.updateSourceCitationCount(domain, 1);
+
+        const domainBase = domain.toLowerCase().split('.')[0];
+        for (const comp of resolvedCompetitors) {
+          if (!comp.name) continue;
+          const compWords = comp.name.toLowerCase().split(/\s+/);
+          if (compWords.some(w => domainBase.includes(w) || w.includes(domainBase))) {
+            await storage.updateCompetitorDomain(comp.id, domain);
+          }
+        }
+      } catch {}
+    }
+
+    // Create response record
+    const responseRecord = await storage.createResponse({
+      promptId: prompt.id,
+      analysisRunId,
+      provider: provider || analysis.provider || null,
+      text: analysis.response,
+      brandMentioned: analysis.brandMentioned,
+      competitorsMentioned: uniqueCompetitors.map(name => {
+        const resolved = resolvedCompetitors.find(r => r.name.toLowerCase() === name.toLowerCase());
+        return resolved?.name || name;
+      }),
+      sources: analysis.sources
+    });
+
+    // Create competitor mention records
+    for (const comp of resolvedCompetitors) {
+      try {
+        await storage.createCompetitorMention({
+          competitorId: comp.id,
+          analysisRunId,
+          responseId: responseRecord.id,
+        });
+      } catch {}
+    }
+
+    console.log(`[${new Date().toISOString()}] [${provider}] Completed job ${job.id}`);
+  }
+
   private generateSourceTitle(domain: string, url: string): string {
-    // Generate a descriptive title based on the domain and URL
     const domainParts = domain.split('.');
     const mainDomain = domainParts[0];
-    
-    // Handle common patterns
+
     if (url.includes('/docs')) {
       return `${mainDomain} Documentation`;
     } else if (url.includes('/api')) {
@@ -581,10 +492,7 @@ export class BrandAnalyzer {
       return 'Mozilla Developer Network';
     } else if (domain.includes('web.dev')) {
       return 'Web.dev Article';
-    } else if (domain.includes('css-tricks.com')) {
-      return 'CSS-Tricks Article';
     } else {
-      // For unknown domains, create a more generic title
       const tld = domainParts[domainParts.length - 1];
       if (tld === 'org') {
         return `${mainDomain} Organization`;
@@ -642,17 +550,17 @@ export class BrandAnalyzer {
     const responses = await storage.getResponsesWithPrompts();
     const competitors = await storage.getCompetitors();
     const sources = await storage.getSources();
-    
+
     const brandMentions = responses.filter(r => r.brandMentioned).length;
     const brandMentionRate = responses.length > 0 ? (brandMentions / responses.length) * 100 : 0;
-    
+
     const topCompetitor = competitors
       .sort((a, b) => (b.mentionCount || 0) - (a.mentionCount || 0))[0]?.name || null;
-    
+
     const uniqueDomains = new Set(sources.map(s => s.domain)).size;
-    
+
     return await storage.createAnalytics({
-      totalPrompts: responses.length, // Use full dataset count
+      totalPrompts: responses.length,
       brandMentionRate,
       topCompetitor,
       totalSources: sources.length,
@@ -661,23 +569,21 @@ export class BrandAnalyzer {
   }
 
   async getOverviewMetrics() {
-    // Get full dataset for accurate metrics
     const allResponses = await storage.getResponsesWithPrompts();
     const competitorAnalysis = await storage.getCompetitorAnalysis();
     const sourceAnalysis = await storage.getSourceAnalysis();
-    
-    // Calculate metrics from full dataset
+
     const brandMentions = allResponses.filter(r => r.brandMentioned).length;
     const brandMentionRate = allResponses.length > 0 ? (brandMentions / allResponses.length) * 100 : 0;
-    
+
     const topCompetitor = competitorAnalysis
       .sort((a, b) => b.mentionCount - a.mentionCount)[0];
-    
+
     const uniqueDomains = new Set(sourceAnalysis.map(s => s.domain)).size;
-    
+
     return {
       brandMentionRate,
-      totalPrompts: allResponses.length, // Use full dataset count
+      totalPrompts: allResponses.length,
       topCompetitor: topCompetitor?.name || 'N/A',
       totalSources: sourceAnalysis.length,
       totalDomains: uniqueDomains

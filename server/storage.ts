@@ -26,7 +26,10 @@ import {
   type CompetitorAnalysis,
   type SourceAnalysis,
   type MergeSuggestion,
-  type MergeHistoryEntry
+  type MergeHistoryEntry,
+  type JobQueueItem,
+  type InsertJobQueueItem,
+  type JobQueueProgress,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -101,6 +104,15 @@ export interface IStorage {
   getMergeSuggestions(): Promise<MergeSuggestion[]>;
   getMergeHistory(): Promise<MergeHistoryEntry[]>;
   getAllCompetitorsIncludingMerged(): Promise<Competitor[]>;
+
+  // Job queue
+  enqueueJobs(jobs: InsertJobQueueItem[]): Promise<void>;
+  dequeueJob(analysisRunId: number): Promise<JobQueueItem | null>;
+  completeJob(jobId: number): Promise<void>;
+  failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void>;
+  getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress>;
+  recoverStalledJobs(stallTimeoutMs?: number): Promise<number>;
+  cancelJobsForRun(analysisRunId: number): Promise<void>;
 
   // Data clearing methods
   clearAllPrompts(): Promise<void>;
@@ -520,6 +532,15 @@ export class MemStorage implements IStorage {
   async getAllCompetitorsIncludingMerged(): Promise<Competitor[]> {
     return Array.from(this.competitors.values());
   }
+
+  // Job queue stubs (MemStorage doesn't support the queue — use DatabaseStorage)
+  async enqueueJobs(_jobs: InsertJobQueueItem[]): Promise<void> {}
+  async dequeueJob(_analysisRunId: number): Promise<JobQueueItem | null> { return null; }
+  async completeJob(_jobId: number): Promise<void> {}
+  async failJob(_jobId: number, _error: string, _shouldRetry: boolean): Promise<void> {}
+  async getJobQueueProgress(_analysisRunId: number): Promise<JobQueueProgress> { return { total: 0, pending: 0, processing: 0, completed: 0, failed: 0 }; }
+  async recoverStalledJobs(_stallTimeoutMs?: number): Promise<number> { return 0; }
+  async cancelJobsForRun(_analysisRunId: number): Promise<void> {}
 
   async clearAllPrompts(): Promise<void> {
     this.prompts.clear();

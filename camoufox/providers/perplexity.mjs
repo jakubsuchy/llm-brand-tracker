@@ -5,16 +5,26 @@ export const config = {
 };
 
 export async function handler({ page }, question) {
-  // Wait for input
+  // Wait for input — Perplexity uses a Lexical contenteditable div, not a real input
   const input = page.locator('#ask-input');
   await input.waitFor({ timeout: 30000 });
   console.log('[Perplexity] Page loaded');
 
-  // Ask
-  await input.fill(question);
+  // Click to focus, then type character-by-character (fill() doesn't work on Lexical editors)
+  await input.click();
+  await page.waitForTimeout(300);
+  await page.keyboard.type(question, { delay: 20 });
+  await page.waitForTimeout(500);
+
+  // Submit — try aria-label first, fall back to Enter key
   const submitBtn = page.locator('button[aria-label="Submit"]');
-  await submitBtn.waitFor({ timeout: 10000 });
-  await submitBtn.click();
+  try {
+    await submitBtn.waitFor({ timeout: 5000 });
+    await submitBtn.click();
+  } catch {
+    console.log('[Perplexity] Submit button not found, pressing Enter');
+    await page.keyboard.press('Enter');
+  }
   console.log('[Perplexity] Submitted question');
 
   // Wait for response — copy button appears when done

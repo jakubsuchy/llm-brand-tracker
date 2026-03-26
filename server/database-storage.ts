@@ -9,7 +9,8 @@ import {
   AnalysisRun, InsertAnalysisRun,
   TopicAnalysis, CompetitorAnalysis, SourceAnalysis,
   MergeSuggestion, MergeHistoryEntry,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings
+  JobQueueItem, InsertJobQueueItem, JobQueueProgress,
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, sql, isNull } from "drizzle-orm";
@@ -541,6 +542,109 @@ export class DatabaseStorage implements IStorage {
       mergedName: r.merged_name as string,
       performedAt: r.performed_at ? new Date(r.performed_at) : null,
     }));
+  }
+
+  // Job queue methods
+  async enqueueJobs(jobs: InsertJobQueueItem[]): Promise<void> {
+    // Batch insert in chunks of 100
+    for (let i = 0; i < jobs.length; i += 100) {
+      const batch = jobs.slice(i, i + 100);
+      await db.insert(jobQueue).values(batch);
+    }
+  }
+
+  async dequeueJob(analysisRunId: number): Promise<JobQueueItem | null> {
+    const result = await db.execute(sql`
+      UPDATE job_queue
+      SET status = 'processing', locked_at = NOW(), attempts = attempts + 1
+      WHERE id = (
+        SELECT id FROM job_queue
+        WHERE analysis_run_id = ${analysisRunId} AND status = 'pending'
+        ORDER BY id LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *
+    `);
+    const rows = (result as any).rows ?? result;
+    if (!rows || rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      analysisRunId: r.analysis_run_id,
+      promptId: r.prompt_id,
+      promptText: r.prompt_text,
+      promptTopicId: r.prompt_topic_id,
+      promptIsExisting: r.prompt_is_existing,
+      provider: r.provider,
+      status: r.status,
+      attempts: r.attempts,
+      maxAttempts: r.max_attempts,
+      lastError: r.last_error,
+      lockedAt: r.locked_at ? new Date(r.locked_at) : null,
+      completedAt: r.completed_at ? new Date(r.completed_at) : null,
+      createdAt: r.created_at ? new Date(r.created_at) : null,
+    };
+  }
+
+  async completeJob(jobId: number): Promise<void> {
+    await db.update(jobQueue)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(jobQueue.id, jobId));
+  }
+
+  async failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void> {
+    if (shouldRetry) {
+      // Check if we've exceeded max attempts
+      const [job] = await db.select().from(jobQueue).where(eq(jobQueue.id, jobId));
+      if (job && job.attempts < (job.maxAttempts || 3)) {
+        await db.update(jobQueue)
+          .set({ status: 'pending', lockedAt: null, lastError: error })
+          .where(eq(jobQueue.id, jobId));
+        return;
+      }
+    }
+    await db.update(jobQueue)
+      .set({ status: 'failed', lastError: error })
+      .where(eq(jobQueue.id, jobId));
+  }
+
+  async getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress> {
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'processing') as processing,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'failed') as failed
+      FROM job_queue
+      WHERE analysis_run_id = ${analysisRunId}
+    `);
+    const rows = (result as any).rows ?? result;
+    const r = rows[0];
+    return {
+      total: Number(r.total),
+      pending: Number(r.pending),
+      processing: Number(r.processing),
+      completed: Number(r.completed),
+      failed: Number(r.failed),
+    };
+  }
+
+  async recoverStalledJobs(stallTimeoutMs: number = 300000): Promise<number> {
+    const result = await db.execute(sql`
+      UPDATE job_queue
+      SET status = 'pending', locked_at = NULL
+      WHERE status = 'processing'
+        AND locked_at < NOW() - INTERVAL '1 millisecond' * ${stallTimeoutMs}
+    `);
+    const count = (result as any).rowCount ?? ((result as any).rows?.length ?? 0);
+    return Number(count);
+  }
+
+  async cancelJobsForRun(analysisRunId: number): Promise<void> {
+    await db.update(jobQueue)
+      .set({ status: 'failed', lastError: 'Cancelled by user' })
+      .where(sql`${jobQueue.analysisRunId} = ${analysisRunId} AND (${jobQueue.status} = 'pending' OR ${jobQueue.status} = 'processing')`);
   }
 
   // Data clearing methods
