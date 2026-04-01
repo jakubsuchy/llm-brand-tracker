@@ -64,12 +64,12 @@ export async function getAnalysisProgressFromDB(): Promise<AnalysisProgress> {
   }
 
   const completedCount = progress.completed + progress.failed;
-  const pct = 30 + (completedCount / progress.total) * 55;
+  const pct = Math.round((completedCount / progress.total) * 100);
 
   return {
     status: 'testing_prompts',
     message: `Testing prompts... (${completedCount}/${progress.total})`,
-    progress: Math.min(pct, 85),
+    progress: pct,
     totalPrompts: progress.total,
     completedPrompts: completedCount,
   };
