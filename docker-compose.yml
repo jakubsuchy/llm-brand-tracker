@@ -25,6 +25,8 @@ services:
     environment:
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
       CAMOUFOX_API_KEY: ${CAMOUFOX_API_KEY:-}
+      APIFY_PROXY_PASSWORD: ${APIFY_PROXY_PASSWORD:-}
+      APIFY_PROXY_COUNTRY: ${APIFY_PROXY_COUNTRY:-US}
     volumes:
       - browser-profile:/tmp/browser-profile
     healthcheck:

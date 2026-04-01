@@ -172,7 +172,10 @@ export class BrandAnalyzer {
         console.log(`[${new Date().toISOString()}] Camoufox not available, skipping browser providers`);
       }
 
-      activeProviders.push('api');
+      // Only include API provider if no browser providers are available
+      if (activeProviders.length === 0) {
+        activeProviders.push('api');
+      }
       activeProviders = [...new Set(activeProviders)];
 
       // Enqueue jobs
@@ -180,11 +183,10 @@ export class BrandAnalyzer {
 
       const totalTasks = allPrompts.length * activeProviders.length;
       const hasBrowserProviders = activeProviders.some(p => p !== 'api');
-      const concurrency = hasBrowserProviders ? 1 : 3;
-      console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks, concurrency: ${concurrency}`);
+      console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks`);
 
-      // Run worker loop
-      await this.runWorkerLoop(this.analysisRunId!, concurrency);
+      // Run worker loop — browser jobs run serially, API jobs can run in parallel
+      await this.runWorkerLoop(this.analysisRunId!, hasBrowserProviders);
 
       // Generate analytics
       await this.generateAnalytics();
@@ -232,9 +234,12 @@ export class BrandAnalyzer {
   }
 
   /**
-   * Spawn N worker promises that poll the job queue.
+   * Spawn worker promises that poll the job queue.
+   * Browser jobs run serially (concurrency 1), API jobs can run in parallel.
    */
-  async runWorkerLoop(analysisRunId: number, concurrency: number): Promise<void> {
+  async runWorkerLoop(analysisRunId: number, hasBrowserProviders: boolean = false): Promise<void> {
+    // Browser is a singleton — only one prompt at a time. API can do 3 concurrent.
+    const concurrency = hasBrowserProviders ? 1 : 3;
     const POLL_INTERVAL_MS = 500;
     const STALL_TIMEOUT_MS = 300000; // 5 minutes
 
@@ -274,7 +279,8 @@ export class BrandAnalyzer {
         } catch (error: any) {
           const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
           const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
-          const shouldRetry = isRateLimit && !isQuota;
+          // Retry everything except quota errors — browser failures, timeouts, etc. are transient
+          const shouldRetry = !isQuota;
           await storage.failJob(job.id, error.message || 'Unknown error', shouldRetry);
           console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message}`);
 

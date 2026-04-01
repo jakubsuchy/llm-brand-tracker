@@ -118,6 +118,7 @@ export interface IStorage {
   clearAllPrompts(): Promise<void>;
   clearAllResponses(): Promise<void>;
   clearAllCompetitors(): Promise<void>;
+  clearAllAnalysisData(): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -557,6 +558,17 @@ export class MemStorage implements IStorage {
     this.competitors.clear();
     this.currentCompetitorId = 1;
     console.log(`[${new Date().toISOString()}] MemStorage: All competitors cleared successfully`);
+  }
+
+  async clearAllAnalysisData(): Promise<void> {
+    this.prompts.clear();
+    this.responses.clear();
+    this.competitors.clear();
+    this.sources.clear();
+    this.analytics.clear();
+    this.competitorMentionsList = [];
+    this.analysisRunsMap.clear();
+    this.sourceUrlsMap.clear();
   }
 
   async getLatestResponses(): Promise<ResponseWithPrompt[]> {

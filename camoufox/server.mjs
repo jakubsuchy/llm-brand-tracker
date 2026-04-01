@@ -1,18 +1,37 @@
 import http from 'http';
-import { PlaywrightCrawler, Configuration } from 'crawlee';
-import { firefox } from 'playwright-core';
-import { launchOptions } from 'camoufox-js';
 import { resolve } from 'path';
 import { readdirSync } from 'fs';
+import { execSync } from 'child_process';
+import { createRequire } from 'module';
+import { Camoufox } from 'camoufox-js';
+
+// Import crawlee's Cloudflare handler (exports field blocks subpath imports, so use require)
+let handleCloudflareChallenge;
+try {
+  const _require = createRequire(import.meta.url);
+  const mod = _require('/app/node_modules/@crawlee/playwright/internals/utils/playwright-utils.js');
+  handleCloudflareChallenge = mod.playwrightUtils.handleCloudflareChallenge;
+  console.log('[Camoufox] Loaded Crawlee Cloudflare handler');
+} catch (e) {
+  console.log(`[Camoufox] Could not load Crawlee Cloudflare handler: ${e.message}`);
+  handleCloudflareChallenge = async () => {};
+}
 
 const port = parseInt(process.env.CAMOUFOX_PORT || '8888');
 const profileDir = resolve(process.env.BROWSER_PROFILE_PATH || '/tmp/browser-profile');
 const apiKey = process.env.CAMOUFOX_API_KEY || '';
+const apifyProxyPassword = process.env.APIFY_PROXY_PASSWORD || '';
+const apifyProxyCountry = process.env.APIFY_PROXY_COUNTRY || 'US';
+
+// Stable session ID for the container lifetime — same residential IP across all requests.
+// Restarting the container rotates the IP.
+const proxySessionId = apifyProxyPassword ? `camoufox${Date.now()}` : '';
 
 console.log(`[Camoufox] Starting on port ${port}`);
 console.log(`[Camoufox] DISPLAY=${process.env.DISPLAY}`);
 console.log(`[Camoufox] Profile: ${profileDir}`);
-console.log(`[Camoufox] Auth: ${apiKey ? 'enabled' : 'disabled (set CAMOUFOX_API_KEY to enable)'}`);
+console.log(`[Camoufox] Auth: ${apiKey ? 'enabled' : 'disabled'}`);
+console.log(`[Camoufox] Proxy: ${apifyProxyPassword ? `Apify residential (country: ${apifyProxyCountry}, session: ${proxySessionId})` : 'disabled'}`);
 
 // ─── Load providers ───────────────────────────────────────────────
 
@@ -27,7 +46,81 @@ for (const file of providerFiles) {
   console.log(`[Camoufox] Loaded provider: ${name} (auth: ${mod.config.requiresAuth})`);
 }
 
-// ─── Shared crawler runner ────────────────────────────────────────
+// ─── Browser helpers ──────────────────────────────────────────────
+
+function buildBrowserOpts() {
+  const opts = {
+    headless: false,
+    geoip: !!apifyProxyPassword,
+  };
+  if (apifyProxyPassword) {
+    opts.proxy = {
+      server: 'http://proxy.apify.com:8000',
+      username: `groups-RESIDENTIAL,session-${proxySessionId},country-${apifyProxyCountry}`,
+      password: apifyProxyPassword,
+    };
+  }
+  return opts;
+}
+
+// ─── Startup self-test ────────────────────────────────────────────
+
+async function startupTest() {
+  console.log('[Camoufox] Running startup self-test...');
+  console.log('[Camoufox] DISPLAY at test time:', process.env.DISPLAY);
+  const opts = buildBrowserOpts();
+  console.log('[Camoufox] Browser opts:', JSON.stringify({ ...opts, proxy: opts.proxy ? { ...opts.proxy, password: '***' } : undefined }, null, 2));
+
+  // Network connectivity checks
+  try {
+    const directResp = await fetch('https://httpbin.org/ip', { signal: AbortSignal.timeout(10000) });
+    console.log(`[Camoufox] Direct fetch (no proxy): ${(await directResp.text()).trim()}`);
+  } catch (e) {
+    console.log(`[Camoufox] Direct fetch FAILED: ${e.message}`);
+  }
+
+  if (apifyProxyPassword) {
+    try {
+      const username = `groups-RESIDENTIAL,session-${proxySessionId},country-${apifyProxyCountry}`;
+      const curlResult = execSync(
+        `curl -s --max-time 10 -x "http://proxy.apify.com:8000" -U "${username}:${apifyProxyPassword}" https://httpbin.org/ip`,
+        { encoding: 'utf8' }
+      );
+      console.log(`[Camoufox] Curl via proxy: ${curlResult.trim()}`);
+    } catch (e) {
+      console.log(`[Camoufox] Curl via proxy FAILED: ${e.message}`);
+    }
+
+    try {
+      const dns = execSync('getent hosts proxy.apify.com', { encoding: 'utf8' });
+      console.log(`[Camoufox] DNS proxy.apify.com: ${dns.trim()}`);
+    } catch (e) {
+      console.log(`[Camoufox] DNS lookup FAILED: ${e.message}`);
+    }
+  }
+
+  // Browser test
+  let browser;
+  try {
+    browser = await Camoufox(opts);
+    console.log('[Camoufox] Browser launched OK');
+
+    const page = await browser.newPage();
+    console.log('[Camoufox] Page created OK');
+
+    const resp = await page.goto('https://httpbin.org/ip', { timeout: 30000 });
+    const body = await resp.text();
+    console.log(`[Camoufox] Self-test PASSED — IP: ${body.trim()}`);
+  } catch (err) {
+    console.error(`[Camoufox] Self-test FAILED: ${err.message}`);
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+await startupTest();
+
+// ─── Browser runner ───────────────────────────────────────────────
 
 let busy = false;
 
@@ -35,43 +128,31 @@ async function runPrompt(providerName, question, credentials) {
   const provider = providers[providerName];
   if (!provider) throw new Error(`Unknown provider: ${providerName}. Available: ${Object.keys(providers).join(', ')}`);
 
-  const camoufoxOpts = await launchOptions({
-    headless: false,
-    humanize: true,
-    user_data_dir: profileDir,
-  });
+  console.log(`[Camoufox] Launching browser for ${providerName}...`);
+  const browser = await Camoufox(buildBrowserOpts());
+  const page = await browser.newPage();
 
-  const config = new Configuration({ persistStorage: false });
   let result = null;
+  try {
+    console.log(`[Camoufox] Navigating to ${provider.url}...`);
+    await page.goto(provider.url, { waitUntil: 'load', timeout: 60000 });
 
-  const crawler = new PlaywrightCrawler({
-    launchContext: {
-      launcher: firefox,
-      launchOptions: {
-        ...camoufoxOpts,
-        firefoxUserPrefs: {
-          ...camoufoxOpts.firefoxUserPrefs,
-          'dom.events.asyncClipboard.readText': true,
-          'dom.events.testing.asyncClipboard': true,
-        },
-      },
-      userDataDir: profileDir,
-    },
-    postNavigationHooks: [
-      async ({ handleCloudflareChallenge }) => {
-        await handleCloudflareChallenge();
-      },
-    ],
-    browserPoolOptions: { useFingerprints: false },
-    navigationTimeoutSecs: 60,
-    requestHandlerTimeoutSecs: 300,
-    async requestHandler(ctx) {
-      result = await provider.handler(ctx, question, credentials || {});
-    },
-  }, config);
+    // Handle Cloudflare challenge if present
+    try {
+      await handleCloudflareChallenge(page, provider.url, null, { verbose: true });
+    } catch (e) {
+      console.log(`[Camoufox] Cloudflare: ${e.message}`);
+    }
 
-  await crawler.run([provider.url]);
-  await crawler.teardown();
+    console.log(`[Camoufox] Page loaded, running handler...`);
+
+    result = await Promise.race([
+      provider.handler({ page }, question, credentials || {}),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Handler timeout (300s)')), 300000)),
+    ]);
+  } finally {
+    await browser.close().catch(() => {});
+  }
 
   if (!result) throw new Error(`${providerName} returned no result`);
   return { ...result, provider: providerName };
@@ -86,7 +167,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Auth check — all endpoints below require the API key (if set)
   if (apiKey) {
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';

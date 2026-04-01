@@ -233,7 +233,8 @@ Rules:
 - Simple, direct language — like typing into a search box or chat
 - Mix of: recommendations, comparisons, "best of" lists, "what should I use", specific questions
 - Vary the angle: features, pricing, scale, compliance, performance, use cases
-- Enterprise-focused context by default unless the topic says otherwise
+- ALWAYS include at least one simple, generic prompt like "Recommend a [topic]" or "I need a [topic]" or "What [topic] should I use?" — without any qualifier like "enterprise" or "for large teams"
+- Don't add "for enterprise" to every prompt — mix in general/unqualified questions alongside enterprise-specific ones
 
 Return a JSON object with a "prompts" key containing an array of strings.`
         },

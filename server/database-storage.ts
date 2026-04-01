@@ -10,7 +10,7 @@ import {
   TopicAnalysis, CompetitorAnalysis, SourceAnalysis,
   MergeSuggestion, MergeHistoryEntry,
   JobQueueItem, InsertJobQueueItem, JobQueueProgress,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, count, sql, isNull } from "drizzle-orm";
@@ -661,5 +661,23 @@ export class DatabaseStorage implements IStorage {
     console.log(`[${new Date().toISOString()}] DatabaseStorage: Clearing all competitors...`);
     await db.delete(competitors);
     console.log(`[${new Date().toISOString()}] DatabaseStorage: All competitors cleared successfully`);
+  }
+
+  async clearAllAnalysisData(): Promise<void> {
+    console.log(`[${new Date().toISOString()}] DatabaseStorage: Clearing ALL analysis data...`);
+    // Order matters — respect foreign key constraints
+    await db.delete(jobQueue);
+    await db.delete(competitorMentions);
+    await db.delete(competitorMerges);
+    await db.delete(sourceUrls);
+    await db.delete(responses);
+    await db.delete(prompts);
+    await db.delete(competitors);
+    await db.delete(sources);
+    await db.delete(analytics);
+    await db.delete(apiUsage);
+    await db.delete(analysisRuns);
+    await db.delete(topics);
+    console.log(`[${new Date().toISOString()}] DatabaseStorage: All analysis data cleared`);
   }
 }

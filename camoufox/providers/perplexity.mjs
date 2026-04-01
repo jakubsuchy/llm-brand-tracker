@@ -7,14 +7,74 @@ export const config = {
 export async function handler({ page }, question) {
   // Wait for input — Perplexity uses a Lexical contenteditable div, not a real input
   const input = page.locator('#ask-input');
-  await input.waitFor({ timeout: 30000 });
+  try {
+    await input.waitFor({ timeout: 30000 });
+  } catch (e) {
+    // Dump page HTML for debugging
+    const html = await page.content().catch(() => 'could not get page content');
+    console.log(`[Perplexity] #ask-input not found. URL: ${page.url()}`);
+    console.log(`[Perplexity] Page HTML (first 3000 chars): ${html.substring(0, 3000)}`);
+    throw e;
+  }
   console.log('[Perplexity] Page loaded');
 
-  // Click to focus, then type character-by-character (fill() doesn't work on Lexical editors)
-  await input.click();
-  await page.waitForTimeout(300);
-  await page.keyboard.type(question, { delay: 20 });
-  await page.waitForTimeout(500);
+  // Dismiss popups — Google sign-in prompt, Perplexity sign-in modal, etc.
+  for (let i = 0; i < 3; i++) {
+    let dismissed = false;
+    // Close any button with aria-label="Close" (covers both popups)
+    for (const btn of await page.locator('button[aria-label="Close"]').all()) {
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click().catch(() => {});
+        console.log('[Perplexity] Dismissed popup');
+        dismissed = true;
+        await page.waitForTimeout(500);
+      }
+    }
+    // Also press Escape to close any modal
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    if (!dismissed) break;
+  }
+
+  // Write question to clipboard
+  await page.evaluate(async (text) => {
+    await navigator.clipboard.writeText(text);
+  }, question);
+
+  // Try paste up to 3 times — popups can steal focus
+  let entered = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await input.click();
+    await page.waitForTimeout(300);
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('ControlOrMeta+v');
+    await page.waitForTimeout(800);
+
+    entered = await input.textContent();
+    console.log(`[Perplexity] Paste attempt ${attempt}: ${entered.length} chars (expected ${question.length})`);
+    if (entered.length > 0) break;
+
+    // Dismiss any new popups that appeared
+    for (const btn of await page.locator('button[aria-label="Close"]').all()) {
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click().catch(() => {});
+        console.log('[Perplexity] Dismissed popup during retry');
+      }
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+  }
+
+  // Final fallback: keyboard.type
+  if (entered.length === 0) {
+    console.log('[Perplexity] Paste failed, falling back to keyboard.type...');
+    await input.click();
+    await page.waitForTimeout(300);
+    await page.keyboard.type(question, { delay: 30 });
+    await page.waitForTimeout(500);
+    entered = await input.textContent();
+    console.log(`[Perplexity] keyboard.type entered ${entered.length} chars`);
+  }
 
   // Submit — try aria-label first, fall back to Enter key
   const submitBtn = page.locator('button[aria-label="Submit"]');
@@ -32,9 +92,15 @@ export async function handler({ page }, question) {
   await copyBtn.waitFor({ timeout: 120000 });
   await page.waitForTimeout(2000); // let it finish rendering
 
-  // Copy via clipboard
-  await copyBtn.click();
-  const answer = await page.evaluate(() => navigator.clipboard.readText());
+  // Extract response — try clipboard first, fall back to DOM text
+  let answer;
+  try {
+    await copyBtn.click();
+    answer = await page.evaluate(() => navigator.clipboard.readText());
+  } catch (e) {
+    console.log(`[Perplexity] Clipboard failed (${e.message.substring(0, 50)}), extracting from DOM`);
+    answer = await page.locator('div.prose').last().innerText();
+  }
   console.log(`[Perplexity] Response: ${answer.length} chars`);
 
   // Sources

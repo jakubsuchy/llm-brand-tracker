@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus, ShieldX, Monitor, Cpu } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus, ShieldX, Monitor, Cpu, Trash2 } from "lucide-react";
 
 interface UsageData {
   totals: {
@@ -210,6 +211,8 @@ export default function SettingsPage() {
         <CompetitorExclusionsCard />
 
         <ApiUsageCard />
+
+        <DangerZoneCard />
 
         <Card>
           <CardHeader>
@@ -514,6 +517,89 @@ function CompetitorExclusionsCard() {
             <Plus className="h-4 w-4 mr-1" />
             Add
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DangerZoneCard() {
+  const { toast } = useToast();
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAll = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch('/api/data/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'nuclear' }),
+      });
+      if (!res.ok) throw new Error('Failed to clear data');
+      toast({
+        title: "Data cleared",
+        description: "All prompts, responses, competitors, sources, and analysis runs have been deleted. Your settings are preserved.",
+      });
+      // Reload to reflect empty state
+      setTimeout(() => window.location.reload(), 1500);
+    } catch {
+      toast({
+        title: "Error",
+        description: "Failed to clear data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <Card className="border-red-200">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-red-700">
+          <Trash2 className="h-5 w-5" />
+          Danger Zone
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          Irreversible actions that delete analysis data
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-200">
+          <div>
+            <h4 className="font-medium text-red-900">Delete all analysis data</h4>
+            <p className="text-sm text-red-700 mt-1">
+              Permanently deletes all prompts, responses, competitors, sources, analysis runs, and API usage logs.
+              Your settings (brand name, API key, blocklist, subdomain config) and topics will be preserved.
+            </p>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" className="ml-4 shrink-0" disabled={isDeleting}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                {isDeleting ? 'Deleting...' : 'Delete All Data'}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete all analysis data including prompts, responses,
+                  competitor records, source citations, analysis runs, and API usage logs.
+                  This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeleteAll}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  Yes, delete everything
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </CardContent>
     </Card>
