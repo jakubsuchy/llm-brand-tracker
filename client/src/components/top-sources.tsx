@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 interface SourceAnalysis {
   sourceId: number;
   domain: string;
+  sourceType: string;
   citationCount: number;
   urls: string[];
 }
@@ -44,6 +45,7 @@ export default function TopSources({ runId }: { runId?: string }) {
   const { toast } = useToast();
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'brand' | 'competitor' | 'neutral'>('all');
   
   const { data: sources, isLoading, error } = useQuery<SourceAnalysis[]>({
     queryKey: ["/api/sources/analysis"],
@@ -115,22 +117,49 @@ export default function TopSources({ runId }: { runId?: string }) {
     );
   }
 
-  const sortedSources = (sources || []).sort((a, b) => b.citationCount - a.citationCount); // Sort by citation count descending
+  const filteredSources = (sources || []).filter(s => typeFilter === 'all' || s.sourceType === typeFilter);
+  const sortedSources = filteredSources.sort((a, b) => b.citationCount - a.citationCount);
   const displaySources = showAll ? sortedSources : sortedSources.slice(0, 6);
+
+  const typeCounts = {
+    all: (sources || []).length,
+    brand: (sources || []).filter(s => s.sourceType === 'brand').length,
+    competitor: (sources || []).filter(s => s.sourceType === 'competitor').length,
+    neutral: (sources || []).filter(s => s.sourceType === 'neutral').length,
+  };
 
   return (
     <Card className="bg-white border-slate-200">
       <CardContent className="p-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-900">Top Sources</h3>
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             className="text-indigo-600 hover:text-indigo-700"
             onClick={() => setShowAll(!showAll)}
           >
             {showAll ? 'Show Less' : 'View All'}
           </Button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          {([
+            { key: 'all', label: 'All', color: 'bg-indigo-100 text-indigo-800' },
+            { key: 'brand', label: 'Brand', color: 'bg-green-100 text-green-800' },
+            { key: 'competitor', label: 'Competitor', color: 'bg-blue-100 text-blue-800' },
+            { key: 'neutral', label: 'Neutral', color: 'bg-gray-100 text-gray-800' },
+          ] as const).map(({ key, label, color }) => (
+            <button
+              key={key}
+              onClick={() => setTypeFilter(key)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                typeFilter === key ? color : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              {label} ({typeCounts[key]})
+            </button>
+          ))}
         </div>
 
         {(sources || []).length === 0 ? (
@@ -162,7 +191,7 @@ export default function TopSources({ runId }: { runId?: string }) {
                       <div className="flex items-center space-x-2">
                         <div className="text-right">
                           <p className="text-sm font-semibold text-slate-900">{source.citationCount}</p>
-                          <p className="text-xs text-slate-500">mentions</p>
+                          <p className="text-xs text-slate-500">citations</p>
                         </div>
                         {isExpanded ? (
                           <ChevronDown className="w-4 h-4 text-slate-400" />

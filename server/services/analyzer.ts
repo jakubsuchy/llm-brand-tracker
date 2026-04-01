@@ -17,6 +17,7 @@ export interface AnalysisProgress {
   progress: number; // 0-100
   totalPrompts?: number;
   completedPrompts?: number;
+  failedCount?: number;
 }
 
 /**
@@ -63,15 +64,21 @@ export async function getAnalysisProgressFromDB(): Promise<AnalysisProgress> {
     return { status: 'initializing', message: 'Preparing analysis...', progress: 10, totalPrompts: 0, completedPrompts: 0 };
   }
 
-  const completedCount = progress.completed + progress.failed;
-  const pct = Math.round((completedCount / progress.total) * 100);
+  // Count original jobs only (no retries) for the progress denominator
+  // Retries have original_job_id set, originals don't
+  const terminalFailures = (await storage.getFailedJobs(latestRun.id)).length;
+  // Original job count = total jobs without original_job_id
+  const originalTotal = latestRun.totalPrompts || progress.total;
+  const doneCount = progress.completed + terminalFailures;
+  const pct = Math.round((doneCount / originalTotal) * 100);
 
   return {
     status: 'testing_prompts',
-    message: `Testing prompts... (${completedCount}/${progress.total})`,
-    progress: pct,
-    totalPrompts: progress.total,
-    completedPrompts: completedCount,
+    message: `Testing prompts... (${progress.completed} done${terminalFailures > 0 ? `, ${terminalFailures} failed` : ''}/${originalTotal})`,
+    progress: Math.min(pct, 99),
+    totalPrompts: originalTotal,
+    completedPrompts: progress.completed,
+    failedCount: terminalFailures,
   };
 }
 
@@ -255,6 +262,9 @@ export class BrandAnalyzer {
 
         const job = await storage.dequeueJob(analysisRunId);
         if (!job) {
+          // Small delay before checking — allow any in-flight failJob to create retry jobs
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+
           // Check if we should exit: no pending and no processing jobs
           const progress = await storage.getJobQueueProgress(analysisRunId);
           if (progress.pending === 0 && progress.processing === 0) {
@@ -267,7 +277,6 @@ export class BrandAnalyzer {
             console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: stall timeout exceeded, exiting`);
             break;
           }
-          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
           continue;
         }
 
@@ -285,7 +294,6 @@ export class BrandAnalyzer {
           console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message}`);
 
           if (isRateLimit) {
-            // Back off before picking up next job
             const backoff = Math.pow(2, Math.min(job.attempts, 5)) * 2000;
             console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: rate limited, backing off ${Math.round(backoff / 1000)}s`);
             await new Promise(resolve => setTimeout(resolve, backoff));
@@ -293,8 +301,8 @@ export class BrandAnalyzer {
         }
 
         // Update run progress
-        const progress = await storage.getJobQueueProgress(analysisRunId);
-        const completedCount = progress.completed + progress.failed;
+        const queueProgress = await storage.getJobQueueProgress(analysisRunId);
+        const completedCount = queueProgress.completed + queueProgress.failed;
         await storage.updateAnalysisRunProgress(analysisRunId, completedCount);
       }
     });

@@ -21,6 +21,16 @@ interface AnalysisProgress {
   progress: number;
   totalPrompts?: number;
   completedPrompts?: number;
+  failedCount?: number;
+}
+
+interface FailedJob {
+  id: number;
+  provider: string;
+  promptText: string;
+  error: string;
+  attempts: number;
+  failedAt: string;
 }
 
 export default function AnalysisProgressPage() {
@@ -28,7 +38,13 @@ export default function AnalysisProgressPage() {
 
   const { data: progress, refetch, isLoading } = useQuery<AnalysisProgress>({
     queryKey: ['/api/analysis/progress'],
-    refetchInterval: isRunning ? 2000 : false, // Poll every 2 seconds when running
+    refetchInterval: isRunning ? 2000 : false,
+    enabled: true,
+  });
+
+  const { data: failures } = useQuery<FailedJob[]>({
+    queryKey: ['/api/analysis/failures'],
+    refetchInterval: isRunning ? 5000 : false,
     enabled: true,
   });
 
@@ -190,14 +206,40 @@ export default function AnalysisProgressPage() {
             )}
 
             {progress?.totalPrompts && progress?.completedPrompts !== undefined && (
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
-                  <span className="text-gray-600">Total Prompts:</span>
+                  <span className="text-gray-600">Total Tasks:</span>
                   <span className="font-medium ml-2">{progress.totalPrompts}</span>
                 </div>
                 <div>
                   <span className="text-gray-600">Completed:</span>
-                  <span className="font-medium ml-2">{progress.completedPrompts}</span>
+                  <span className="font-medium ml-2 text-green-700">{progress.completedPrompts}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Failed:</span>
+                  <span className={`font-medium ml-2 ${(progress.failedCount || 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {progress.failedCount || 0}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {failures && failures.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <h4 className="text-sm font-medium text-red-700 flex items-center gap-1">
+                  <XCircle className="h-4 w-4" />
+                  Failed Tasks ({failures.length})
+                </h4>
+                <div className="max-h-48 overflow-y-auto space-y-2">
+                  {failures.map(f => (
+                    <div key={f.id} className="bg-red-50 p-3 rounded-lg border border-red-200 text-sm">
+                      <div className="flex justify-between items-start">
+                        <span className="font-medium text-red-900">[{f.provider}] {f.promptText.substring(0, 80)}...</span>
+                        <Badge variant="outline" className="text-xs text-red-600 shrink-0 ml-2">attempt {f.attempts}</Badge>
+                      </div>
+                      <p className="text-red-700 mt-1 text-xs font-mono">{f.error}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

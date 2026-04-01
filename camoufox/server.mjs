@@ -2,20 +2,7 @@ import http from 'http';
 import { resolve } from 'path';
 import { readdirSync } from 'fs';
 import { execSync } from 'child_process';
-import { createRequire } from 'module';
 import { Camoufox } from 'camoufox-js';
-
-// Import crawlee's Cloudflare handler (exports field blocks subpath imports, so use require)
-let handleCloudflareChallenge;
-try {
-  const _require = createRequire(import.meta.url);
-  const mod = _require('/app/node_modules/@crawlee/playwright/internals/utils/playwright-utils.js');
-  handleCloudflareChallenge = mod.playwrightUtils.handleCloudflareChallenge;
-  console.log('[Camoufox] Loaded Crawlee Cloudflare handler');
-} catch (e) {
-  console.log(`[Camoufox] Could not load Crawlee Cloudflare handler: ${e.message}`);
-  handleCloudflareChallenge = async () => {};
-}
 
 const port = parseInt(process.env.CAMOUFOX_PORT || '8888');
 const profileDir = resolve(process.env.BROWSER_PROFILE_PATH || '/tmp/browser-profile');
@@ -23,15 +10,11 @@ const apiKey = process.env.CAMOUFOX_API_KEY || '';
 const apifyProxyPassword = process.env.APIFY_PROXY_PASSWORD || '';
 const apifyProxyCountry = process.env.APIFY_PROXY_COUNTRY || 'US';
 
-// Stable session ID for the container lifetime — same residential IP across all requests.
-// Restarting the container rotates the IP.
-const proxySessionId = apifyProxyPassword ? `camoufox${Date.now()}` : '';
-
 console.log(`[Camoufox] Starting on port ${port}`);
 console.log(`[Camoufox] DISPLAY=${process.env.DISPLAY}`);
 console.log(`[Camoufox] Profile: ${profileDir}`);
 console.log(`[Camoufox] Auth: ${apiKey ? 'enabled' : 'disabled'}`);
-console.log(`[Camoufox] Proxy: ${apifyProxyPassword ? `Apify residential (country: ${apifyProxyCountry}, session: ${proxySessionId})` : 'disabled'}`);
+console.log(`[Camoufox] Proxy: ${apifyProxyPassword ? `Apify residential (country: ${apifyProxyCountry}, new IP per request)` : 'disabled'}`);
 
 // ─── Load providers ───────────────────────────────────────────────
 
@@ -48,15 +31,27 @@ for (const file of providerFiles) {
 
 // ─── Browser helpers ──────────────────────────────────────────────
 
-function buildBrowserOpts() {
+// Per-provider sticky sessions (stable IP for providers that need login persistence)
+const stickySessions = {};
+
+function buildBrowserOpts(providerName) {
   const opts = {
     headless: false,
     geoip: !!apifyProxyPassword,
   };
   if (apifyProxyPassword) {
+    const provider = providers[providerName];
+    const useStickySession = provider?.config?.stickySession;
+    const usernameParts = [`groups-RESIDENTIAL`, `country-${apifyProxyCountry}`];
+    if (useStickySession) {
+      if (!stickySessions[providerName]) {
+        stickySessions[providerName] = `${providerName}${Date.now()}`;
+      }
+      usernameParts.push(`session-${stickySessions[providerName]}`);
+    }
     opts.proxy = {
       server: 'http://proxy.apify.com:8000',
-      username: `groups-RESIDENTIAL,session-${proxySessionId},country-${apifyProxyCountry}`,
+      username: usernameParts.join(','),
       password: apifyProxyPassword,
     };
   }
@@ -81,7 +76,7 @@ async function startupTest() {
 
   if (apifyProxyPassword) {
     try {
-      const username = `groups-RESIDENTIAL,session-${proxySessionId},country-${apifyProxyCountry}`;
+      const username = `groups-RESIDENTIAL,country-${apifyProxyCountry}`;
       const curlResult = execSync(
         `curl -s --max-time 10 -x "http://proxy.apify.com:8000" -U "${username}:${apifyProxyPassword}" https://httpbin.org/ip`,
         { encoding: 'utf8' }
@@ -129,7 +124,7 @@ async function runPrompt(providerName, question, credentials) {
   if (!provider) throw new Error(`Unknown provider: ${providerName}. Available: ${Object.keys(providers).join(', ')}`);
 
   console.log(`[Camoufox] Launching browser for ${providerName}...`);
-  const browser = await Camoufox(buildBrowserOpts());
+  const browser = await Camoufox(buildBrowserOpts(providerName));
   const page = await browser.newPage();
 
   let result = null;
@@ -137,11 +132,20 @@ async function runPrompt(providerName, question, credentials) {
     console.log(`[Camoufox] Navigating to ${provider.url}...`);
     await page.goto(provider.url, { waitUntil: 'load', timeout: 60000 });
 
-    // Handle Cloudflare challenge if present
-    try {
-      await handleCloudflareChallenge(page, provider.url, null, { verbose: true });
-    } catch (e) {
-      console.log(`[Camoufox] Cloudflare: ${e.message}`);
+    // Detect Cloudflare challenge — fail fast so retry gets a fresh IP
+    const isChallenge = await page.evaluate(() => {
+      const body = document.body?.innerText || '';
+      return body.includes('Verify you are human') || body.includes('Just a moment')
+        || body.includes('security verification') || body.includes('Checking your browser');
+    }).catch(() => false);
+
+    if (isChallenge) {
+      // Rotate sticky session for this provider — current IP is burned
+      if (stickySessions[providerName]) {
+        stickySessions[providerName] = `${providerName}${Date.now()}`;
+        console.log(`[Camoufox] Rotated ${providerName} session due to Cloudflare`);
+      }
+      throw new Error('Cloudflare challenge detected — retrying with new IP');
     }
 
     console.log(`[Camoufox] Page loaded, running handler...`);
@@ -232,6 +236,12 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify(result));
       } catch (err) {
         busy = false;
+        // Rotate sticky session if proxy connection was refused
+        if (err.message?.includes('NS_ERROR_PROXY_CONNECTION_REFUSED') && stickySessions[provider]) {
+          const oldSession = stickySessions[provider];
+          stickySessions[provider] = `${provider}${Date.now()}`;
+          console.log(`[Camoufox] Rotated ${provider} session: ${oldSession} → ${stickySessions[provider]}`);
+        }
         console.error('[Camoufox] Error:', err.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

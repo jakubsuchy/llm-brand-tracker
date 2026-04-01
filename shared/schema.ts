@@ -122,6 +122,7 @@ export const jobQueue = pgTable("job_queue", {
   attempts: integer("attempts").default(0),
   maxAttempts: integer("max_attempts").default(3),
   lastError: text("last_error"),
+  originalJobId: integer("original_job_id"),  // links retries back to the first job in the chain
   lockedAt: timestamp("locked_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),

@@ -948,6 +948,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get failed jobs for the latest (or specific) analysis run
+  app.get("/api/analysis/failures", async (req, res) => {
+    try {
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      let targetRunId = runId;
+      if (!targetRunId) {
+        const latestRun = await storage.getLatestAnalysisRun();
+        targetRunId = latestRun?.id;
+      }
+      if (!targetRunId) {
+        return res.json([]);
+      }
+      const failures = await storage.getFailedJobs(targetRunId);
+      res.json(failures.map(j => ({
+        id: j.id,
+        provider: j.provider,
+        promptText: j.promptText,
+        error: j.lastError,
+        attempts: j.attempts,
+        failedAt: j.completedAt,
+      })));
+    } catch (error) {
+      console.error("Error fetching failures:", error);
+      res.status(500).json({ error: "Failed to fetch failures" });
+    }
+  });
+
   // Get analysis progress for a specific session (reads from job_queue)
   app.get("/api/analysis/:sessionId/progress", async (req, res) => {
     try {

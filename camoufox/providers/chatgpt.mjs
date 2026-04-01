@@ -19,6 +19,7 @@ function generateTOTP() {
 
 export const config = {
   requiresAuth: false,
+  stickySession: true, // keep same IP across requests (for login persistence)
 };
 
 export async function handler({ page }, question, { email, password }) {

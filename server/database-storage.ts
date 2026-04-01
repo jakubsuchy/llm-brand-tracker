@@ -593,19 +593,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void> {
-    if (shouldRetry) {
-      // Check if we've exceeded max attempts
-      const [job] = await db.select().from(jobQueue).where(eq(jobQueue.id, jobId));
-      if (job && job.attempts < (job.maxAttempts || 3)) {
-        await db.update(jobQueue)
-          .set({ status: 'pending', lockedAt: null, lastError: error })
-          .where(eq(jobQueue.id, jobId));
-        return;
-      }
-    }
+    // Always mark the current job as failed with the error
+    const [job] = await db.select().from(jobQueue).where(eq(jobQueue.id, jobId));
     await db.update(jobQueue)
-      .set({ status: 'failed', lastError: error })
+      .set({ status: 'failed', lastError: error, completedAt: new Date() })
       .where(eq(jobQueue.id, jobId));
+
+    // If retryable and under max attempts, create a new job for the retry
+    if (shouldRetry && job && job.attempts < (job.maxAttempts || 3)) {
+      // Link back to the original job in the chain (first failure's id)
+      const originalId = job.originalJobId || job.id;
+      await db.insert(jobQueue).values({
+        analysisRunId: job.analysisRunId,
+        promptId: job.promptId,
+        promptText: job.promptText,
+        promptTopicId: job.promptTopicId,
+        promptIsExisting: job.promptIsExisting,
+        provider: job.provider,
+        status: 'pending',
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
+        lastError: null,
+        originalJobId: originalId,
+      });
+    }
   }
 
   async getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress> {
@@ -631,19 +642,90 @@ export class DatabaseStorage implements IStorage {
   }
 
   async recoverStalledJobs(stallTimeoutMs: number = 300000): Promise<number> {
+    // Find stalled jobs
+    const stalledJobs = await db.select().from(jobQueue)
+      .where(sql`${jobQueue.status} = 'processing' AND ${jobQueue.lockedAt} < NOW() - INTERVAL '1 millisecond' * ${stallTimeoutMs}`);
+
+    for (const job of stalledJobs) {
+      // Mark as failed with the stall reason
+      await db.update(jobQueue)
+        .set({ status: 'failed', lastError: 'Stalled — container crashed or timed out', completedAt: new Date() })
+        .where(eq(jobQueue.id, job.id));
+
+      // Create a retry job if under max attempts
+      if (job.attempts < (job.maxAttempts || 3)) {
+        const originalId = job.originalJobId || job.id;
+        await db.insert(jobQueue).values({
+          analysisRunId: job.analysisRunId,
+          promptId: job.promptId,
+          promptText: job.promptText,
+          promptTopicId: job.promptTopicId,
+          promptIsExisting: job.promptIsExisting,
+          provider: job.provider,
+          status: 'pending',
+          attempts: job.attempts,
+          maxAttempts: job.maxAttempts,
+          lastError: null,
+          originalJobId: originalId,
+        });
+      }
+    }
+
+    return stalledJobs.length;
+  }
+
+  async getFailedJobs(analysisRunId: number): Promise<JobQueueItem[]> {
+    // Only return terminal failures: failed jobs where no retry in the same chain succeeded.
+    // A chain is linked by original_job_id. The last failed job in a chain with no
+    // completed/pending sibling is a terminal failure.
     const result = await db.execute(sql`
-      UPDATE job_queue
-      SET status = 'pending', locked_at = NULL
-      WHERE status = 'processing'
-        AND locked_at < NOW() - INTERVAL '1 millisecond' * ${stallTimeoutMs}
+      SELECT f.* FROM job_queue f
+      WHERE f.analysis_run_id = ${analysisRunId}
+        AND f.status = 'failed'
+        -- No completed or pending/processing job shares this chain
+        AND NOT EXISTS (
+          SELECT 1 FROM job_queue s
+          WHERE s.analysis_run_id = ${analysisRunId}
+            AND s.status IN ('completed', 'pending', 'processing')
+            AND (
+              -- same chain: both point to the same original, or one IS the original
+              s.original_job_id = COALESCE(f.original_job_id, f.id)
+              OR s.id = COALESCE(f.original_job_id, f.id)
+              OR COALESCE(s.original_job_id, s.id) = COALESCE(f.original_job_id, f.id)
+            )
+        )
+        -- Only show the latest failure per chain
+        AND f.id = (
+          SELECT MAX(f2.id) FROM job_queue f2
+          WHERE f2.analysis_run_id = ${analysisRunId}
+            AND f2.status = 'failed'
+            AND COALESCE(f2.original_job_id, f2.id) = COALESCE(f.original_job_id, f.id)
+        )
+      ORDER BY f.id DESC
     `);
-    const count = (result as any).rowCount ?? ((result as any).rows?.length ?? 0);
-    return Number(count);
+    const rows = (result as any).rows ?? result;
+    return (rows as any[]).map(r => ({
+      id: r.id,
+      analysisRunId: r.analysis_run_id,
+      promptId: r.prompt_id,
+      promptText: r.prompt_text,
+      promptTopicId: r.prompt_topic_id,
+      promptIsExisting: r.prompt_is_existing,
+      provider: r.provider,
+      status: r.status,
+      attempts: r.attempts,
+      maxAttempts: r.max_attempts,
+      lastError: r.last_error,
+      originalJobId: r.original_job_id,
+      lockedAt: r.locked_at ? new Date(r.locked_at) : null,
+      completedAt: r.completed_at ? new Date(r.completed_at) : null,
+      createdAt: r.created_at ? new Date(r.created_at) : null,
+    }));
   }
 
   async cancelJobsForRun(analysisRunId: number): Promise<void> {
     await db.update(jobQueue)
-      .set({ status: 'failed', lastError: 'Cancelled by user' })
+      .set({ status: 'cancelled', completedAt: new Date() })
       .where(sql`${jobQueue.analysisRunId} = ${analysisRunId} AND (${jobQueue.status} = 'pending' OR ${jobQueue.status} = 'processing')`);
   }
 

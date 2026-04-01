@@ -114,15 +114,10 @@ Rules:
 async function getResponseViaBrowser(prompt: string, provider: string): Promise<{ responseText: string; sources: string[] }> {
   const { askBrowser } = await import('./chatgpt-browser');
 
-  // Only chatgpt requires credentials
-  const credentials = provider === 'chatgpt' ? {
-    email: process.env.CHATGPT_EMAIL || '',
-    password: process.env.CHATGPT_PASSWORD || '',
-  } : undefined;
-
-  if (provider === 'chatgpt' && (!credentials?.email || !credentials?.password)) {
-    throw new Error('CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for ChatGPT browser mode');
-  }
+  // Pass credentials if available (ChatGPT works without them in anonymous mode)
+  const email = process.env.CHATGPT_EMAIL || '';
+  const password = process.env.CHATGPT_PASSWORD || '';
+  const credentials = (email && password) ? { email, password } : undefined;
 
   const result = await askBrowser(prompt, provider as any, credentials);
 

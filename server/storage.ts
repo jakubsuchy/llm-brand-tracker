@@ -112,6 +112,7 @@ export interface IStorage {
   failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void>;
   getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress>;
   recoverStalledJobs(stallTimeoutMs?: number): Promise<number>;
+  getFailedJobs(analysisRunId: number): Promise<JobQueueItem[]>;
   cancelJobsForRun(analysisRunId: number): Promise<void>;
 
   // Data clearing methods
@@ -541,6 +542,7 @@ export class MemStorage implements IStorage {
   async failJob(_jobId: number, _error: string, _shouldRetry: boolean): Promise<void> {}
   async getJobQueueProgress(_analysisRunId: number): Promise<JobQueueProgress> { return { total: 0, pending: 0, processing: 0, completed: 0, failed: 0 }; }
   async recoverStalledJobs(_stallTimeoutMs?: number): Promise<number> { return 0; }
+  async getFailedJobs(_analysisRunId: number): Promise<JobQueueItem[]> { return []; }
   async cancelJobsForRun(_analysisRunId: number): Promise<void> {}
 
   async clearAllPrompts(): Promise<void> {

@@ -1,5 +1,4 @@
 import { URL } from 'url';
-import axios from "axios";
 import * as cheerio from "cheerio";
 
 export interface ScrapedContent {
@@ -88,7 +87,8 @@ export async function fetchWebsiteText(url: string): Promise<string> {
     if (!/^https?:\/\//i.test(url)) {
       url = 'https://' + url;
     }
-    const { data: html } = await axios.get(url, { timeout: 10000 });
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const html = await res.text();
     const $ = cheerio.load(html);
     // Try to get the main content, fallback to body text
     let mainText = $("main").text() || $("body").text();
