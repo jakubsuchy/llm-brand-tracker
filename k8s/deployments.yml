@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: llm-brand-tracker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "admin", "-d", "brand_tracker"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "admin", "-d", "brand_tracker"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: llm-brand-tracker
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: camoufox
+  namespace: llm-brand-tracker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: camoufox
+  template:
+    metadata:
+      labels:
+        app: camoufox
+    spec:
+      containers:
+        - name: camoufox
+          image: ghcr.io/jakubsuchy/llm-brand-tracker/camoufox:latest
+          ports:
+            - containerPort: 8888
+            - containerPort: 5900
+            - containerPort: 6080
+          envFrom:
+            - secretRef:
+                name: camoufox-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8888
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: llm-brand-tracker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/jakubsuchy/llm-brand-tracker/app:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: CAMOUFOX_URL
+              value: "http://camoufox:8888"
+            - name: NODE_ENV
+              value: "production"
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          command: ["sh", "-c"]
+          args:
+            - |
+              export DATABASE_URL="postgresql://admin:${DATABASE_URL}@postgres:5432/brand_tracker"
+              npx drizzle-kit push && node dist/index.js
+          readinessProbe:
+            httpGet:
+              path: /api/test
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/test
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
