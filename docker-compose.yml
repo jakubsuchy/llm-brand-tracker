@@ -16,21 +16,19 @@ services:
       timeout: 5s
       retries: 5
 
-  camoufox:
-    build: ./camoufox
+  browser-actor:
+    build: ./browser-actor
+    profiles: ["browser"]
     restart: unless-stopped
     ports:
       - "5900:5900"
       - "6080:6080"
     environment:
+      APIFY_META_ORIGIN: STANDBY
+      ACTOR_STANDBY_PORT: 8888
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
-      CAMOUFOX_API_KEY: ${CAMOUFOX_API_KEY:-}
-      APIFY_PROXY_PASSWORD: ${APIFY_PROXY_PASSWORD:-}
-      APIFY_PROXY_COUNTRY: ${APIFY_PROXY_COUNTRY:-US}
-    volumes:
-      - browser-profile:/tmp/browser-profile
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8888/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8888/ || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -44,18 +42,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      camoufox:
-        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://admin:password@db:5432/brand_tracker
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       CHATGPT_EMAIL: ${CHATGPT_EMAIL:-}
       CHATGPT_PASSWORD: ${CHATGPT_PASSWORD:-}
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
-      CAMOUFOX_URL: http://camoufox:8888
-      CAMOUFOX_API_KEY: ${CAMOUFOX_API_KEY:-}
+      BROWSER_ACTOR_URL: http://browser-actor:8888
+      APIFY_TOKEN: ${APIFY_TOKEN:-}
       NODE_ENV: production
 
 volumes:
   pgdata:
-  browser-profile:

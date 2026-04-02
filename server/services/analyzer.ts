@@ -163,23 +163,15 @@ export class BrandAnalyzer {
       let activeProviders: string[] = [];
 
       try {
-        const camoufoxUrl = process.env.CAMOUFOX_URL || 'http://camoufox:8888';
-        const fetchHeaders: Record<string, string> = {};
-        if (process.env.CAMOUFOX_API_KEY) fetchHeaders['Authorization'] = `Bearer ${process.env.CAMOUFOX_API_KEY}`;
-        const providersRes = await fetch(`${camoufoxUrl}/providers`, { headers: fetchHeaders });
-        if (providersRes.ok) {
-          const { providers } = await providersRes.json() as { providers: { name: string; requiresAuth: boolean }[] };
-          for (const p of providers) {
-            if (!p.requiresAuth || (process.env.CHATGPT_EMAIL && process.env.CHATGPT_PASSWORD)) {
-              activeProviders.push(p.name);
-            }
-          }
+        const { isBrowserAvailable } = await import('./chatgpt-browser');
+        if (await isBrowserAvailable()) {
+          activeProviders.push('chatgpt', 'perplexity');
         }
       } catch {
-        console.log(`[${new Date().toISOString()}] Camoufox not available, skipping browser providers`);
+        console.log(`[${new Date().toISOString()}] Browser actor not available, skipping browser providers`);
       }
 
-      // Only include API provider if no browser providers are available
+      // Fallback to API-only if no browser providers
       if (activeProviders.length === 0) {
         activeProviders.push('api');
       }
@@ -287,9 +279,10 @@ export class BrandAnalyzer {
           await storage.completeJob(job.id);
         } catch (error: any) {
           const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
+          const isAborted = error?.message?.startsWith('ABORTED:');
           const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
-          // Retry everything except quota errors — browser failures, timeouts, etc. are transient
-          const shouldRetry = !isQuota;
+          // Retry everything except quota and aborted errors
+          const shouldRetry = !isQuota && !isAborted;
           await storage.failJob(job.id, error.message || 'Unknown error', shouldRetry);
           console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message}`);
 

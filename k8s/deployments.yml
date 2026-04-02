@@ -56,7 +56,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: camoufox
+  name: browser-actor
   namespace: llm-brand-tracker
 spec:
   replicas: 1
@@ -64,31 +64,36 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: camoufox
+      app: browser-actor
   template:
     metadata:
       labels:
-        app: camoufox
+        app: browser-actor
     spec:
       containers:
-        - name: camoufox
-          image: ghcr.io/jakubsuchy/llm-brand-tracker/camoufox:latest
+        - name: browser-actor
+          image: ghcr.io/jakubsuchy/llm-brand-tracker/browser-actor:latest
           ports:
             - containerPort: 8888
             - containerPort: 5900
             - containerPort: 6080
+          env:
+            - name: APIFY_META_ORIGIN
+              value: STANDBY
+            - name: ACTOR_STANDBY_PORT
+              value: "8888"
           envFrom:
             - secretRef:
-                name: camoufox-secrets
+                name: browser-actor-secrets
           readinessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8888
             initialDelaySeconds: 15
             periodSeconds: 5
           livenessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8888
             initialDelaySeconds: 30
             periodSeconds: 10
@@ -119,8 +124,8 @@ spec:
                 secretKeyRef:
                   name: postgres-credentials
                   key: POSTGRES_PASSWORD
-            - name: CAMOUFOX_URL
-              value: "http://camoufox:8888"
+            - name: BROWSER_ACTOR_URL
+              value: "http://browser-actor:8888"
             - name: NODE_ENV
               value: "production"
           envFrom:

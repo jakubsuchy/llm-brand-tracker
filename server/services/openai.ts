@@ -109,17 +109,12 @@ Rules:
   }
 }
 
-// --- Browser method: send to camoufox container, supports multiple providers ---
+// --- Browser method: send to browser actor (local or Apify Cloud) ---
 
 async function getResponseViaBrowser(prompt: string, provider: string): Promise<{ responseText: string; sources: string[] }> {
   const { askBrowser } = await import('./chatgpt-browser');
 
-  // Pass credentials if available (ChatGPT works without them in anonymous mode)
-  const email = process.env.CHATGPT_EMAIL || '';
-  const password = process.env.CHATGPT_PASSWORD || '';
-  const credentials = (email && password) ? { email, password } : undefined;
-
-  const result = await askBrowser(prompt, provider as any, credentials);
+  const result = await askBrowser(prompt, provider as any);
 
   // Extract URLs from markdown links in the response text
   const urlSources: string[] = [];

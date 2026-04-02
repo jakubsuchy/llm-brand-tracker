@@ -1,0 +1,22 @@
+{
+    "name": "llm-prompt-response",
+    "version": "0.0.1",
+    "type": "module",
+    "description": "Apify Actor that submits prompts to LLM providers (ChatGPT, Perplexity) via Camoufox browser automation and returns structured responses with sources.",
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "dependencies": {
+        "apify": "^3.4.2",
+        "crawlee": "^3.13.8",
+        "camoufox-js": "^0.9.3",
+        "playwright-core": "^1.58.2",
+        "otpauth": "^9.5.0"
+    },
+    "scripts": {
+        "start": "node src/main.js",
+        "test": "echo 'Error: no tests yet' && exit 1"
+    },
+    "author": "",
+    "license": "ISC"
+}

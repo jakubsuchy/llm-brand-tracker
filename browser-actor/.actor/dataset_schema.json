@@ -1,0 +1,41 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "overview": {
+            "title": "LLM Responses",
+            "transformation": {
+                "fields": ["provider", "question", "answer", "sources", "url", "timestamp"]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "provider": {
+                        "label": "Provider",
+                        "format": "text"
+                    },
+                    "question": {
+                        "label": "Prompt",
+                        "format": "text"
+                    },
+                    "answer": {
+                        "label": "Response",
+                        "format": "text"
+                    },
+                    "sources": {
+                        "label": "Sources",
+                        "format": "array"
+                    },
+                    "url": {
+                        "label": "Page URL",
+                        "format": "link"
+                    },
+                    "timestamp": {
+                        "label": "Timestamp",
+                        "format": "date"
+                    }
+                }
+            }
+        }
+    }
+}

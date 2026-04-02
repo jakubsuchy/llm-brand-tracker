@@ -1,0 +1,17 @@
+{
+    "actorSpecification": 1,
+    "name": "llm-prompt-response",
+    "title": "LLM Prompt Response",
+    "description": "Submits prompts to LLM providers (ChatGPT, Perplexity) via Camoufox anti-detect browser and captures structured responses with sources.",
+    "version": "0.0",
+    "meta": {
+        "templateId": "ai-generated-actor",
+        "generatedBy": "claude-opus-4-6"
+    },
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "../Dockerfile"
+}

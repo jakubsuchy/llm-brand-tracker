@@ -4,3 +4,5 @@ npm-debug.log
 .env
 .DS_Store
 .claude
+browser-actor/node_modules
+browser-actor/storage

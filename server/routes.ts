@@ -123,6 +123,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error('[RECOVERY] Crash recovery failed:', error);
   }
 
+  // --- Browser actor health check ---
+  try {
+    const { isBrowserAvailable } = await import('./services/chatgpt-browser');
+    if (process.env.APIFY_TOKEN) {
+      console.log('[STARTUP] Browser mode: Apify Cloud (APIFY_TOKEN set)');
+    } else if (await isBrowserAvailable()) {
+      console.log(`[STARTUP] Browser mode: local container (${process.env.BROWSER_ACTOR_URL || 'http://browser-actor:8888'})`);
+    } else {
+      console.log('[STARTUP] Browser actor not available — browser providers disabled, API-only mode');
+      if (!process.env.APIFY_TOKEN) {
+        console.log('[STARTUP] To enable browser providers: set APIFY_TOKEN or start with --profile browser');
+      }
+    }
+  } catch (error) {
+    console.error('[STARTUP] Browser health check failed:', error);
+  }
+
   // Test analysis endpoint - process just one prompt
   app.post("/api/test-analysis", async (req, res) => {
     try {
