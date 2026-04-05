@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Megaphone, MessageSquare, Trophy, Globe, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Megaphone, Trophy, Globe, TrendingUp, TrendingDown, Minus, BarChart3 } from "lucide-react";
 
 interface CompetitorAnalysis {
   competitorId: number;
@@ -46,6 +47,16 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
 
   const { data: competitorAnalysis } = useQuery<CompetitorAnalysis[]>({
     queryKey: [`/api/competitors/analysis${paramStr}`],
+  });
+
+  // Per-provider breakdown (only for "all providers" view)
+  const runOnlyParams = new URLSearchParams();
+  if (runId) runOnlyParams.set('runId', runId);
+  const runOnlyParamStr = runOnlyParams.toString() ? `?${runOnlyParams.toString()}` : '';
+
+  const { data: providerMetrics } = useQuery<{ provider: string; total: number; mentioned: number; rate: number }[]>({
+    queryKey: [`/api/metrics/by-provider${runOnlyParamStr}`],
+    enabled: !provider, // only fetch when viewing all providers
   });
 
   // Fetch all runs to find the previous one
@@ -168,23 +179,33 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
         </CardContent>
       </Card>
 
-      {/* Total Prompts */}
+      {/* Provider Performance */}
       <Card className="bg-white border-slate-200">
         <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-600">Total Prompts Tested</p>
-              <p className="text-2xl font-semibold text-slate-900 mt-1">{totalResponses}</p>
-            </div>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium text-slate-600">Provider Performance</p>
             <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-violet-600" />
+              <BarChart3 className="w-5 h-5 text-violet-600" />
             </div>
           </div>
-          <div className="mt-4">
-            <span className="text-sm font-medium text-slate-600">
-              {completedRuns.length} run{completedRuns.length !== 1 ? 's' : ''} completed
-            </span>
-          </div>
+          {providerMetrics && providerMetrics.length > 0 ? (
+            <div className="space-y-2">
+              {providerMetrics.map(p => (
+                <div key={p.provider} className="flex items-center gap-2">
+                  <span className="text-xs text-slate-600 w-20 truncate" title={p.provider}>{p.provider}</span>
+                  <Progress value={p.rate} className="h-2 flex-1" />
+                  <span className="text-xs font-semibold text-slate-900 w-10 text-right">{p.rate}%</span>
+                </div>
+              ))}
+            </div>
+          ) : provider ? (
+            <div className="text-sm text-slate-500">
+              <p className="text-2xl font-semibold text-slate-900">{(metrics?.brandMentionRate || 0).toFixed(1)}%</p>
+              <p className="text-xs mt-1">{provider} mention rate</p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No data yet</p>
+          )}
         </CardContent>
       </Card>
 

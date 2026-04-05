@@ -424,6 +424,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Per-provider brand mention rates
+  app.get("/api/metrics/by-provider", async (req, res) => {
+    try {
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const allResponses = await storage.getResponsesWithPrompts(runId);
+
+      // Group by provider, then by unique prompt text
+      const providerMap = new Map<string, Map<string, boolean>>();
+      for (const r of allResponses) {
+        const prov = r.provider || 'unknown';
+        if (!providerMap.has(prov)) providerMap.set(prov, new Map());
+        const promptMap = providerMap.get(prov)!;
+        const key = r.prompt?.text?.toLowerCase().trim() || '';
+        if (!promptMap.has(key)) promptMap.set(key, false);
+        if (r.brandMentioned) promptMap.set(key, true);
+      }
+
+      const results = [...providerMap.entries()].map(([provider, promptMap]) => {
+        const total = promptMap.size;
+        const mentioned = [...promptMap.values()].filter(Boolean).length;
+        return {
+          provider,
+          total,
+          mentioned,
+          rate: total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0,
+        };
+      }).sort((a, b) => b.rate - a.rate);
+
+      res.json(results);
+    } catch (error) {
+      console.error("Error fetching provider metrics:", error);
+      res.status(500).json({ error: "Failed to fetch provider metrics" });
+    }
+  });
+
   // Overview metrics endpoint
   app.get("/api/metrics", async (req, res) => {
     try {
