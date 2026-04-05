@@ -54,7 +54,7 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
   if (runId) runOnlyParams.set('runId', runId);
   const runOnlyParamStr = runOnlyParams.toString() ? `?${runOnlyParams.toString()}` : '';
 
-  const { data: providerMetrics } = useQuery<{ provider: string; total: number; mentioned: number; rate: number }[]>({
+  const { data: providerMetrics } = useQuery<{ provider: string; label: string; total: number; mentioned: number; rate: number }[]>({
     queryKey: [`/api/metrics/by-provider${runOnlyParamStr}`],
     enabled: !provider, // only fetch when viewing all providers
   });
@@ -192,7 +192,7 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
             <div className="space-y-2">
               {providerMetrics.map(p => (
                 <div key={p.provider} className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600 w-20 truncate" title={p.provider}>{p.provider}</span>
+                  <span className="text-xs text-slate-600 w-20 truncate" title={p.label}>{p.label}</span>
                   <Progress value={p.rate} className="h-2 flex-1" />
                   <span className="text-xs font-semibold text-slate-900 w-10 text-right">{p.rate}%</span>
                 </div>

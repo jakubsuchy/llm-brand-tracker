@@ -441,11 +441,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (r.brandMentioned) promptMap.set(key, true);
       }
 
+      // Get display labels from provider config
+      const defaultLabels: Record<string, string> = { perplexity: 'Perplexity', chatgpt: 'ChatGPT', gemini: 'Google Gemini' };
+      const provConfigRaw = await storage.getSetting('providersConfig');
+      const provConfig = provConfigRaw ? JSON.parse(provConfigRaw) : {};
+
       const results = [...providerMap.entries()].map(([provider, promptMap]) => {
         const total = promptMap.size;
         const mentioned = [...promptMap.values()].filter(Boolean).length;
         return {
           provider,
+          label: provConfig[provider]?.label || defaultLabels[provider] || provider,
           total,
           mentioned,
           rate: total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0,
@@ -717,63 +723,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
 
-      if (provider) {
-        // When filtering by provider, compute competitor mentions from responses directly
-        let allResponses = await storage.getResponsesWithPrompts(runId);
-        allResponses = allResponses.filter(r => r.provider === provider);
-        const totalResponses = allResponses.length;
+      // Unified approach: count unique prompts where each competitor was mentioned
+      let allResponses = await storage.getResponsesWithPrompts(runId);
+      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
 
-        // Build mention counts from competitorsMentioned arrays
-        const mentionCounts = new Map<string, number>();
-        for (const r of allResponses) {
-          if (r.competitorsMentioned && Array.isArray(r.competitorsMentioned)) {
-            for (const name of r.competitorsMentioned) {
-              mentionCounts.set(name, (mentionCounts.get(name) || 0) + 1);
-            }
+      // Count unique prompts total
+      const uniquePrompts = new Set(allResponses.map(r => r.prompt?.text?.toLowerCase().trim() || ''));
+      const totalUniquePrompts = uniquePrompts.size;
+
+      // For each competitor: count unique prompts where they were mentioned
+      const competitorPrompts = new Map<string, Set<string>>();
+      for (const r of allResponses) {
+        const promptKey = r.prompt?.text?.toLowerCase().trim() || '';
+        if (r.competitorsMentioned && Array.isArray(r.competitorsMentioned)) {
+          for (const name of r.competitorsMentioned) {
+            if (!competitorPrompts.has(name)) competitorPrompts.set(name, new Set());
+            competitorPrompts.get(name)!.add(promptKey);
           }
         }
-
-        // Map to competitor records for IDs and categories
-        const allCompetitors = await storage.getCompetitors();
-        const compByName = new Map(allCompetitors.map(c => [c.name.toLowerCase(), c]));
-
-        const analysis = [...mentionCounts.entries()].map(([name, count]) => {
-          const comp = compByName.get(name.toLowerCase());
-          return {
-            competitorId: comp?.id || 0,
-            name: comp?.name || name,
-            category: comp?.category || null,
-            mentionCount: count,
-            mentionRate: totalResponses > 0 ? (count / totalResponses) * 100 : 0,
-            changeRate: 0
-          };
-        });
-        res.json(analysis);
-      } else if (runId) {
-        const mentions = await storage.getCompetitorAnalysisByRun(runId);
-        const totalResponses = (await storage.getResponsesWithPrompts(runId)).length;
-        const analysis = mentions.map(m => ({
-          competitorId: m.competitorId,
-          name: m.name,
-          category: m.category,
-          mentionCount: m.mentionCount,
-          mentionRate: totalResponses > 0 ? (m.mentionCount / totalResponses) * 100 : 0,
-          changeRate: 0
-        }));
-        res.json(analysis);
-      } else {
-        const mentions = await storage.getCompetitorAnalysisAllRuns();
-        const totalResponses = (await storage.getResponsesWithPrompts()).length;
-        const analysis = mentions.map(m => ({
-          competitorId: m.competitorId,
-          name: m.name,
-          category: m.category,
-          mentionCount: m.mentionCount,
-          mentionRate: totalResponses > 0 ? (m.mentionCount / totalResponses) * 100 : 0,
-          changeRate: 0
-        }));
-        res.json(analysis);
       }
+
+      const allCompetitors = await storage.getCompetitors();
+      const compByName = new Map(allCompetitors.map(c => [c.name.toLowerCase(), c]));
+
+      const analysis = [...competitorPrompts.entries()].map(([name, prompts]) => {
+        const comp = compByName.get(name.toLowerCase());
+        const mentionCount = prompts.size;
+        return {
+          competitorId: comp?.id || 0,
+          name: comp?.name || name,
+          category: comp?.category || null,
+          mentionCount,
+          mentionRate: totalUniquePrompts > 0 ? (mentionCount / totalUniquePrompts) * 100 : 0,
+          changeRate: 0
+        };
+      }).sort((a, b) => b.mentionCount - a.mentionCount);
+
+      res.json(analysis);
     } catch (error) {
       console.error("Error fetching competitor analysis:", error);
       res.status(500).json({ error: "Failed to fetch competitor analysis" });
@@ -1551,10 +1537,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Providers configuration
-  const DEFAULT_PROVIDERS_CONFIG = {
-    perplexity: { enabled: true, type: 'browser' },
-    chatgpt: { enabled: true, type: 'browser' },
-    gemini: { enabled: false, type: 'browser' },
+  const DEFAULT_PROVIDERS_CONFIG: Record<string, any> = {
+    perplexity: { enabled: true, type: 'browser', label: 'Perplexity' },
+    chatgpt: { enabled: true, type: 'browser', label: 'ChatGPT' },
+    gemini: { enabled: false, type: 'browser', label: 'Google Gemini' },
   };
 
   app.get("/api/settings/providers", async (req, res) => {

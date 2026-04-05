@@ -30,6 +30,13 @@ export default function Dashboard() {
     queryKey: ['/api/analysis/runs'],
   });
 
+  const { data: providersConfig } = useQuery<Record<string, { enabled: boolean; label?: string }>>({
+    queryKey: ['/api/settings/providers'],
+  });
+  const enabledProviders = providersConfig
+    ? Object.entries(providersConfig).filter(([, v]) => v.enabled)
+    : [];
+
   const selectedRunId = urlRunId || 'all';
 
   const setSelectedRunId = (id: string) => {
@@ -63,9 +70,9 @@ export default function Dashboard() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Providers</SelectItem>
-              <SelectItem value="perplexity">Perplexity</SelectItem>
-              <SelectItem value="chatgpt">ChatGPT</SelectItem>
-              <SelectItem value="gemini">Gemini</SelectItem>
+              {enabledProviders.map(([key, config]) => (
+                <SelectItem key={key} value={key}>{config.label || key}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {analysisRuns && analysisRuns.length > 0 && (
