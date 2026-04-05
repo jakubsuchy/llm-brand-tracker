@@ -103,6 +103,23 @@ analytics (id, date, total_prompts, brand_mention_rate, top_competitor, ...)
 - Each prompt makes 2 OpenAI calls: generate response + analyze for brand/competitor mentions
 - Competitor categorization is an additional call, but only for new competitors (checked before calling)
 
+### Authentication & Route Protection
+
+All API routes are protected by PassportJS session auth. The auth guard is in `server/routes.ts`:
+
+- **Auth routes** (`/api/auth/*`, `/api/initialize`) are registered BEFORE the guard middleware, so they're automatically exempt
+- **Public API paths** that don't require auth (e.g., health checks) are listed in `server/config.ts` → `PUBLIC_API_PATHS` set
+- **All other `/api/*` routes** return 401 if not authenticated
+- **Role-based access**: use `requireRole('admin')` middleware on specific routes (e.g., `/api/users`)
+
+To make an API path public (no auth required):
+1. Add the path to `PUBLIC_API_PATHS` in `server/config.ts` (path is relative to `/api`, e.g., `'/test'` for `/api/test`)
+
+To protect a route with a specific role:
+1. Add `requireRole('admin')` (or other role) as middleware: `app.get("/api/thing", requireRole('admin'), handler)`
+
+Auth provider configs (Google OAuth, SAML) are stored in DB via `app_settings` key `authProviders`, configurable at `/users` → Auth Providers tab.
+
 ## Common Pitfalls
 
 - **Server bind**: Must be `0.0.0.0`, not `localhost`, for Docker

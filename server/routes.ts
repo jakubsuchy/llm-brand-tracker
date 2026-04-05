@@ -201,7 +201,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // --- Auth guard: protect all subsequent API routes ---
+  const { PUBLIC_API_PATHS } = await import('./config');
   app.use("/api", (req, res, next) => {
+    if (PUBLIC_API_PATHS.has(req.path)) return next();
     if (req.isAuthenticated()) return next();
     res.status(401).json({ message: "Not authenticated" });
   });
