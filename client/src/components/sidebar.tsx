@@ -9,11 +9,15 @@ import {
   User,
   Activity,
   Zap,
-  Scale
+  Scale,
+  Shield,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Sidebar() {
   const [location] = useLocation();
+  const { user, logout, hasRole } = useAuth();
 
   const navigationItems = [
     { id: "prompt-generator", label: "Prompt Generator", icon: Zap, path: "/prompt-generator" },
@@ -24,6 +28,7 @@ export default function Sidebar() {
     { id: "sources", label: "Sources", icon: ExternalLink, path: "/sources" },
     { id: "analysis", label: "Analysis Progress", icon: Activity, path: "/analysis-progress" },
     { id: "settings", label: "Settings", icon: Settings, path: "/settings" },
+    ...(hasRole('admin') ? [{ id: 'users', label: 'Users', icon: Shield, path: '/users' }] : []),
   ];
 
   return (
@@ -67,14 +72,7 @@ export default function Sidebar() {
           })}
         </div>
 
-        {/* Status Indicator */}
-        <div className="mt-8 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-medium text-emerald-700">API Connected</span>
-          </div>
-          <p className="text-xs text-emerald-600 mt-1">Last sync: 2 min ago</p>
-        </div>
+
       </nav>
 
       {/* User Profile */}
@@ -83,10 +81,17 @@ export default function Sidebar() {
           <div className="w-8 h-8 bg-slate-300 rounded-full flex items-center justify-center">
             <User className="w-4 h-4 text-slate-600" />
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-slate-900">Analysis User</p>
-            <p className="text-xs text-slate-500">Brand Analyst</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-slate-900 truncate">{user?.fullName || 'User'}</p>
+            <p className="text-xs text-slate-500 truncate">{user?.roles?.join(', ') || ''}</p>
           </div>
+          <button
+            onClick={() => logout()}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>

@@ -53,6 +53,9 @@ services:
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
       BROWSER_ACTOR_URL: http://browser-actor:8888
       APIFY_TOKEN: ${APIFY_TOKEN:-}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       NODE_ENV: production
 
 volumes:

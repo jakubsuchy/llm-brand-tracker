@@ -126,6 +126,27 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
 });
 
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  fullName: text("full_name").notNull(),
+  hashedPassword: text("hashed_password"),
+  salt: text("salt"),
+  googleId: text("google_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const userRoles = pgTable("user_roles", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  roleId: integer("role_id").references(() => roles.id).notNull(),
+});
+
 export const jobQueue = pgTable("job_queue", {
   id: serial("id").primaryKey(),
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id).notNull(),
@@ -198,6 +219,19 @@ export const insertJobQueueSchema = createInsertSchema(jobQueue).omit({
   completedAt: true,
 });
 
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+});
+
+export const insertUserRoleSchema = createInsertSchema(userRoles).omit({
+  id: true,
+});
+
 // Types
 export type Topic = typeof topics.$inferSelect;
 export type InsertTopic = z.infer<typeof insertTopicSchema>;
@@ -230,6 +264,17 @@ export type CompetitorMerge = typeof competitorMerges.$inferSelect;
 
 export type JobQueueItem = typeof jobQueue.$inferSelect;
 export type InsertJobQueueItem = z.infer<typeof insertJobQueueSchema>;
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+
+export type Role = typeof roles.$inferSelect;
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+
+export type UserRole = typeof userRoles.$inferSelect;
+export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
+
+export type UserWithRoles = User & { roles: string[] };
 
 // Extended types for API responses
 export type PromptWithTopic = Prompt & { topic: Topic | null };

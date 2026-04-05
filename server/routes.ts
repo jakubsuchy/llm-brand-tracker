@@ -1,9 +1,19 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import passport from 'passport';
 import { storage } from "./storage";
 import { analyzer, BrandAnalyzer, cancelAnalysisRun, getAnalysisProgressFromDB, isAnalysisRunningInDB } from "./services/analyzer";
 import { generatePromptsForTopic } from "./services/openai";
 import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
+
+function requireRole(...requiredRoles: string[]) {
+  return (req: any, res: any, next: any) => {
+    if (!req.user?.roles?.some((r: string) => requiredRoles.includes(r))) {
+      return res.status(403).json({ message: "Insufficient permissions" });
+    }
+    next();
+  };
+}
 
 // Brand name for filtering — loaded from DB on startup, persisted on change
 let currentBrandName: string = '';
@@ -93,6 +103,223 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (error) {
     console.error('[STARTUP] Failed to load settings from DB:', error);
   }
+
+  // --- Public auth routes (no auth required) ---
+  app.get("/api/auth/needs-setup", async (req, res) => {
+    const { getUserCount, getAuthProviderConfig } = await import('./services/auth');
+    const count = await getUserCount();
+    const config = await getAuthProviderConfig();
+    res.json({
+      needsSetup: count === 0,
+      googleEnabled: !!config.google?.enabled,
+      samlEnabled: !!config.saml?.enabled,
+    });
+  });
+
+  app.get("/api/auth/session", async (req, res) => {
+    if (req.isAuthenticated()) {
+      const { getAuthProviderConfig } = await import('./services/auth');
+      const config = await getAuthProviderConfig();
+      res.json({
+        user: req.user,
+        googleEnabled: !!config.google?.enabled,
+        samlEnabled: !!config.saml?.enabled,
+      });
+    } else {
+      res.status(401).json({ message: "Not authenticated" });
+    }
+  });
+
+  app.post("/api/auth/login", (req, res, next) => {
+    passport.authenticate('local', (err: any, user: any, info: any) => {
+      if (err) return next(err);
+      if (!user) return res.status(401).json({ message: info?.message || 'Invalid credentials' });
+      req.logIn(user, (err) => {
+        if (err) return next(err);
+        res.json({ user });
+      });
+    })(req, res, next);
+  });
+
+  // Google OAuth routes (dynamic — check if strategy is registered)
+  app.get("/api/auth/google", (req, res, next) => {
+    if (!(passport as any)._strategy('google')) return res.status(404).json({ message: "Google auth not configured" });
+    passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+  });
+
+  app.get("/api/auth/google/callback",
+    (req, res, next) => {
+      if (!(passport as any)._strategy('google')) return res.redirect('/login?error=google');
+      passport.authenticate('google', { failureRedirect: '/login?error=google' })(req, res, next);
+    },
+    (req, res) => { res.redirect('/'); }
+  );
+
+  // SAML routes (dynamic — check if strategy is registered)
+  app.get("/api/auth/saml", (req, res, next) => {
+    if (!(passport as any)._strategy('saml')) return res.status(404).json({ message: "SAML auth not configured" });
+    passport.authenticate('saml')(req, res, next);
+  });
+
+  app.post("/api/auth/saml/callback",
+    (req, res, next) => {
+      if (!(passport as any)._strategy('saml')) return res.redirect('/login?error=saml');
+      passport.authenticate('saml', { failureRedirect: '/login?error=saml' })(req, res, next);
+    },
+    (req, res) => { res.redirect('/'); }
+  );
+
+  // SAML metadata endpoint
+  app.get("/api/auth/saml/metadata", (req, res) => {
+    const strategy = (passport as any)._strategy('saml') as any;
+    if (!strategy) return res.status(404).json({ message: "SAML not configured" });
+    res.type('application/xml').send(strategy.generateServiceProviderMetadata());
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.logout((err) => {
+      if (err) return res.status(500).json({ message: "Logout failed" });
+      res.json({ success: true });
+    });
+  });
+
+  app.post("/api/initialize", async (req, res) => {
+    try {
+      const { getUserCount, createUser, assignRole } = await import('./services/auth');
+      if (await getUserCount() > 0) return res.status(403).json({ message: "Already initialized" });
+      const { email, fullName, password } = req.body;
+      if (!email || !fullName || !password) return res.status(400).json({ message: "All fields required" });
+      const user = await createUser(email, fullName, password);
+      await assignRole(user.id, 'admin');
+      await assignRole(user.id, 'analyst');
+      await assignRole(user.id, 'user');
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.code === '23505') return res.status(409).json({ message: "Email already exists" });
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // --- Auth guard: protect all subsequent API routes ---
+  app.use("/api", (req, res, next) => {
+    if (req.isAuthenticated()) return next();
+    res.status(401).json({ message: "Not authenticated" });
+  });
+
+  // --- User management routes (admin only) ---
+  app.get("/api/users", requireRole('admin'), async (req, res) => {
+    const { getAllUsersWithRoles } = await import('./services/auth');
+    const users = await getAllUsersWithRoles();
+    res.json(users.map(u => ({ id: u.id, email: u.email, fullName: u.fullName, roles: u.roles, createdAt: u.createdAt, googleId: !!u.googleId })));
+  });
+
+  app.post("/api/users", requireRole('admin'), async (req, res) => {
+    try {
+      const { createUser, assignRole } = await import('./services/auth');
+      const { email, fullName, password, roles } = req.body;
+      if (!email || !fullName || !password) return res.status(400).json({ message: "All fields required" });
+      const user = await createUser(email, fullName, password);
+      for (const role of (roles || ['user'])) await assignRole(user.id, role);
+      res.json({ id: user.id, email: user.email, fullName: user.fullName });
+    } catch (err: any) {
+      if (err.code === '23505') return res.status(409).json({ message: "Email already exists" });
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/users/:id", requireRole('admin'), async (req, res) => {
+    try {
+      const { db } = await import('./db');
+      const { users } = await import('@shared/schema');
+      const { eq } = await import('drizzle-orm');
+      const userId = parseInt(req.params.id);
+      const { email, fullName } = req.body;
+      if (!email || !fullName) return res.status(400).json({ message: "Email and full name required" });
+      const result = await db.update(users).set({ email, fullName }).where(eq(users.id, userId)).returning();
+      if (result.length === 0) return res.status(404).json({ message: "User not found" });
+      res.json({ id: result[0].id, email: result[0].email, fullName: result[0].fullName });
+    } catch (err: any) {
+      if (err.code === '23505') return res.status(409).json({ message: "Email already exists" });
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/password", requireRole('admin'), async (req, res) => {
+    try {
+      const { hashPassword } = await import('./services/auth');
+      const { db } = await import('./db');
+      const { users } = await import('@shared/schema');
+      const { eq } = await import('drizzle-orm');
+      const userId = parseInt(req.params.id);
+      const { password } = req.body;
+      if (!password) return res.status(400).json({ message: "Password required" });
+      const { hash, salt } = await hashPassword(password);
+      const result = await db.update(users).set({ hashedPassword: hash, salt }).where(eq(users.id, userId)).returning();
+      if (result.length === 0) return res.status(404).json({ message: "User not found" });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/users/:id/roles", requireRole('admin'), async (req, res) => {
+    try {
+      const { removeUserRoles, assignRole } = await import('./services/auth');
+      const userId = parseInt(req.params.id);
+      const { roles } = req.body;
+      if (!roles || !Array.isArray(roles)) return res.status(400).json({ message: "Roles array required" });
+      // Prevent removing your own admin role
+      if (userId === req.user!.id && req.user!.roles.includes('admin') && !roles.includes('admin')) {
+        return res.status(400).json({ message: "You cannot remove your own admin role" });
+      }
+      await removeUserRoles(userId);
+      for (const role of roles) await assignRole(userId, role);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/users/:id", requireRole('admin'), async (req, res) => {
+    try {
+      const { removeUserRoles } = await import('./services/auth');
+      const { db } = await import('./db');
+      const { users } = await import('@shared/schema');
+      const { eq } = await import('drizzle-orm');
+      const userId = parseInt(req.params.id);
+      if (userId === req.user!.id) {
+        return res.status(400).json({ message: "You cannot delete your own account" });
+      }
+      await removeUserRoles(userId);
+      const result = await db.delete(users).where(eq(users.id, userId)).returning();
+      if (result.length === 0) return res.status(404).json({ message: "User not found" });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // --- Auth provider configuration (admin only) ---
+  app.get("/api/auth/providers", requireRole('admin'), async (req, res) => {
+    const { getAuthProviderConfig } = await import('./services/auth');
+    const config = await getAuthProviderConfig();
+    // Mask secrets: show only whether they're set
+    res.json({
+      google: config.google
+        ? { ...config.google, clientSecret: config.google.clientSecret ? '••••••••' : '' }
+        : { enabled: false, clientId: '', clientSecret: '' },
+      saml: config.saml
+        ? { ...config.saml, cert: config.saml.cert ? '(configured)' : '' }
+        : { enabled: false, entryPoint: '', issuer: '', cert: '' },
+    });
+  });
+
+  app.post("/api/auth/providers", requireRole('admin'), async (req, res) => {
+    const { saveAuthProviderConfig, configureAuthProviders } = await import('./services/auth');
+    await saveAuthProviderConfig(req.body);
+    await configureAuthProviders();
+    res.json({ success: true });
+  });
 
   // --- Crash recovery ---
   try {
