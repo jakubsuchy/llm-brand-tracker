@@ -17,7 +17,9 @@ services:
       retries: 5
 
   browser-actor:
-    build: ./browser-actor
+    build:
+      context: ./browser-actor
+      dockerfile: Dockerfile-local
     profiles: ["browser"]
     restart: unless-stopped
     ports:
@@ -27,8 +29,9 @@ services:
       APIFY_META_ORIGIN: STANDBY
       ACTOR_STANDBY_PORT: 8888
       CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
+      APIFY_PROXY_PASSWORD: ${APIFY_PROXY_PASSWORD:-}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8888/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8888/ || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10

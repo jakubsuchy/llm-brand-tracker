@@ -1,40 +1,46 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Settings, Key, Save, CheckCircle, XCircle, BarChart3, Globe, X, Plus, ShieldX, Monitor, Cpu, Trash2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Settings, Key, Save, CheckCircle, XCircle, Globe, X, Plus, ShieldX, Trash2 } from "lucide-react";
 
-interface UsageData {
-  totals: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    calls: number;
-  };
-  perRun: Array<{
-    analysisRunId: number | null;
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    calls: number;
-    run: { id: number; startedAt: string; brandName: string | null; status: string } | null;
-  }>;
-}
+const SETTINGS_TABS = ['brand', 'credentials', 'providers', 'sources', 'danger'] as const;
 
 export default function SettingsPage() {
+  const [, setLocation] = useLocation();
+  const hash = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
+  const initialTab = SETTINGS_TABS.includes(hash as any) ? hash : 'brand';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = window.location.hash.slice(1);
+      if (SETTINGS_TABS.includes(h as any)) setActiveTab(h);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    window.location.hash = tab;
+  };
+
   const [apiKey, setApiKey] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'none' | 'valid' | 'invalid'>('none');
-  const [promptsPerTopic, setPromptsPerTopic] = useState("5");
-  const [analysisFrequency, setAnalysisFrequency] = useState("manual");
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
+  const { data: openaiStatus, refetch: refetchOpenai } = useQuery<{ hasKey: boolean }>({
+    queryKey: ['/api/settings/openai-key'],
+  });
   const { toast } = useToast();
 
   const handleSaveApiKey = async () => {
@@ -57,6 +63,7 @@ export default function SettingsPage() {
 
       if (response.ok) {
         setKeyStatus('valid');
+        refetchOpenai();
         toast({
           title: "Success",
           description: "OpenAI API key saved and validated successfully",
@@ -82,60 +89,16 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveAnalysisConfig = async () => {
-    setIsSavingConfig(true);
-    try {
-      const response = await fetch('/api/settings/analysis-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          promptsPerTopic: parseInt(promptsPerTopic),
-          analysisFrequency 
-        }),
-      });
-
-      if (response.ok) {
-        toast({
-          title: "Success",
-          description: "Analysis configuration saved successfully",
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to save analysis configuration",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to save analysis configuration",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSavingConfig(false);
-    }
-  };
-
   const getKeyStatusDisplay = () => {
-    switch (keyStatus) {
-      case 'valid':
-        return (
-          <Badge className="bg-green-100 text-green-800 border-green-200">
-            <CheckCircle className="h-3 w-3 mr-1" />
-            Valid Key
-          </Badge>
-        );
-      case 'invalid':
-        return (
-          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-            <XCircle className="h-3 w-3 mr-1" />
-            Invalid Key
-          </Badge>
-        );
-      default:
-        return null;
+    if (keyStatus === 'invalid') {
+      return (
+        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+          <XCircle className="h-3 w-3 mr-1" />
+          Invalid Key
+        </Badge>
+      );
     }
+    return null;
   };
 
   return (
@@ -148,151 +111,213 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 max-w-2xl">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5" />
-              OpenAI API Configuration
-            </CardTitle>
-            <p className="text-sm text-gray-600">
-              Enter your OpenAI API key to enable real-time ChatGPT analysis
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="apiKey">OpenAI API Key</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="apiKey"
-                  type="password"
-                  placeholder="sk-..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="flex-1"
-                />
-                <Button 
-                  onClick={handleSaveApiKey}
-                  disabled={isChecking || !apiKey.trim()}
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  {isChecking ? 'Checking...' : 'Save'}
-                </Button>
-              </div>
-              {getKeyStatusDisplay()}
-            </div>
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="max-w-2xl">
+        <TabsList className="mb-6">
+          <TabsTrigger value="brand">Brand</TabsTrigger>
+          <TabsTrigger value="credentials">Credentials</TabsTrigger>
+          <TabsTrigger value="providers">Providers</TabsTrigger>
+          <TabsTrigger value="sources">Competitor Sources</TabsTrigger>
+          <TabsTrigger value="danger">Danger Zone</TabsTrigger>
+        </TabsList>
 
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">How to get your API key:</h4>
-              <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-                <li>Visit <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">OpenAI API Keys</a></li>
-                <li>Sign in to your OpenAI account</li>
-                <li>Click "Create new secret key"</li>
-                <li>Copy the key and paste it above</li>
-              </ol>
-            </div>
+        <TabsContent value="brand" className="space-y-6">
+          <BrandDetailsCard />
+        </TabsContent>
 
-            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-              <h4 className="font-medium text-yellow-900 mb-2">Important Notes:</h4>
-              <ul className="text-sm text-yellow-800 space-y-1 list-disc list-inside">
-                <li>Your API key is stored securely and only used for analysis</li>
-                <li>Analysis requires OpenAI credits in your account</li>
-                <li>Each prompt analysis costs approximately $0.01-0.03</li>
-                <li>You can monitor usage in your OpenAI dashboard</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-
-        <ResponseMethodCard />
-
-        <CompetitorSubdomainsCard />
-
-        <CompetitorExclusionsCard />
-
-        <ApiUsageCard />
-
-        <DangerZoneCard />
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Analysis Configuration</CardTitle>
-            <p className="text-sm text-gray-600">
-              Control how the brand tracking analysis runs
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <TabsContent value="credentials" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="h-5 w-5" />
+                OpenAI API Key
+                {openaiStatus?.hasKey && (
+                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Configured
+                  </Badge>
+                )}
+              </CardTitle>
+              <p className="text-sm text-gray-600">
+                Required for prompt analysis. Used for generating responses and analyzing results.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Prompts per Topic</Label>
-                <Input 
-                  type="number" 
-                  value={promptsPerTopic}
-                  onChange={(e) => setPromptsPerTopic(e.target.value)}
-                  min="1" 
-                  max="20" 
-                />
-                <p className="text-xs text-gray-500">Number of test prompts to generate per topic</p>
+                <Label htmlFor="apiKey">OpenAI API Key</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="apiKey"
+                    type="password"
+                    placeholder={openaiStatus?.hasKey ? "••••••••••• (saved)" : "sk-..."}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={handleSaveApiKey}
+                    disabled={isChecking || !apiKey.trim()}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {isChecking ? 'Checking...' : 'Save'}
+                  </Button>
+                </div>
+                {getKeyStatusDisplay()}
               </div>
-              
-              <div className="space-y-2">
-                <Label>Analysis Frequency</Label>
-                <Select value={analysisFrequency} onValueChange={setAnalysisFrequency}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">Manual only</SelectItem>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500">How often to run automatic analysis</p>
-              </div>
-            </div>
+              <p className="text-xs text-gray-500">
+                Get your key at{' '}
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                  platform.openai.com/api-keys
+                </a>
+              </p>
+            </CardContent>
+          </Card>
 
-            <div className="pt-4 border-t">
-              <Button 
-                onClick={handleSaveAnalysisConfig}
-                disabled={isSavingConfig}
-                className="w-full"
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {isSavingConfig ? 'Saving...' : 'Save Analysis Settings'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <ApifyTokenCard />
+        </TabsContent>
+
+        <TabsContent value="providers" className="space-y-6">
+          <ProvidersCard />
+        </TabsContent>
+
+        <TabsContent value="sources" className="space-y-6">
+          <CompetitorSubdomainsCard />
+          <CompetitorExclusionsCard />
+        </TabsContent>
+
+        <TabsContent value="danger" className="space-y-6">
+          <DangerZoneCard />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
-function ResponseMethodCard() {
+interface ProviderConfig {
+  [key: string]: {
+    enabled: boolean;
+    type: string;
+    label?: string;
+  };
+}
+
+const PROVIDER_INFO: Record<string, { label: string; description: string; icon: string }> = {
+  perplexity: {
+    label: 'Perplexity',
+    description: 'Browser-based. Uses residential proxy. Returns responses with source citations.',
+    icon: '🔍',
+  },
+  chatgpt: {
+    label: 'ChatGPT',
+    description: 'Browser-based. Supports anonymous and authenticated mode. Returns responses with sources.',
+    icon: '💬',
+  },
+  gemini: {
+    label: 'Google Gemini',
+    description: 'Browser-based. Google AI responses with grounding sources.',
+    icon: '✨',
+  },
+};
+
+function ProvidersCard() {
   const { toast } = useToast();
-  const { data, refetch } = useQuery<{ method: string; browserAvailable: boolean }>({
-    queryKey: ['/api/settings/response-method'],
+  const { data: config, refetch } = useQuery<ProviderConfig>({
+    queryKey: ['/api/settings/providers'],
   });
 
-  const method = data?.method || 'api';
-  const browserAvailable = data?.browserAvailable || false;
-
-  const setMethod = async (newMethod: string) => {
+  const toggleProvider = async (name: string) => {
+    if (!config) return;
+    const updated = { ...config, [name]: { ...config[name], enabled: !config[name].enabled } };
     try {
-      const res = await fetch('/api/settings/response-method', {
+      const res = await fetch('/api/settings/providers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: newMethod }),
+        body: JSON.stringify(updated),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error);
-      }
+      if (!res.ok) throw new Error('Failed');
       refetch();
-      toast({ title: "Saved", description: `Response method set to ${newMethod === 'browser' ? 'ChatGPT Browser' : 'OpenAI API'}` });
-    } catch (error) {
-      toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+      const provider = PROVIDER_INFO[name]?.label || name;
+      const enabled = updated[name].enabled;
+      toast({ title: enabled ? 'Enabled' : 'Disabled', description: `${provider} ${enabled ? 'will be included' : 'will be skipped'} in analysis runs` });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update provider', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Analysis Providers</CardTitle>
+        <p className="text-sm text-gray-600">
+          Choose which LLM providers to query during analysis. Each enabled provider generates one response per prompt.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {config && Object.entries(config).map(([name, settings]) => {
+          const info = PROVIDER_INFO[name] || { label: name, description: '', icon: '🤖' };
+          return (
+            <div key={name} className={`flex items-center justify-between p-4 rounded-lg border ${settings.enabled ? 'border-blue-200 bg-blue-50/50' : 'border-gray-200 bg-gray-50'}`}>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{info.icon}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{info.label}</span>
+                    <Badge variant="outline" className="text-xs">{settings.type}</Badge>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{info.description}</p>
+                </div>
+              </div>
+              <Switch
+                checked={settings.enabled}
+                onCheckedChange={() => toggleProvider(name)}
+              />
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BrandDetailsCard() {
+  const [brandUrl, setBrandUrl] = useState('');
+  const [brandName, setBrandName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
+
+  const { data, refetch } = useQuery<{ brandUrl: string | null; brandName: string | null }>({
+    queryKey: ['/api/settings/brand'],
+  });
+
+  // Populate fields from DB on load
+  useState(() => {
+    if (data) {
+      if (data.brandUrl && !brandUrl) setBrandUrl(data.brandUrl);
+      if (data.brandName && !brandName) setBrandName(data.brandName);
+    }
+  });
+
+  // Update fields when data loads
+  const displayUrl = brandUrl || data?.brandUrl || '';
+  const displayName = brandName || data?.brandName || '';
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings/brand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandUrl: brandUrl || data?.brandUrl || '',
+          brandName: brandName || data?.brandName || '',
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+      refetch();
+      toast({ title: "Saved", description: "Brand details updated" });
+    } catch {
+      toast({ title: "Error", description: "Failed to save brand details", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -300,47 +325,224 @@ function ResponseMethodCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Monitor className="h-5 w-5" />
-          Response Method
+          <Globe className="h-5 w-5" />
+          Brand Details
+          {data?.brandName && (
+            <Badge className="bg-green-100 text-green-800 border-green-200">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              {data.brandName}
+            </Badge>
+          )}
         </CardTitle>
         <p className="text-sm text-gray-600">
-          Choose how prompts are sent to ChatGPT for analysis
+          Your brand identity used for analysis. The Prompt Generator reads these values.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="brandUrl">Brand Website URL</Label>
+          <Input
+            id="brandUrl"
+            type="url"
+            placeholder="https://example.com"
+            value={brandUrl || data?.brandUrl || ''}
+            onChange={(e) => setBrandUrl(e.target.value)}
+          />
+          <p className="text-xs text-gray-500">Used to scrape brand content and generate relevant analysis topics</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="brandName">Brand Name</Label>
+          <Input
+            id="brandName"
+            placeholder="My Brand"
+            value={brandName || data?.brandName || ''}
+            onChange={(e) => setBrandName(e.target.value)}
+          />
+          <p className="text-xs text-gray-500">Used to detect brand mentions in LLM responses</p>
+        </div>
+        <Button onClick={handleSave} disabled={isSaving} className="w-full">
+          <Save className="h-4 w-4 mr-2" />
+          {isSaving ? 'Saving...' : 'Save Brand Details'}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ApifyTokenCard() {
+  const [token, setToken] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
+
+  const { data: tokenStatus, refetch: refetchToken } = useQuery<{ hasToken: boolean }>({
+    queryKey: ['/api/settings/apify-token'],
+  });
+
+  const { data: browserStatus } = useQuery<{ mode: string; hasApifyToken: boolean; localContainerUp: boolean }>({
+    queryKey: ['/api/settings/browser-status'],
+    refetchInterval: 10000,
+  });
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings/apify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error);
+      }
+      toast({ title: "Saved", description: token.trim() ? "Apify token saved and validated" : "Apify token removed" });
+      setToken("");
+      refetchToken();
+    } catch (error) {
+      toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRemoveToken = async () => {
+    setIsSaving(true);
+    try {
+      await fetch('/api/settings/apify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: '' }),
+      });
+      toast({ title: "Removed", description: "Switched to local mode" });
+      refetchToken();
+    } catch {
+      toast({ title: "Error", description: "Failed to remove token", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const { refetch: refetchStatus } = useQuery<any>({
+    queryKey: ['/api/settings/browser-status'],
+  });
+
+  const switchMode = async (newMode: 'local' | 'cloud') => {
+    try {
+      await fetch('/api/settings/browser-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      });
+      refetchStatus();
+      toast({ title: "Switched", description: `Browser mode set to ${newMode}` });
+    } catch {
+      toast({ title: "Error", description: "Failed to switch mode", variant: "destructive" });
+    }
+  };
+
+  const mode = browserStatus?.mode || 'none';
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Browser Analysis Mode
+          {mode === 'cloud' && (
+            <Badge className="bg-green-100 text-green-800 border-green-200">
+              <CheckCircle className="h-3 w-3 mr-1" /> Cloud
+            </Badge>
+          )}
+          {mode === 'local' && (
+            <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+              <CheckCircle className="h-3 w-3 mr-1" /> Local
+            </Badge>
+          )}
+          {mode === 'none' && (
+            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+              <XCircle className="h-3 w-3 mr-1" /> Not Available
+            </Badge>
+          )}
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          Browser providers (Perplexity, ChatGPT, Gemini) need a browser runtime to fetch responses.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <button
-            onClick={() => setMethod('api')}
-            className={`p-4 rounded-lg border-2 text-left transition-colors ${
-              method === 'api' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-            }`}
+          {/* Local option */}
+          <div
+            onClick={() => browserStatus?.localContainerUp && switchMode('local')}
+            className={`p-4 rounded-lg border-2 transition-colors ${mode === 'local' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'} ${browserStatus?.localContainerUp ? 'cursor-pointer' : ''}`}
           >
-            <div className="flex items-center gap-2 mb-1">
-              <Cpu className="h-4 w-4" />
-              <span className="font-medium">OpenAI API</span>
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-medium">Local Container</span>
+              {mode === 'local' && <Badge className="bg-blue-100 text-blue-700 text-xs">Active</Badge>}
             </div>
-            <p className="text-xs text-gray-500">
-              Fast, uses Responses API with web search. ~3-5s per prompt. Requires OpenAI API credits.
-            </p>
-          </button>
-          <button
-            onClick={() => browserAvailable ? setMethod('browser') : null}
-            className={`p-4 rounded-lg border-2 text-left transition-colors ${
-              method === 'browser' ? 'border-blue-500 bg-blue-50'
-                : browserAvailable ? 'border-gray-200 hover:border-gray-300'
-                : 'border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed'
-            }`}
+            <div className="text-xs text-gray-500 mb-2 space-y-0.5">
+              <div>Cost: <span className="font-medium text-green-700">Free</span></div>
+              <div>Speed: <span className="font-medium">~1 prompt/min</span></div>
+              <div className="text-gray-400">May get blocked by anti-bot protections</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              {browserStatus?.localContainerUp ? (
+                <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" /> Running</Badge>
+              ) : (
+                <Badge variant="outline" className="text-gray-500"><XCircle className="h-3 w-3 mr-1" /> Not running</Badge>
+              )}
+            </div>
+            {!browserStatus?.localContainerUp && (
+              <p className="text-xs text-gray-400 mt-2">
+                Start with: <code className="bg-gray-100 px-1 rounded">docker compose --profile browser up -d</code>
+              </p>
+            )}
+          </div>
+
+          {/* Cloud option */}
+          <div
+            onClick={() => tokenStatus?.hasToken && switchMode('cloud')}
+            className={`p-4 rounded-lg border-2 transition-colors ${mode === 'cloud' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'} ${tokenStatus?.hasToken ? 'cursor-pointer' : ''}`}
           >
-            <div className="flex items-center gap-2 mb-1">
-              <Monitor className="h-4 w-4" />
-              <span className="font-medium">ChatGPT Browser</span>
-              {!browserAvailable && <Badge variant="outline" className="text-xs">Credentials needed</Badge>}
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-medium">Apify Cloud</span>
+              {mode === 'cloud' && <Badge className="bg-green-100 text-green-700 text-xs">Active</Badge>}
             </div>
-            <p className="text-xs text-gray-500">
-              Uses real ChatGPT web UI with web search and real sources. ~60-120s per prompt. Requires CHATGPT_EMAIL/PASSWORD env vars.
-            </p>
-          </button>
+            <div className="text-xs text-gray-500 mb-2 space-y-0.5">
+              <div>Cost: <span className="font-medium text-amber-700">~$0.05/prompt</span></div>
+              <div>Speed: <span className="font-medium">~15 prompts/min</span></div>
+              <div className="text-gray-400">Residential proxies, no anti-bot issues</div>
+            </div>
+            {tokenStatus?.hasToken ? (
+              <div className="flex items-center gap-2">
+                <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" /> Connected</Badge>
+                <button onClick={handleRemoveToken} className="text-xs text-red-500 hover:text-red-700 underline" disabled={isSaving}>
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2 mt-2">
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    placeholder="apify_api_..."
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
+                  <Button size="sm" onClick={handleSave} disabled={isSaving || !token.trim()}>
+                    {isSaving ? '...' : 'Connect'}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Get token at{' '}
+                  <a href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    console.apify.com
+                  </a>
+                </p>
+              </div>
+            )}
+          </div>
         </div>
+        <p className="text-xs text-gray-400 text-center mt-2">We receive a small commission if you use Apify Cloud.</p>
       </CardContent>
     </Card>
   );
@@ -606,117 +808,3 @@ function DangerZoneCard() {
   );
 }
 
-function ApiUsageCard() {
-  const { data: usage, isLoading } = useQuery<UsageData>({
-    queryKey: ['/api/usage'],
-  });
-
-  const formatNumber = (n: number) => n.toLocaleString();
-
-  // Rough cost estimate: GPT-4o pricing ($2.50/1M input, $10/1M output)
-  const estimateCost = (input: number, output: number) => {
-    const cost = (input / 1_000_000) * 2.50 + (output / 1_000_000) * 10;
-    return cost < 0.01 ? '< $0.01' : `$${cost.toFixed(2)}`;
-  };
-
-  if (isLoading) {
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="animate-pulse space-y-3">
-            <div className="h-6 bg-gray-200 rounded w-1/3"></div>
-            <div className="h-20 bg-gray-200 rounded"></div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!usage) return null;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BarChart3 className="h-5 w-5" />
-          API Usage
-        </CardTitle>
-        <p className="text-sm text-gray-600">
-          OpenAI token usage across all analysis runs
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Totals */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-blue-50 p-3 rounded-lg text-center">
-            <div className="text-xl font-bold text-blue-700">{formatNumber(usage.totals.totalTokens)}</div>
-            <div className="text-xs text-blue-600">Total Tokens</div>
-          </div>
-          <div className="bg-green-50 p-3 rounded-lg text-center">
-            <div className="text-xl font-bold text-green-700">{formatNumber(usage.totals.inputTokens)}</div>
-            <div className="text-xs text-green-600">Input Tokens</div>
-          </div>
-          <div className="bg-purple-50 p-3 rounded-lg text-center">
-            <div className="text-xl font-bold text-purple-700">{formatNumber(usage.totals.outputTokens)}</div>
-            <div className="text-xs text-purple-600">Output Tokens</div>
-          </div>
-          <div className="bg-amber-50 p-3 rounded-lg text-center">
-            <div className="text-xl font-bold text-amber-700">{estimateCost(usage.totals.inputTokens, usage.totals.outputTokens)}</div>
-            <div className="text-xs text-amber-600">Est. Cost (GPT-4o)</div>
-          </div>
-        </div>
-
-        <div className="text-xs text-gray-500 text-right">
-          {formatNumber(usage.totals.calls)} API calls total
-        </div>
-
-        {/* Per-run breakdown */}
-        {usage.perRun.length > 0 && (
-          <div className="pt-4 border-t">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">Per-run breakdown</h4>
-            <div className="bg-white rounded-lg border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Run</TableHead>
-                    <TableHead>Model</TableHead>
-                    <TableHead className="text-right">Input</TableHead>
-                    <TableHead className="text-right">Output</TableHead>
-                    <TableHead className="text-right">Calls</TableHead>
-                    <TableHead className="text-right">Est. Cost</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {usage.perRun.map((row, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="text-sm">
-                        {row.run ? (
-                          <span>
-                            {new Date(row.run.startedAt).toLocaleDateString()}{' '}
-                            {new Date(row.run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            {row.run.brandName && <span className="text-gray-500 ml-1">({row.run.brandName})</span>}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">Outside run</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">{row.model}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right text-sm">{formatNumber(row.inputTokens)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatNumber(row.outputTokens)}</TableCell>
-                      <TableCell className="text-right text-sm">{row.calls}</TableCell>
-                      <TableCell className="text-right text-sm text-amber-600">
-                        {estimateCost(row.inputTokens, row.outputTokens)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}

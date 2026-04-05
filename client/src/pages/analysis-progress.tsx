@@ -1,18 +1,25 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useQuery } from "@tanstack/react-query";
-import { 
-  Activity, 
-  Clock, 
-  CheckCircle, 
-  XCircle, 
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Activity,
+  Clock,
+  CheckCircle,
+  XCircle,
   AlertCircle,
   Play,
   RefreshCw,
-  BarChart3
+  DollarSign,
+  BarChart3,
+  Search,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 
 interface AnalysisProgress {
@@ -22,6 +29,7 @@ interface AnalysisProgress {
   totalPrompts?: number;
   completedPrompts?: number;
   failedCount?: number;
+  runningCount?: number;
 }
 
 interface FailedJob {
@@ -31,6 +39,19 @@ interface FailedJob {
   error: string;
   attempts: number;
   failedAt: string;
+}
+
+interface JobItem {
+  id: number;
+  provider: string;
+  promptText: string;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  originalJobId: number | null;
+  lockedAt: string | null;
+  completedAt: string | null;
 }
 
 export default function AnalysisProgressPage() {
@@ -45,6 +66,12 @@ export default function AnalysisProgressPage() {
   const { data: failures } = useQuery<FailedJob[]>({
     queryKey: ['/api/analysis/failures'],
     refetchInterval: isRunning ? 5000 : false,
+    enabled: true,
+  });
+
+  const { data: allJobs } = useQuery<JobItem[]>({
+    queryKey: ['/api/analysis/jobs'],
+    refetchInterval: isRunning ? 2000 : false,
     enabled: true,
   });
 
@@ -191,6 +218,7 @@ export default function AnalysisProgressPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Progress bar + stats */}
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>Overall Progress</span>
@@ -199,172 +227,362 @@ export default function AnalysisProgressPage() {
               <Progress value={progress?.progress || 0} className="h-2" />
             </div>
 
-            {progress?.message && (
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                <p className="text-sm text-blue-800">{progress.message}</p>
+            <div className="grid grid-cols-4 gap-3">
+              <div className="bg-gray-50 p-2 rounded text-center">
+                <div className="text-lg font-bold">{progress?.totalPrompts || 0}</div>
+                <div className="text-xs text-gray-500">Total</div>
               </div>
-            )}
-
-            {progress?.totalPrompts && progress?.completedPrompts !== undefined && (
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-600">Total Tasks:</span>
-                  <span className="font-medium ml-2">{progress.totalPrompts}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Completed:</span>
-                  <span className="font-medium ml-2 text-green-700">{progress.completedPrompts}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Failed:</span>
-                  <span className={`font-medium ml-2 ${(progress.failedCount || 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                    {progress.failedCount || 0}
-                  </span>
-                </div>
+              <div className="bg-blue-50 p-2 rounded text-center">
+                <div className="text-lg font-bold text-blue-700">{progress?.runningCount || 0}</div>
+                <div className="text-xs text-blue-600">Running</div>
               </div>
-            )}
-
-            {failures && failures.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <h4 className="text-sm font-medium text-red-700 flex items-center gap-1">
-                  <XCircle className="h-4 w-4" />
-                  Failed Tasks ({failures.length})
-                </h4>
-                <div className="max-h-48 overflow-y-auto space-y-2">
-                  {failures.map(f => (
-                    <div key={f.id} className="bg-red-50 p-3 rounded-lg border border-red-200 text-sm">
-                      <div className="flex justify-between items-start">
-                        <span className="font-medium text-red-900">[{f.provider}] {f.promptText.substring(0, 80)}...</span>
-                        <Badge variant="outline" className="text-xs text-red-600 shrink-0 ml-2">attempt {f.attempts}</Badge>
-                      </div>
-                      <p className="text-red-700 mt-1 text-xs font-mono">{f.error}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="bg-green-50 p-2 rounded text-center">
+                <div className="text-lg font-bold text-green-700">{progress?.completedPrompts || 0}</div>
+                <div className="text-xs text-green-600">Done</div>
               </div>
-            )}
-
-            {/* Show historical totals */}
-            <div className="pt-4 border-t">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Historical Data:</span>
-                <button 
-                  onClick={async () => {
-                    try {
-                      const response = await fetch('/api/counts');
-                      const counts = await response.json();
-                      alert(`Total prompts in database: ${counts.totalPrompts}\nTotal responses: ${counts.totalResponses}`);
-                    } catch (error) {
-                      console.error('Error fetching counts:', error);
-                    }
-                  }}
-                  className="text-blue-600 hover:text-blue-800 text-xs underline"
-                >
-                  View Total Counts
-                </button>
+              <div className="bg-red-50 p-2 rounded text-center">
+                <div className="text-lg font-bold text-red-700">{progress?.failedCount || 0}</div>
+                <div className="text-xs text-red-600">Failed</div>
               </div>
             </div>
 
-            <div className="pt-4 border-t space-y-4">
-              <div className="flex gap-3">
-                <Button 
-                  onClick={startAnalysis}
-                  disabled={isRunning || isLoading}
-                  className="flex-1"
-                >
-                  <Play className="h-4 w-4 mr-2" />
-                  {isRunning ? 'Analysis Running...' : 'Start New Analysis'}
+            {/* Actions */}
+            <div className="flex gap-3">
+              <Button onClick={startAnalysis} disabled={isRunning || isLoading} className="flex-1">
+                <Play className="h-4 w-4 mr-2" />
+                {isRunning ? 'Running...' : 'Start Analysis'}
+              </Button>
+              {isRunning && (
+                <Button onClick={cancelAnalysis} variant="destructive" className="px-6">
+                  <XCircle className="h-4 w-4 mr-2" /> Cancel
                 </Button>
-                
-                {isRunning && (
-                  <Button 
-                    onClick={cancelAnalysis}
-                    variant="destructive"
-                    className="px-6"
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Cancel
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Analysis Stages */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Analysis Stages</CardTitle>
-            <p className="text-sm text-gray-600">
-              Detailed breakdown of the analysis process
-            </p>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {getStageDetails().map((stage, index) => (
-                <div key={stage.key} className="flex items-start gap-3">
-                  <div className="flex-shrink-0 mt-1">
-                    {stage.completed ? (
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                    ) : progress?.status === stage.key ? (
-                      <Activity className="h-5 w-5 text-blue-600 animate-pulse" />
-                    ) : (
-                      <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className={`font-medium ${
-                        stage.completed ? 'text-green-800' : 
-                        progress?.status === stage.key ? 'text-blue-800' : 'text-gray-600'
-                      }`}>
-                        {stage.title}
-                      </h4>
-                      {progress?.status === stage.key && (
-                        <Badge variant="outline" className="text-xs">Current</Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600">{stage.description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        {/* Job list */}
+        {allJobs && allJobs.length > 0 && (
+          <JobsTable jobs={allJobs} />
+        )}
 
-        {/* Analysis Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5" />
-              Analysis Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-              <h4 className="font-medium text-yellow-900 mb-2">What happens during analysis:</h4>
-              <ul className="text-sm text-yellow-800 space-y-1 list-disc list-inside">
-                <li>Brand content is scraped to understand services and features</li>
-                <li>Relevant topics are generated based on brand offerings</li>
-                <li>Test prompts are created for each topic using OpenAI</li>
-                <li>AI responses are generated and analyzed for brand mentions</li>
-                <li>Competitor mentions and source citations are tracked</li>
-                <li>Results are stored and analytics are updated</li>
-              </ul>
-            </div>
+        {/* Cost Overview */}
+        <CostSummaryCard />
 
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">Performance Notes:</h4>
-              <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-                <li>Analysis typically takes 5-10 minutes to complete</li>
-                <li>Progress updates every 2 seconds during active analysis</li>
-                <li>Each prompt analysis costs approximately $0.01-0.03 in OpenAI credits</li>
-                <li>Results are immediately available in the dashboard upon completion</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
+  );
+}
+
+const STATUS_ORDER: Record<string, number> = { processing: 0, pending: 1, failed: 2, completed: 3, cancelled: 4 };
+const PAGE_SIZE = 50;
+
+function JobsTable({ jobs }: { jobs: JobItem[] }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [page, setPage] = useState(0);
+  const [expandedJob, setExpandedJob] = useState<number | null>(null);
+
+  // Filter
+  const filtered = jobs.filter(job => {
+    if (statusFilter !== 'all' && job.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (q.startsWith('#')) {
+        return job.id.toString() === q.slice(1);
+      }
+      return job.promptText.toLowerCase().includes(q) || job.provider.toLowerCase().includes(q) || job.id.toString().includes(q);
+    }
+    return true;
+  });
+
+  // Sort: running > pending > failed > completed > cancelled
+  const sorted = [...filtered].sort((a, b) => {
+    const sa = STATUS_ORDER[a.status] ?? 5;
+    const sb = STATUS_ORDER[b.status] ?? 5;
+    if (sa !== sb) return sa - sb;
+    return b.id - a.id;
+  });
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Reset page when filter changes
+  useEffect(() => { setPage(0); }, [search, statusFilter]);
+
+  // Status counts
+  const counts: Record<string, number> = {};
+  for (const j of jobs) counts[j.status] = (counts[j.status] || 0) + 1;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Jobs ({filtered.length})</CardTitle>
+          <div className="flex gap-2">
+            {['all', 'processing', 'pending', 'completed', 'failed', 'cancelled'].map(s => {
+              const count = s === 'all' ? jobs.length : (counts[s] || 0);
+              if (count === 0 && s !== 'all') return null;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                    statusFilter === s
+                      ? s === 'processing' ? 'bg-blue-100 text-blue-700'
+                        : s === 'completed' ? 'bg-green-100 text-green-700'
+                        : s === 'failed' ? 'bg-red-100 text-red-700'
+                        : s === 'pending' ? 'bg-gray-200 text-gray-700'
+                        : 'bg-indigo-100 text-indigo-700'
+                      : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)} ({count})
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="relative mt-2">
+          <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-gray-400" />
+          <Input
+            placeholder="Search by ID (#123), prompt, or provider..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-7 h-8 text-sm"
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-xs">
+              <TableHead className="w-12">#</TableHead>
+              <TableHead className="w-20">Provider</TableHead>
+              <TableHead>Prompt</TableHead>
+              <TableHead className="w-24">Status</TableHead>
+              <TableHead className="w-16 text-center">Try</TableHead>
+              <TableHead className="w-48">Error</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paged.map(job => {
+              const hasRetry = job.status === 'failed' && jobs.some(j => j.originalJobId === job.id || (job.originalJobId && j.originalJobId === job.originalJobId && j.id > job.id));
+
+              const isExpanded = expandedJob === job.id;
+              return (
+                <React.Fragment key={job.id}>
+                  <TableRow
+                    className={`text-xs cursor-pointer hover:bg-gray-50 ${job.status === 'processing' ? 'bg-blue-50' : ''}`}
+                    onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                  >
+                    <TableCell className="font-mono text-gray-400">{job.id}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
+                    </TableCell>
+                    <TableCell className="max-w-[300px] truncate text-gray-700" title={job.promptText}>
+                      {job.promptText.substring(0, 60)}{job.promptText.length > 60 ? '...' : ''}
+                    </TableCell>
+                    <TableCell>
+                      {job.status === 'completed' && (
+                        <Badge className="bg-green-100 text-green-700 text-[10px]"><CheckCircle className="h-3 w-3 mr-0.5" /> Done</Badge>
+                      )}
+                      {job.status === 'processing' && (
+                        <Badge className="bg-blue-100 text-blue-700 text-[10px]"><Activity className="h-3 w-3 mr-0.5 animate-pulse" /> Running</Badge>
+                      )}
+                      {job.status === 'pending' && (
+                        <Badge variant="outline" className="text-[10px] text-gray-500">Pending</Badge>
+                      )}
+                      {job.status === 'failed' && hasRetry && (
+                        <Badge className="bg-amber-100 text-amber-700 text-[10px]"><RefreshCw className="h-3 w-3 mr-0.5" /> Retried</Badge>
+                      )}
+                      {job.status === 'failed' && !hasRetry && (
+                        <Badge className="bg-red-100 text-red-700 text-[10px]"><XCircle className="h-3 w-3 mr-0.5" /> Failed</Badge>
+                      )}
+                      {job.status === 'cancelled' && (
+                        <Badge variant="outline" className="text-[10px] text-gray-400">Cancelled</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center text-gray-500">{job.attempts}/{job.maxAttempts}</TableCell>
+                    <TableCell className="max-w-[200px] truncate text-[10px] text-red-600 font-mono">
+                      {job.lastError ? job.lastError.substring(0, 50) + (job.lastError.length > 50 ? '...' : '') : ''}
+                    </TableCell>
+                  </TableRow>
+                  {isExpanded && (
+                    <TableRow className="bg-gray-50">
+                      <TableCell colSpan={6} className="p-3">
+                        <div className="space-y-2 text-xs">
+                          <div><span className="text-gray-500 font-medium">Prompt:</span> <span className="text-gray-700">{job.promptText}</span></div>
+                          {job.lastError && (
+                            <div><span className="text-gray-500 font-medium">Error:</span> <span className="text-red-600 font-mono whitespace-pre-wrap break-all">{job.lastError}</span></div>
+                          )}
+                          {job.originalJobId && (
+                            <div><span className="text-gray-500 font-medium">Retry of:</span> <span className="font-mono">#{job.originalJobId}</span></div>
+                          )}
+                          {job.lockedAt && (
+                            <div><span className="text-gray-500 font-medium">Started:</span> {new Date(job.lockedAt).toLocaleString()}</div>
+                          )}
+                          {job.completedAt && (
+                            <div><span className="text-gray-500 font-medium">Finished:</span> {new Date(job.completedAt).toLocaleString()}</div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            {paged.length === 0 && (
+              <TableRow><TableCell colSpan={6} className="text-center text-sm text-gray-400 py-4">No jobs match</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-2 border-t text-xs text-gray-500">
+            <span>{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}</span>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface UsageData {
+  totals: { inputTokens: number; outputTokens: number; totalTokens: number; calls: number };
+  perRun: Array<{ analysisRunId: number | null; model: string; inputTokens: number; outputTokens: number; calls: number; run: { id: number; startedAt: string; brandName: string | null } | null }>;
+}
+
+interface ApifyUsageData {
+  totals: { costUsd: number; runs: number; durationMs: number; computeUnits: number };
+  runs: Array<{ id: number; apifyRunId: string; provider: string; status: string; costUsd: number; durationMs: number; createdAt: string }>;
+}
+
+function CostSummaryCard() {
+  const { data: apiUsage } = useQuery<UsageData>({ queryKey: ['/api/usage'] });
+  const { data: apifyUsage } = useQuery<ApifyUsageData>({ queryKey: ['/api/apify-usage'] });
+
+  const hasApify = (apifyUsage?.totals?.runs || 0) > 0;
+  const hasApi = (apiUsage?.totals?.calls || 0) > 0;
+  if (!hasApify && !hasApi) return null;
+
+  const formatCost = (n: number) => n < 0.01 ? '< $0.01' : `$${n.toFixed(2)}`;
+  const formatNumber = (n: number) => n.toLocaleString();
+  const apiEstCost = apiUsage ? (apiUsage.totals.inputTokens / 1_000_000) * 2.50 + (apiUsage.totals.outputTokens / 1_000_000) * 10 : 0;
+  const apifyCost = apifyUsage?.totals?.costUsd || 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <DollarSign className="h-5 w-5" />
+          Cost Overview
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="bg-amber-50 p-3 rounded-lg text-center">
+            <div className="text-xl font-bold text-amber-700">{formatCost(apiEstCost + apifyCost)}</div>
+            <div className="text-xs text-amber-600">Total Cost</div>
+          </div>
+          {hasApi && (
+            <div className="bg-blue-50 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-blue-700">{formatCost(apiEstCost)}</div>
+              <div className="text-xs text-blue-600">OpenAI (est.)</div>
+            </div>
+          )}
+          {hasApify && (
+            <div className="bg-green-50 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-green-700">{formatCost(apifyCost)}</div>
+              <div className="text-xs text-green-600">Apify</div>
+            </div>
+          )}
+        </div>
+
+        <Tabs defaultValue={hasApify ? "apify" : "api"}>
+          <TabsList>
+            {hasApi && <TabsTrigger value="api">OpenAI API</TabsTrigger>}
+            {hasApify && <TabsTrigger value="apify">Apify Runs</TabsTrigger>}
+          </TabsList>
+
+          {hasApi && (
+            <TabsContent value="api" className="mt-3">
+              <div className="text-xs text-gray-500 mb-2">{formatNumber(apiUsage!.totals.totalTokens)} tokens, {formatNumber(apiUsage!.totals.calls)} calls</div>
+              {apiUsage!.perRun.length > 0 && (
+                <div className="bg-white rounded-lg border overflow-hidden max-h-48 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Run</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead className="text-right">Tokens</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {apiUsage!.perRun.map((row, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-sm">
+                            {row.run ? new Date(row.run.startedAt).toLocaleDateString() : <span className="text-gray-400">Outside run</span>}
+                          </TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{row.model}</Badge></TableCell>
+                          <TableCell className="text-right text-sm">{formatNumber(row.inputTokens + row.outputTokens)}</TableCell>
+                          <TableCell className="text-right text-sm text-amber-600">{formatCost((row.inputTokens / 1_000_000) * 2.50 + (row.outputTokens / 1_000_000) * 10)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {hasApify && (
+            <TabsContent value="apify" className="mt-3">
+              <div className="text-xs text-gray-500 mb-2">{apifyUsage!.totals.runs} runs, {Math.round(apifyUsage!.totals.durationMs / 1000)}s total</div>
+              {apifyUsage!.runs.length > 0 && (
+                <div className="bg-white rounded-lg border overflow-hidden max-h-48 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Provider</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Duration</TableHead>
+                        <TableHead className="text-right">Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {apifyUsage!.runs.map((run) => (
+                        <TableRow key={run.id}>
+                          <TableCell className="text-sm">{new Date(run.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{run.provider}</Badge></TableCell>
+                          <TableCell>
+                            <Badge className={`text-xs ${run.status === 'SUCCEEDED' ? 'bg-green-100 text-green-700' : run.status === 'FAILED' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                              {run.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right text-sm">{run.durationMs ? `${Math.round(run.durationMs / 1000)}s` : '-'}</TableCell>
+                          <TableCell className="text-right text-sm text-green-600">{run.costUsd ? formatCost(run.costUsd) : '-'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+          )}
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }

@@ -109,7 +109,7 @@ export interface IStorage {
   enqueueJobs(jobs: InsertJobQueueItem[]): Promise<void>;
   dequeueJob(analysisRunId: number): Promise<JobQueueItem | null>;
   completeJob(jobId: number): Promise<void>;
-  failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void>;
+  failJob(jobId: number, error: string, shouldRetry: boolean, wasBusy?: boolean): Promise<void>;
   getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress>;
   recoverStalledJobs(stallTimeoutMs?: number): Promise<number>;
   getFailedJobs(analysisRunId: number): Promise<JobQueueItem[]>;
@@ -539,7 +539,7 @@ export class MemStorage implements IStorage {
   async enqueueJobs(_jobs: InsertJobQueueItem[]): Promise<void> {}
   async dequeueJob(_analysisRunId: number): Promise<JobQueueItem | null> { return null; }
   async completeJob(_jobId: number): Promise<void> {}
-  async failJob(_jobId: number, _error: string, _shouldRetry: boolean): Promise<void> {}
+  async failJob(_jobId: number, _error: string, _shouldRetry: boolean, _wasBusy?: boolean): Promise<void> {}
   async getJobQueueProgress(_analysisRunId: number): Promise<JobQueueProgress> { return { total: 0, pending: 0, processing: 0, completed: 0, failed: 0 }; }
   async recoverStalledJobs(_stallTimeoutMs?: number): Promise<number> { return 0; }
   async getFailedJobs(_analysisRunId: number): Promise<JobQueueItem[]> { return []; }

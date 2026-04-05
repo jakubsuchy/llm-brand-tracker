@@ -86,6 +86,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   } catch {}
 
+  // --- Load DB settings into env ---
+  try {
+    const { loadSettingsIntoEnv } = await import('./services/settings');
+    await loadSettingsIntoEnv();
+  } catch (error) {
+    console.error('[STARTUP] Failed to load settings from DB:', error);
+  }
+
   // --- Crash recovery ---
   try {
     const recovered = await storage.recoverStalledJobs();
@@ -195,8 +203,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const allResponses = await storage.getResponsesWithPrompts(runId);
 
-      const brandMentions = allResponses.filter(r => r.brandMentioned).length;
-      const brandMentionRate = allResponses.length > 0 ? (brandMentions / allResponses.length) * 100 : 0;
+      // Group by unique prompt text — a prompt "mentions brand" if ANY response for it did
+      const promptMap = new Map<string, { mentioned: boolean; count: number }>();
+      for (const r of allResponses) {
+        const key = r.prompt?.text?.toLowerCase().trim() || '';
+        if (!promptMap.has(key)) promptMap.set(key, { mentioned: false, count: 0 });
+        const entry = promptMap.get(key)!;
+        entry.count++;
+        if (r.brandMentioned) entry.mentioned = true;
+      }
+      const uniquePrompts = promptMap.size;
+      const brandMentions = [...promptMap.values()].filter(p => p.mentioned).length;
+      const brandMentionRate = uniquePrompts > 0 ? (brandMentions / uniquePrompts) * 100 : 0;
 
       // Get top competitor from competitor_mentions table
       let topCompetitorName = 'N/A';
@@ -236,7 +254,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         brandMentionRate,
-        totalPrompts: allResponses.length,
+        totalPrompts: uniquePrompts,
+        brandMentions,
         topCompetitor: topCompetitorName,
         totalSources: sourceCount,
         totalDomains: domainCount
@@ -255,14 +274,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
 
+      // Unique prompt mention calculation
+      const promptMap = new Map<string, boolean>();
+      for (const r of allResponses) {
+        const key = r.prompt?.text?.toLowerCase().trim() || '';
+        if (!promptMap.has(key)) promptMap.set(key, false);
+        if (r.brandMentioned) promptMap.set(key, true);
+      }
+      const uniquePrompts = promptMap.size;
+      const brandMentions = [...promptMap.values()].filter(Boolean).length;
+
       res.json({
         totalResponses: allResponses.length,
-        totalPrompts: allPrompts.length,
+        totalPrompts: uniquePrompts,
         totalTopics: allTopics.length,
         totalCompetitors: 0,
         totalSources: 0,
-        brandMentions: allResponses.filter(r => r.brandMentioned).length,
-        brandMentionRate: allResponses.length > 0 ? (allResponses.filter(r => r.brandMentioned).length / allResponses.length) * 100 : 0
+        brandMentions,
+        brandMentionRate: uniquePrompts > 0 ? (brandMentions / uniquePrompts) * 100 : 0
       });
     } catch (error) {
       console.error("Error fetching counts:", error);
@@ -992,6 +1021,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all jobs for the latest (or specific) analysis run — compact view
+  app.get("/api/analysis/jobs", async (req, res) => {
+    try {
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      let targetRunId = runId;
+      if (!targetRunId) {
+        const latestRun = await storage.getLatestAnalysisRun();
+        targetRunId = latestRun?.id;
+      }
+      if (!targetRunId) return res.json([]);
+
+      const { jobQueue } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { sql } = await import("drizzle-orm");
+
+      const jobs = await db.select({
+        id: jobQueue.id,
+        provider: jobQueue.provider,
+        promptText: jobQueue.promptText,
+        status: jobQueue.status,
+        attempts: jobQueue.attempts,
+        maxAttempts: jobQueue.maxAttempts,
+        lastError: jobQueue.lastError,
+        originalJobId: jobQueue.originalJobId,
+        lockedAt: jobQueue.lockedAt,
+        completedAt: jobQueue.completedAt,
+        createdAt: jobQueue.createdAt,
+      }).from(jobQueue)
+        .where(sql`${jobQueue.analysisRunId} = ${targetRunId}`)
+        .orderBy(sql`${jobQueue.id} DESC`);
+
+      res.json(jobs);
+    } catch (error) {
+      console.error("Error fetching jobs:", error);
+      res.status(500).json({ error: "Failed to fetch jobs" });
+    }
+  });
+
+  // Apify usage statistics
+  app.get("/api/apify-usage", async (req, res) => {
+    try {
+      const { apifyUsage } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { sql, desc } = await import("drizzle-orm");
+
+      // Totals
+      const [totals] = await db
+        .select({
+          totalCost: sql<number>`coalesce(sum(cost_usd), 0)`,
+          totalRuns: sql<number>`count(*)`,
+          totalDurationMs: sql<number>`coalesce(sum(duration_ms), 0)`,
+          totalComputeUnits: sql<number>`coalesce(sum(compute_units), 0)`,
+        })
+        .from(apifyUsage);
+
+      // Per-run breakdown (last 50)
+      const runs = await db
+        .select()
+        .from(apifyUsage)
+        .orderBy(desc(apifyUsage.createdAt))
+        .limit(50);
+
+      res.json({
+        totals: {
+          costUsd: Number(totals.totalCost),
+          runs: Number(totals.totalRuns),
+          durationMs: Number(totals.totalDurationMs),
+          computeUnits: Number(totals.totalComputeUnits),
+        },
+        runs: runs.map(r => ({
+          ...r,
+          costUsd: Number(r.costUsd),
+          durationMs: Number(r.durationMs),
+          computeUnits: Number(r.computeUnits),
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching apify usage:", error);
+      res.status(500).json({ error: "Failed to fetch apify usage" });
+    }
+  });
+
   // Get analysis progress for a specific session (reads from job_queue)
   app.get("/api/analysis/:sessionId/progress", async (req, res) => {
     try {
@@ -1079,6 +1190,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ brandUrl, brandName });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch brand settings" });
+    }
+  });
+
+  app.post("/api/settings/brand", async (req, res) => {
+    try {
+      const { brandUrl, brandName } = req.body;
+      if (brandUrl !== undefined) await storage.setSetting('brandUrl', brandUrl);
+      if (brandName !== undefined) {
+        await storage.setSetting('brandName', brandName);
+        currentBrandName = brandName;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save brand settings" });
+    }
+  });
+
+  // Browser actor status check
+  app.get("/api/settings/browser-status", async (req, res) => {
+    try {
+      const hasApifyToken = !!process.env.APIFY_TOKEN;
+      let localUp = false;
+      try {
+        const url = process.env.BROWSER_ACTOR_URL || 'http://browser-actor:8888';
+        const res2 = await fetch(`${url}/`, { signal: AbortSignal.timeout(3000) });
+        localUp = res2.ok;
+      } catch {}
+      // User-chosen mode from DB, or auto-detect
+      const savedMode = await storage.getSetting('browserMode');
+      let mode: string;
+      if (savedMode === 'local' || savedMode === 'cloud') {
+        mode = savedMode;
+      } else {
+        mode = hasApifyToken ? 'cloud' : (localUp ? 'local' : 'none');
+      }
+      res.json({ mode, hasApifyToken, localContainerUp: localUp });
+    } catch {
+      res.json({ mode: 'none', hasApifyToken: false, localContainerUp: false });
+    }
+  });
+
+  app.post("/api/settings/browser-mode", async (req, res) => {
+    try {
+      const { mode } = req.body;
+      if (mode !== 'local' && mode !== 'cloud') {
+        return res.status(400).json({ error: "Mode must be 'local' or 'cloud'" });
+      }
+      await storage.setSetting('browserMode', mode);
+      res.json({ success: true, mode });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save browser mode" });
+    }
+  });
+
+  // Settings - Providers configuration
+  const DEFAULT_PROVIDERS_CONFIG = {
+    perplexity: { enabled: true, type: 'browser' },
+    chatgpt: { enabled: true, type: 'browser' },
+    gemini: { enabled: false, type: 'browser' },
+  };
+
+  app.get("/api/settings/providers", async (req, res) => {
+    try {
+      const raw = await storage.getSetting('providersConfig');
+      const config = raw ? JSON.parse(raw) : DEFAULT_PROVIDERS_CONFIG;
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch providers config" });
+    }
+  });
+
+  app.post("/api/settings/providers", async (req, res) => {
+    try {
+      const config = req.body;
+      await storage.setSetting('providersConfig', JSON.stringify(config));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save providers config" });
     }
   });
 
@@ -1236,13 +1425,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid API key or OpenAI service unavailable" });
       }
 
-      // Store the API key in environment (in production, use secure storage)
-      process.env.OPENAI_API_KEY = apiKey;
-      
+      // Store in DB and update env
+      const { setSetting } = await import('./services/settings');
+      await setSetting('openaiApiKey', apiKey);
+
       res.json({ success: true, message: "API key saved and validated" });
     } catch (error) {
       console.error("Error saving API key:", error);
       res.status(500).json({ error: "Failed to save API key" });
+    }
+  });
+
+  // Settings - Save Apify Token
+  app.post("/api/settings/apify-token", async (req, res) => {
+    try {
+      const { token } = req.body;
+
+      if (token) {
+        // Validate the token by fetching user info
+        const testRes = await fetch('https://api.apify.com/v2/users/me', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!testRes.ok) {
+          return res.status(400).json({ error: "Invalid Apify token" });
+        }
+      }
+
+      const { setSetting } = await import('./services/settings');
+      await setSetting('apifyToken', token || '');
+
+      res.json({ success: true, message: token ? "Apify token saved and validated" : "Apify token removed" });
+    } catch (error) {
+      console.error("Error saving Apify token:", error);
+      res.status(500).json({ error: "Failed to save Apify token" });
+    }
+  });
+
+  // Settings - Get Apify Token status
+  app.get("/api/settings/apify-token", async (req, res) => {
+    try {
+      const { getSetting } = await import('./services/settings');
+      const token = await getSetting('apifyToken');
+      res.json({ hasToken: !!token });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check Apify token" });
+    }
+  });
+
+  // Settings - Get OpenAI key status
+  app.get("/api/settings/openai-key", async (req, res) => {
+    try {
+      const { getSetting } = await import('./services/settings');
+      const key = await getSetting('openaiApiKey');
+      res.json({ hasKey: !!key });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check OpenAI key" });
+    }
+  });
+
+  // Settings - Save ChatGPT credentials
+  app.post("/api/settings/chatgpt-credentials", async (req, res) => {
+    try {
+      const { email, password, totpSecret } = req.body;
+      const { setSetting } = await import('./services/settings');
+      if (email !== undefined) await setSetting('chatgptEmail', email || '');
+      if (password !== undefined) await setSetting('chatgptPassword', password || '');
+      if (totpSecret !== undefined) await setSetting('chatgptTotpSecret', totpSecret || '');
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error saving ChatGPT credentials:", error);
+      res.status(500).json({ error: "Failed to save credentials" });
+    }
+  });
+
+  app.get("/api/settings/chatgpt-credentials", async (req, res) => {
+    try {
+      const { getSetting } = await import('./services/settings');
+      const email = await getSetting('chatgptEmail');
+      const password = await getSetting('chatgptPassword');
+      const totpSecret = await getSetting('chatgptTotpSecret');
+      res.json({
+        hasEmail: !!email,
+        hasPassword: !!password,
+        hasTotpSecret: !!totpSecret,
+        email: email || '',  // email is not secret, can show it
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check credentials" });
     }
   });
 

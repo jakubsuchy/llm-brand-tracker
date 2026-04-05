@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle, XCircle, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { CheckCircle, XCircle, Search } from "lucide-react";
 import type { ResponseWithPrompt, Topic } from "@shared/schema";
 
 interface AnalysisRun {
@@ -29,6 +29,7 @@ export default function PromptResultsPage() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
+  const [selectedProvider, setSelectedProvider] = useState<string>('all');
   const [selectedRun, setSelectedRun] = useState<string>(urlRunId || 'all');
   const [expandedPrompt, setExpandedPrompt] = useState<number | null>(urlPromptId ? parseInt(urlPromptId) : null);
   const [page, setPage] = useState(0);
@@ -66,12 +67,19 @@ export default function PromptResultsPage() {
   const mentionedCount = allPrompts.filter(p => p.brandMentioned).length;
   const notMentionedCount = allPrompts.filter(p => !p.brandMentioned).length;
 
+  // Get unique providers for filter
+  const providers = [...new Set(allPrompts.map(p => p.provider).filter(Boolean))];
+
   const filteredPrompts = allPrompts.filter(prompt => {
     if (filter === 'mentioned' && !prompt.brandMentioned) return false;
     if (filter === 'not-mentioned' && prompt.brandMentioned) return false;
     if (selectedTopic !== 'all' && prompt.prompt.topicId !== parseInt(selectedTopic)) return false;
-    if (searchTerm && !prompt.prompt.text.toLowerCase().includes(searchTerm.toLowerCase())) {
-      return false;
+    if (selectedProvider !== 'all' && prompt.provider !== selectedProvider) return false;
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      const matchesPrompt = prompt.prompt.text.toLowerCase().includes(q);
+      const matchesResponse = prompt.text.toLowerCase().includes(q);
+      if (!matchesPrompt && !matchesResponse) return false;
     }
     return true;
   });
@@ -86,6 +94,7 @@ export default function PromptResultsPage() {
   const updateTopic = (t: string) => { setSelectedTopic(t); setPage(0); };
   const updateSearch = (s: string) => { setSearchTerm(s); setPage(0); };
   const updateRun = (r: string) => { setSelectedRun(r); setPage(0); };
+  const updateProvider = (p: string) => { setSelectedProvider(p); setPage(0); };
 
   const getTopicName = (topicId: number | null) => {
     if (!topicId) return 'General';
@@ -173,7 +182,7 @@ export default function PromptResultsPage() {
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
-              placeholder="Search queries..."
+              placeholder="Search prompts and responses..."
               value={searchTerm}
               onChange={(e) => updateSearch(e.target.value)}
               className="pl-10"
@@ -192,6 +201,17 @@ export default function PromptResultsPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={selectedProvider} onValueChange={updateProvider}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Providers</SelectItem>
+              {providers.map(p => (
+                <SelectItem key={p} value={p!}>{p}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -201,10 +221,10 @@ export default function PromptResultsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>USER QUERY</TableHead>
+              <TableHead className="w-28">PROVIDER</TableHead>
               <TableHead className="w-48">IS BRAND MENTIONED?</TableHead>
               <TableHead className="w-32">TOPIC</TableHead>
               {selectedRun === 'all' && <TableHead className="w-36">RUN</TableHead>}
-              <TableHead className="w-24"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -217,11 +237,19 @@ export default function PromptResultsPage() {
             ) : (
               paginatedPrompts.map((prompt) => (
                 <>
-                  <TableRow key={prompt.id} id={`prompt-${prompt.id}`} className={`hover:bg-gray-50 ${expandedPrompt === prompt.id && urlPromptId ? 'bg-blue-50' : ''}`}>
+                  <TableRow
+                    key={prompt.id}
+                    id={`prompt-${prompt.id}`}
+                    className={`hover:bg-gray-50 cursor-pointer ${expandedPrompt === prompt.id ? 'bg-blue-50' : ''}`}
+                    onClick={() => setExpandedPrompt(expandedPrompt === prompt.id ? null : prompt.id)}
+                  >
                     <TableCell className="font-medium">
                       <p className="text-sm text-gray-900 leading-relaxed">
                         {prompt.prompt.text}
                       </p>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">{prompt.provider || 'api'}</Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -250,27 +278,13 @@ export default function PromptResultsPage() {
                         </span>
                       </TableCell>
                     )}
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setExpandedPrompt(expandedPrompt === prompt.id ? null : prompt.id)}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        {expandedPrompt === prompt.id ? (
-                          <><ChevronUp className="h-4 w-4 mr-1" /> Hide</>
-                        ) : (
-                          <><ChevronDown className="h-4 w-4 mr-1" /> Details</>
-                        )}
-                      </Button>
-                    </TableCell>
                   </TableRow>
                   {expandedPrompt === prompt.id && (
                     <TableRow key={`${prompt.id}-detail`}>
                       <TableCell colSpan={selectedRun === 'all' ? 5 : 4} className="bg-gray-50 p-0">
                         <div className="p-4 space-y-3">
                           <div>
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">ChatGPT Response</h4>
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.provider || 'API'} Response</h4>
                             <div className="text-sm text-gray-800 whitespace-pre-wrap bg-white p-4 rounded border max-h-96 overflow-y-auto leading-relaxed">
                               {prompt.text}
                             </div>

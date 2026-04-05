@@ -97,6 +97,22 @@ export const apiUsage = pgTable("api_usage", {
   calledAt: timestamp("called_at").defaultNow(),
 });
 
+export const apifyUsage = pgTable("apify_usage", {
+  id: serial("id").primaryKey(),
+  analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id),
+  jobId: integer("job_id"),
+  apifyRunId: text("apify_run_id").notNull(),
+  provider: text("provider").notNull(),
+  status: text("status").notNull(),
+  costUsd: real("cost_usd"),
+  durationMs: integer("duration_ms"),
+  computeUnits: real("compute_units"),
+  proxyGbytes: real("proxy_gbytes"),
+  memMaxBytes: real("mem_max_bytes"),
+  datasetId: text("dataset_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const competitorMerges = pgTable("competitor_merges", {
   id: serial("id").primaryKey(),
   primaryCompetitorId: integer("primary_competitor_id").references(() => competitors.id).notNull(),

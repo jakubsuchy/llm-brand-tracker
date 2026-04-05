@@ -1,9 +1,0 @@
-{
-    "prompts": [
-        "What are the best project management tools for remote teams?"
-    ],
-    "provider": "chatgpt",
-    "chatgptEmail": "you@example.com",
-    "chatgptPassword": "your-password",
-    "chatgptTotpSecret": "YOUR_BASE32_SECRET_HERE"
-}

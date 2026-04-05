@@ -58,12 +58,8 @@ export default function MetricsOverview({ runId }: { runId?: string }) {
     if (idx >= 0 && idx + 1 < completedRuns.length) {
       prevRunId = completedRuns[idx + 1].id.toString(); // runs are sorted desc
     }
-  } else {
-    // Viewing "All Runs" — compare latest vs second-latest
-    if (completedRuns.length >= 2) {
-      prevRunId = completedRuns[1].id.toString();
-    }
   }
+  // No comparison when viewing "All Runs" — aggregate vs single run doesn't make sense
 
   // Fetch previous run metrics (only if we have a previous run)
   const { data: prevMetrics } = useQuery<Metrics>({

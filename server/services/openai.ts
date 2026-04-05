@@ -26,7 +26,8 @@ export async function analyzePromptResponse(
   prompt: string,
   brandName?: string,
   knownCompetitors?: string[],
-  provider: string = activeResponseMethod
+  provider: string = activeResponseMethod,
+  context?: { analysisRunId?: number; jobId?: number },
 ): Promise<PromptAnalysisResult> {
   let responseText = "";
   let sources: string[] = [];
@@ -42,7 +43,7 @@ export async function analyzePromptResponse(
   } else {
     // Browser provider (chatgpt, perplexity, etc.)
     try {
-      const result = await getResponseViaBrowser(prompt, effectiveProvider);
+      const result = await getResponseViaBrowser(prompt, effectiveProvider, context);
       responseText = result.responseText;
       sources = result.sources;
     } catch (browserError) {
@@ -111,10 +112,10 @@ Rules:
 
 // --- Browser method: send to browser actor (local or Apify Cloud) ---
 
-async function getResponseViaBrowser(prompt: string, provider: string): Promise<{ responseText: string; sources: string[] }> {
+async function getResponseViaBrowser(prompt: string, provider: string, context?: { analysisRunId?: number; jobId?: number }): Promise<{ responseText: string; sources: string[] }> {
   const { askBrowser } = await import('./chatgpt-browser');
 
-  const result = await askBrowser(prompt, provider as any);
+  const result = await askBrowser(prompt, provider as any, context);
 
   // Extract URLs from markdown links in the response text
   const urlSources: string[] = [];

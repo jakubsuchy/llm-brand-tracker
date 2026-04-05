@@ -3,8 +3,19 @@ import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/ch
 import { db } from "../db";
 import { apiUsage } from "@shared/schema";
 
-export const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "default_key"
+// Lazy-initialized so DB settings have time to load into process.env
+let _openai: OpenAI | null = null;
+export function getOpenAI(): OpenAI {
+  if (!_openai || _openai.apiKey === 'default_key') {
+    _openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || 'default_key'
+    });
+  }
+  return _openai;
+}
+// Keep backward compat for existing imports
+export const openai = new Proxy({} as OpenAI, {
+  get(_, prop) { return (getOpenAI() as any)[prop]; }
 });
 
 // Current analysis run ID for token tracking

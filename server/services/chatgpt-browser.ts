@@ -1,6 +1,9 @@
 // Browser Actor Client — sends prompts to a local browser-actor container or Apify Cloud.
 // Dual mode: local standby container (no APIFY_TOKEN) or Apify Cloud API (APIFY_TOKEN set).
 
+import { db } from '../db';
+import { apifyUsage } from '@shared/schema';
+
 export interface BrowserScraperResult {
   question: string;
   answer: string;
@@ -87,8 +90,8 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
   });
 
   if (!startRes.ok) {
-    const err = await startRes.json().catch(() => ({ error: startRes.statusText }));
-    throw new Error(`Apify start run failed (${startRes.status}): ${err.error || JSON.stringify(err)}`);
+    const errBody = await startRes.text().catch(() => startRes.statusText);
+    throw new Error(`Apify start run failed (${startRes.status}): ${errBody}`);
   }
 
   const runData = await startRes.json();
@@ -114,6 +117,11 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
     if (status === 'SUCCEEDED' || status === 'FAILED' || status === 'ABORTED') {
       break;
     }
+  }
+
+  // Record usage for any terminal status (fire-and-forget)
+  if (runInfo?.data) {
+    recordApifyUsage(runInfo.data, provider).catch(() => {});
   }
 
   if (status === 'FAILED') {
@@ -156,20 +164,53 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
   };
 }
 
+// ─── Apify usage tracking ────────────────────────────────────────
+
+let _currentContext: { analysisRunId?: number; jobId?: number } | null = null;
+
+async function recordApifyUsage(runData: any, provider: string) {
+  try {
+    const stats = runData.stats || {};
+    const usage = runData.usageUsd || {};
+    await db.insert(apifyUsage).values({
+      analysisRunId: _currentContext?.analysisRunId || null,
+      jobId: _currentContext?.jobId || null,
+      apifyRunId: runData.id,
+      provider,
+      status: runData.status,
+      costUsd: runData.usageTotalUsd || null,
+      durationMs: stats.durationMillis ? Math.round(stats.durationMillis) : null,
+      computeUnits: stats.computeUnits || null,
+      proxyGbytes: usage.PROXY_RESIDENTIAL_TRANSFER_GBYTES || null,
+      memMaxBytes: stats.memMaxBytes || null,
+      datasetId: runData.defaultDatasetId || null,
+    });
+  } catch (err) {
+    console.error('[Apify] Failed to record usage:', (err as Error).message);
+  }
+}
+
 // ─── Public API ──────────────────────────────────────────────────
 
 export async function askBrowser(
   question: string,
   provider: BrowserProvider = 'chatgpt',
+  context?: { analysisRunId?: number; jobId?: number },
 ): Promise<BrowserScraperResult> {
   const startTime = Date.now();
-  const mode = process.env.APIFY_TOKEN ? 'cloud' : 'local';
+  // Check DB setting first, fall back to env var detection
+  const { storage } = await import('../storage');
+  const savedMode = await storage.getSetting('browserMode');
+  const mode = savedMode === 'local' ? 'local' : savedMode === 'cloud' ? 'cloud' : (process.env.APIFY_TOKEN ? 'cloud' : 'local');
 
   console.log(`[Browser ${provider}] Sending (${mode}): "${question.substring(0, 80)}..."`);
 
+  // Pass context to cloud mode for usage tracking
+  _currentContext = context || null;
   const result = mode === 'cloud'
     ? await askBrowserCloud(question, provider)
     : await askBrowserLocal(question, provider);
+  _currentContext = null;
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`[Browser ${provider}] Done in ${elapsed}s — ${result.answer.length} chars, ${result.sources.length} sources`);

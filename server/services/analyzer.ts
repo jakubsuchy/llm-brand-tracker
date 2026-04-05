@@ -18,6 +18,7 @@ export interface AnalysisProgress {
   totalPrompts?: number;
   completedPrompts?: number;
   failedCount?: number;
+  runningCount?: number;
 }
 
 /**
@@ -51,7 +52,16 @@ export async function getAnalysisProgressFromDB(): Promise<AnalysisProgress> {
   }
 
   if (latestRun.status === 'complete') {
-    return { status: 'complete', message: 'Analysis complete!', progress: 100, totalPrompts: latestRun.totalPrompts || 0, completedPrompts: latestRun.totalPrompts || 0 };
+    const terminalFailures = (await storage.getFailedJobs(latestRun.id)).length;
+    const progress = await storage.getJobQueueProgress(latestRun.id);
+    return {
+      status: 'complete',
+      message: terminalFailures > 0 ? `Analysis complete (${terminalFailures} failed)` : 'Analysis complete!',
+      progress: 100,
+      totalPrompts: latestRun.totalPrompts || 0,
+      completedPrompts: progress.completed,
+      failedCount: terminalFailures,
+    };
   }
 
   if (latestRun.status === 'error' || latestRun.status === 'cancelled') {
@@ -72,13 +82,18 @@ export async function getAnalysisProgressFromDB(): Promise<AnalysisProgress> {
   const doneCount = progress.completed + terminalFailures;
   const pct = Math.round((doneCount / originalTotal) * 100);
 
+  const parts = [`${progress.completed} done`];
+  if (progress.processing > 0) parts.push(`${progress.processing} running`);
+  if (terminalFailures > 0) parts.push(`${terminalFailures} failed`);
+
   return {
     status: 'testing_prompts',
-    message: `Testing prompts... (${progress.completed} done${terminalFailures > 0 ? `, ${terminalFailures} failed` : ''}/${originalTotal})`,
+    message: `Testing prompts... (${parts.join(', ')}/${originalTotal})`,
     progress: Math.min(pct, 99),
     totalPrompts: originalTotal,
     completedPrompts: progress.completed,
     failedCount: terminalFailures,
+    runningCount: progress.processing,
   };
 }
 
@@ -159,21 +174,34 @@ export class BrandAnalyzer {
         }
       }
 
-      // Determine which providers to use
+      // Determine which providers to use from settings
       let activeProviders: string[] = [];
 
       try {
+        const raw = await storage.getSetting('providersConfig');
+        const config = raw ? JSON.parse(raw) : {
+          perplexity: { enabled: true, type: 'browser' },
+          chatgpt: { enabled: true, type: 'browser' },
+          gemini: { enabled: false, type: 'browser' },
+        };
+
         const { isBrowserAvailable } = await import('./chatgpt-browser');
-        if (await isBrowserAvailable()) {
-          activeProviders.push('chatgpt', 'perplexity');
+        const browserAvailable = await isBrowserAvailable();
+
+        for (const [name, settings] of Object.entries(config) as [string, any][]) {
+          if (!settings.enabled) continue;
+          if (settings.type === 'browser' && !browserAvailable) {
+            console.log(`[${new Date().toISOString()}] Skipping ${name} — browser not available`);
+            continue;
+          }
+          activeProviders.push(name);
         }
       } catch {
-        console.log(`[${new Date().toISOString()}] Browser actor not available, skipping browser providers`);
+        console.log(`[${new Date().toISOString()}] Failed to load provider config, using defaults`);
       }
 
-      // Fallback to API-only if no browser providers
       if (activeProviders.length === 0) {
-        activeProviders.push('api');
+        throw new Error('No providers available. Enable at least one provider in Settings and ensure browser actor or Apify token is configured.');
       }
       activeProviders = [...new Set(activeProviders)];
 
@@ -215,7 +243,7 @@ export class BrandAnalyzer {
           provider,
           status: 'pending',
           attempts: 0,
-          maxAttempts: 3,
+          maxAttempts: process.env.APIFY_TOKEN ? 100 : 10,
           lastError: null,
         });
       }
@@ -237,14 +265,27 @@ export class BrandAnalyzer {
    * Browser jobs run serially (concurrency 1), API jobs can run in parallel.
    */
   async runWorkerLoop(analysisRunId: number, hasBrowserProviders: boolean = false): Promise<void> {
-    // Browser is a singleton — only one prompt at a time. API can do 3 concurrent.
-    const concurrency = hasBrowserProviders ? 1 : 3;
+    // Cloud: all jobs fire in parallel (each is an independent Apify run).
+    // Local browser: serial (single browser instance). API: 3 concurrent.
+    const isCloud = !!process.env.APIFY_TOKEN;
+    const concurrency = isCloud ? 30 : (hasBrowserProviders ? 1 : 3);
     const POLL_INTERVAL_MS = 500;
     const STALL_TIMEOUT_MS = 300000; // 5 minutes
+
+    let lastStallCheck = Date.now();
 
     const workers = Array.from({ length: concurrency }, async (_, workerIdx) => {
       let idleCount = 0;
       while (true) {
+        // Periodic stall recovery — worker 0 checks every 2 minutes
+        if (workerIdx === 0 && Date.now() - lastStallCheck > 120000) {
+          lastStallCheck = Date.now();
+          const recovered = await storage.recoverStalledJobs(STALL_TIMEOUT_MS);
+          if (recovered > 0) {
+            console.log(`[${new Date().toISOString()}] Recovered ${recovered} stalled jobs`);
+          }
+        }
+
         // Check for cancellation
         const latestRun = await storage.getLatestAnalysisRun();
         if (!latestRun || latestRun.status === 'cancelled' || latestRun.status === 'error') {
@@ -280,16 +321,19 @@ export class BrandAnalyzer {
         } catch (error: any) {
           const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
           const isAborted = error?.message?.startsWith('ABORTED:');
-          const isRateLimit = error?.status === 429 || error?.code === 'rate_limit_exceeded' || error?.message?.includes('rate limit');
+          const isBusy = error?.message?.includes('(429)') || error?.message?.includes('busy');
           // Retry everything except quota and aborted errors
           const shouldRetry = !isQuota && !isAborted;
-          await storage.failJob(job.id, error.message || 'Unknown error', shouldRetry);
-          console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message}`);
+          await storage.failJob(job.id, error.message || 'Unknown error', shouldRetry, isBusy);
+          console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message?.substring(0, 200)}`);
 
-          if (isRateLimit) {
-            const backoff = Math.pow(2, Math.min(job.attempts, 5)) * 2000;
-            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: rate limited, backing off ${Math.round(backoff / 1000)}s`);
+          if (shouldRetry && isCloud) {
+            const backoff = 60000 + Math.random() * 30000;
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: backing off ${Math.round(backoff / 1000)}s before next job`);
             await new Promise(resolve => setTimeout(resolve, backoff));
+          } else if (shouldRetry && isBusy) {
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: browser busy, waiting 10s`);
+            await new Promise(resolve => setTimeout(resolve, 10000));
           }
         }
 
@@ -324,7 +368,7 @@ export class BrandAnalyzer {
 
     // Get response from LLM
     const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
-    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, provider);
+    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, provider, { analysisRunId, jobId: job.id });
 
     // Process competitors
     const brandLower = (this.brandName || '').toLowerCase();

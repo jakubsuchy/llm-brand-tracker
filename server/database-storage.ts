@@ -592,7 +592,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(jobQueue.id, jobId));
   }
 
-  async failJob(jobId: number, error: string, shouldRetry: boolean): Promise<void> {
+  async failJob(jobId: number, error: string, shouldRetry: boolean, wasBusy: boolean = false): Promise<void> {
     // Always mark the current job as failed with the error
     const [job] = await db.select().from(jobQueue).where(eq(jobQueue.id, jobId));
     await db.update(jobQueue)
@@ -601,7 +601,9 @@ export class DatabaseStorage implements IStorage {
 
     // If retryable and under max attempts, create a new job for the retry
     if (shouldRetry && job && job.attempts < (job.maxAttempts || 3)) {
-      // Link back to the original job in the chain (first failure's id)
+      // 429/busy shouldn't count as a real attempt — dequeueJob already incremented,
+      // so subtract 2 to net zero (one for dequeue increment, one for this retry)
+      const retryAttempts = wasBusy ? Math.max(0, job.attempts - 2) : job.attempts;
       const originalId = job.originalJobId || job.id;
       await db.insert(jobQueue).values({
         analysisRunId: job.analysisRunId,
@@ -611,7 +613,7 @@ export class DatabaseStorage implements IStorage {
         promptIsExisting: job.promptIsExisting,
         provider: job.provider,
         status: 'pending',
-        attempts: job.attempts,
+        attempts: retryAttempts,
         maxAttempts: job.maxAttempts,
         lastError: null,
         originalJobId: originalId,
@@ -682,11 +684,11 @@ export class DatabaseStorage implements IStorage {
       SELECT f.* FROM job_queue f
       WHERE f.analysis_run_id = ${analysisRunId}
         AND f.status = 'failed'
-        -- No completed or pending/processing job shares this chain
+        -- No completed, pending, processing, or cancelled job shares this chain
         AND NOT EXISTS (
           SELECT 1 FROM job_queue s
           WHERE s.analysis_run_id = ${analysisRunId}
-            AND s.status IN ('completed', 'pending', 'processing')
+            AND s.status IN ('completed', 'pending', 'processing', 'cancelled')
             AND (
               -- same chain: both point to the same original, or one IS the original
               s.original_job_id = COALESCE(f.original_job_id, f.id)
