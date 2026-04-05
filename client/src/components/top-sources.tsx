@@ -41,14 +41,19 @@ const getDomainLabel = (domain: string) => {
   return 'Website';
 };
 
-export default function TopSources({ runId }: { runId?: string }) {
+export default function TopSources({ runId, provider }: { runId?: string; provider?: string }) {
   const { toast } = useToast();
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'all' | 'brand' | 'competitor' | 'neutral'>('all');
-  
+
+  const sourceParams = new URLSearchParams();
+  if (runId) sourceParams.set('runId', runId);
+  if (provider) sourceParams.set('provider', provider);
+  const sourceParamStr = sourceParams.toString() ? `?${sourceParams.toString()}` : '';
+
   const { data: sources, isLoading, error } = useQuery<SourceAnalysis[]>({
-    queryKey: ["/api/sources/analysis"],
+    queryKey: [`/api/sources/analysis${sourceParamStr}`],
   });
 
   const handleExport = async () => {

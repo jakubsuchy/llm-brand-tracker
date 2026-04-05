@@ -22,11 +22,14 @@ const topicColors = [
   { bg: "bg-green-500", ring: "ring-green-200" },
 ];
 
-export default function TopicAnalysis({ runId }: { runId?: string }) {
+export default function TopicAnalysis({ runId, provider }: { runId?: string; provider?: string }) {
   const [showAll, setShowAll] = useState(false);
-  const runParam = runId ? `?runId=${runId}` : '';
+  const topicParams = new URLSearchParams();
+  if (runId) topicParams.set('runId', runId);
+  if (provider) topicParams.set('provider', provider);
+  const topicParamStr = topicParams.toString() ? `?${topicParams.toString()}` : '';
   const { data: topics, isLoading, error } = useQuery<TopicAnalysis[]>({
-    queryKey: [`/api/topics/analysis${runParam}`],
+    queryKey: [`/api/topics/analysis${topicParamStr}`],
   });
 
   if (isLoading) {

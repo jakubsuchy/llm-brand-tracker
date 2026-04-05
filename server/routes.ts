@@ -428,7 +428,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/metrics", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const allResponses = await storage.getResponsesWithPrompts(runId);
+      const provider = req.query.provider as string | undefined;
+      let allResponses = await storage.getResponsesWithPrompts(runId);
+      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
 
       // Group by unique prompt text — a prompt "mentions brand" if ANY response for it did
       const promptMap = new Map<string, { mentioned: boolean; count: number }>();
@@ -455,10 +457,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allSources = await storage.getSources();
       let sourceCount = 0;
       let domainCount = 0;
-      if (runId) {
+      if (runId || provider) {
         const sourcesWithUrls = await Promise.all(
           allSources.map(async s => {
-            const urls = await storage.getSourceUrlsBySourceId(s.id, runId);
+            const urls = await storage.getSourceUrlsBySourceId(s.id, runId, provider);
             return urls.length > 0 ? s : null;
           })
         );
@@ -467,10 +469,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sourceCount = activeSources.reduce((sum, s) => {
           return sum; // counted below
         }, 0);
-        // Count total URLs for this run
+        // Count total URLs for this run/provider
         let totalUrls = 0;
         for (const s of allSources) {
-          const urls = await storage.getSourceUrlsBySourceId(s.id, runId);
+          const urls = await storage.getSourceUrlsBySourceId(s.id, runId, provider);
           totalUrls += urls.length;
         }
         sourceCount = totalUrls;
@@ -497,7 +499,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/counts", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const allResponses = await storage.getResponsesWithPrompts(runId);
+      const provider = req.query.provider as string | undefined;
+      let allResponses = await storage.getResponsesWithPrompts(runId);
+      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
 
@@ -586,8 +590,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/topics/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const provider = req.query.provider as string | undefined;
       // Derive topic analysis from responses
-      const allResponses = await storage.getResponsesWithPrompts(runId);
+      let allResponses = await storage.getResponsesWithPrompts(runId);
+      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
       const topicMap = new Map<number, { name: string; total: number; brandMentions: number }>();
       for (const r of allResponses) {
         const topicId = r.prompt?.topicId || 0;
@@ -674,7 +680,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/competitors/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      if (runId) {
+      const provider = req.query.provider as string | undefined;
+
+      if (provider) {
+        // When filtering by provider, compute competitor mentions from responses directly
+        let allResponses = await storage.getResponsesWithPrompts(runId);
+        allResponses = allResponses.filter(r => r.provider === provider);
+        const totalResponses = allResponses.length;
+
+        // Build mention counts from competitorsMentioned arrays
+        const mentionCounts = new Map<string, number>();
+        for (const r of allResponses) {
+          if (r.competitorsMentioned && Array.isArray(r.competitorsMentioned)) {
+            for (const name of r.competitorsMentioned) {
+              mentionCounts.set(name, (mentionCounts.get(name) || 0) + 1);
+            }
+          }
+        }
+
+        // Map to competitor records for IDs and categories
+        const allCompetitors = await storage.getCompetitors();
+        const compByName = new Map(allCompetitors.map(c => [c.name.toLowerCase(), c]));
+
+        const analysis = [...mentionCounts.entries()].map(([name, count]) => {
+          const comp = compByName.get(name.toLowerCase());
+          return {
+            competitorId: comp?.id || 0,
+            name: comp?.name || name,
+            category: comp?.category || null,
+            mentionCount: count,
+            mentionRate: totalResponses > 0 ? (count / totalResponses) * 100 : 0,
+            changeRate: 0
+          };
+        });
+        res.json(analysis);
+      } else if (runId) {
         const mentions = await storage.getCompetitorAnalysisByRun(runId);
         const totalResponses = (await storage.getResponsesWithPrompts(runId)).length;
         const analysis = mentions.map(m => ({
@@ -777,6 +817,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/sources/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const provider = req.query.provider as string | undefined;
       const allSources = await storage.getSources();
 
       // Derive source type dynamically from brand name and competitor list
@@ -826,7 +867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const results = await Promise.all(allSources.map(async source => {
-        const urls = await storage.getSourceUrlsBySourceId(source.id, runId);
+        const urls = await storage.getSourceUrlsBySourceId(source.id, runId, provider);
         if (urls.length === 0) return null;
 
         const domainLower = source.domain.toLowerCase();
@@ -864,7 +905,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const domain = req.params.domain;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const allResponses = await storage.getResponsesWithPrompts(runId);
+      const provider = req.query.provider as string | undefined;
+      let allResponses = await storage.getResponsesWithPrompts(runId);
+      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
       // Filter responses whose text contains this domain
       const matching = allResponses.filter(r =>
         r.text.toLowerCase().includes(domain.toLowerCase())
@@ -899,6 +942,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const provider = req.query.provider as string | undefined;
       const useFullDataset = req.query.full === 'true' || limit > 100;
 
       let responses;
@@ -907,7 +951,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         responses = await storage.getRecentResponses(limit, runId);
       }
-
+      if (provider) responses = responses.filter(r => r.provider === provider);
 
       res.json(responses.slice(0, limit));
     } catch (error) {

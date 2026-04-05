@@ -234,10 +234,15 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number): Promise<string[]> {
-    const condition = analysisRunId
+  async getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, provider?: string): Promise<string[]> {
+    let condition = analysisRunId
       ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId}`
-      : eq(sourceUrls.sourceId, sourceId);
+      : sql`${sourceUrls.sourceId} = ${sourceId}`;
+    if (provider) {
+      condition = analysisRunId
+        ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId} AND ${sourceUrls.provider} = ${provider}`
+        : sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.provider} = ${provider}`;
+    }
     const rows = await db
       .select({ url: sourceUrls.url })
       .from(sourceUrls)

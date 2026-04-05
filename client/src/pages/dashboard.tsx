@@ -20,6 +20,7 @@ interface AnalysisRun {
 
 export default function Dashboard() {
   const [brandName, setBrandName] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<string>('all');
   const searchString = useSearch();
   const [, setLocation] = useLocation();
 
@@ -34,6 +35,8 @@ export default function Dashboard() {
   const setSelectedRunId = (id: string) => {
     setLocation(`/?runId=${id}`);
   };
+
+  const providerValue = selectedProvider !== 'all' ? selectedProvider : undefined;
 
   // Load brand name from DB
   useEffect(() => {
@@ -54,6 +57,17 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2 items-center">
+          <Select value={selectedProvider} onValueChange={setSelectedProvider}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All Providers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Providers</SelectItem>
+              <SelectItem value="perplexity">Perplexity</SelectItem>
+              <SelectItem value="chatgpt">ChatGPT</SelectItem>
+              <SelectItem value="gemini">Gemini</SelectItem>
+            </SelectContent>
+          </Select>
           {analysisRuns && analysisRuns.length > 0 && (
             <Select value={selectedRunId} onValueChange={setSelectedRunId}>
               <SelectTrigger className="w-56">
@@ -75,16 +89,16 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
-        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
+        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
-        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} />
+        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
+        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
       </div>
     </div>
   );

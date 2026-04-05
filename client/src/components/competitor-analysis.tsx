@@ -30,14 +30,18 @@ const getCompetitorColor = (index: number) => {
   return colors[index % colors.length];
 };
 
-export default function CompetitorAnalysis({ runId }: { runId?: string }) {
-  const runParam = runId ? `?runId=${runId}` : '';
+export default function CompetitorAnalysis({ runId, provider }: { runId?: string; provider?: string }) {
+  const compParams = new URLSearchParams();
+  if (runId) compParams.set('runId', runId);
+  if (provider) compParams.set('provider', provider);
+  const compParamStr = compParams.toString() ? `?${compParams.toString()}` : '';
+
   const { data: competitors, isLoading, error } = useQuery<CompetitorAnalysis[]>({
-    queryKey: [`/api/competitors/analysis${runParam}`],
+    queryKey: [`/api/competitors/analysis${compParamStr}`],
   });
 
   const { data: metrics } = useQuery<{ totalPrompts: number }>({
-    queryKey: [`/api/metrics${runParam}`],
+    queryKey: [`/api/metrics${compParamStr}`],
   });
 
   const totalPrompts = metrics?.totalPrompts || 0;

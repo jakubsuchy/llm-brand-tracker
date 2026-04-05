@@ -30,18 +30,22 @@ interface AnalysisRun {
 
 const MIN_PROMPTS = 5;
 
-export default function MetricsOverview({ runId }: { runId?: string }) {
-  const runParam = runId ? `?runId=${runId}` : '';
+export default function MetricsOverview({ runId, provider }: { runId?: string; provider?: string }) {
+  const params = new URLSearchParams();
+  if (runId) params.set('runId', runId);
+  if (provider) params.set('provider', provider);
+  const paramStr = params.toString() ? `?${params.toString()}` : '';
+
   const { data: metrics, isLoading, error } = useQuery<Metrics>({
-    queryKey: [`/api/metrics${runParam}`],
+    queryKey: [`/api/metrics${paramStr}`],
   });
 
   const { data: counts } = useQuery<any>({
-    queryKey: [`/api/counts${runParam}`],
+    queryKey: [`/api/counts${paramStr}`],
   });
 
   const { data: competitorAnalysis } = useQuery<CompetitorAnalysis[]>({
-    queryKey: [`/api/competitors/analysis${runParam}`],
+    queryKey: [`/api/competitors/analysis${paramStr}`],
   });
 
   // Fetch all runs to find the previous one
@@ -62,13 +66,18 @@ export default function MetricsOverview({ runId }: { runId?: string }) {
   // No comparison when viewing "All Runs" — aggregate vs single run doesn't make sense
 
   // Fetch previous run metrics (only if we have a previous run)
+  const prevParams = new URLSearchParams();
+  if (prevRunId) prevParams.set('runId', prevRunId);
+  if (provider) prevParams.set('provider', provider);
+  const prevParamStr = prevParams.toString() ? `?${prevParams.toString()}` : '';
+
   const { data: prevMetrics } = useQuery<Metrics>({
-    queryKey: [`/api/metrics?runId=${prevRunId}`],
+    queryKey: [`/api/metrics${prevParamStr}`],
     enabled: !!prevRunId,
   });
 
   const { data: prevCompetitorAnalysis } = useQuery<CompetitorAnalysis[]>({
-    queryKey: [`/api/competitors/analysis?runId=${prevRunId}`],
+    queryKey: [`/api/competitors/analysis${prevParamStr}`],
     enabled: !!prevRunId,
   });
 
