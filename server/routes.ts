@@ -8,7 +8,10 @@ import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
 
 function requireRole(...requiredRoles: string[]) {
   return (req: any, res: any, next: any) => {
-    if (!req.user?.roles?.some((r: string) => requiredRoles.includes(r))) {
+    const userRoles: string[] = req.user?.roles || [];
+    // Admin can access everything
+    if (userRoles.includes('admin')) return next();
+    if (!userRoles.some((r: string) => requiredRoles.includes(r))) {
       return res.status(403).json({ message: "Insufficient permissions" });
     }
     next();
@@ -1022,7 +1025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Data management endpoints
-  app.post("/api/data/clear", async (req, res) => {
+  app.post("/api/data/clear", requireRole("admin"), async (req, res) => {
     try {
       const { type } = req.body;
       
@@ -1056,7 +1059,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // New prompt generator endpoints
-  app.post("/api/analyze-brand", async (req, res) => {
+  app.post("/api/analyze-brand", requireRole("analyst"), async (req, res) => {
     try {
       const { url } = req.body;
       
@@ -1086,7 +1089,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/generate-prompts", async (req, res) => {
+  app.post("/api/generate-prompts", requireRole("analyst"), async (req, res) => {
     try {
       const { brandUrl, competitors, settings } = req.body;
       
@@ -1164,7 +1167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/save-and-analyze", async (req, res) => {
+  app.post("/api/save-and-analyze", requireRole("analyst"), async (req, res) => {
     try {
       const { topics, brandUrl } = req.body;
 
@@ -1247,7 +1250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Re-run analysis on existing prompts
-  app.post("/api/analysis/start", async (req, res) => {
+  app.post("/api/analysis/start", requireRole("analyst"), async (req, res) => {
     try {
       const { brandUrl } = req.body || {};
 
@@ -1289,7 +1292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get failed jobs for the latest (or specific) analysis run
-  app.get("/api/analysis/failures", async (req, res) => {
+  app.get("/api/analysis/failures", requireRole("analyst"), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       let targetRunId = runId;
@@ -1316,7 +1319,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get all jobs for the latest (or specific) analysis run — compact view
-  app.get("/api/analysis/jobs", async (req, res) => {
+  app.get("/api/analysis/jobs", requireRole("analyst"), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       let targetRunId = runId;
@@ -1477,7 +1480,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/settings/brand", async (req, res) => {
+  app.get("/api/settings/brand", requireRole("admin"), async (req, res) => {
     try {
       const brandUrl = await storage.getSetting('brandUrl');
       const brandName = await storage.getSetting('brandName');
@@ -1487,7 +1490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/brand", async (req, res) => {
+  app.post("/api/settings/brand", requireRole("admin"), async (req, res) => {
     try {
       const { brandUrl, brandName } = req.body;
       if (brandUrl !== undefined) await storage.setSetting('brandUrl', brandUrl);
@@ -1502,7 +1505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Browser actor status check
-  app.get("/api/settings/browser-status", async (req, res) => {
+  app.get("/api/settings/browser-status", requireRole("admin"), async (req, res) => {
     try {
       const hasApifyToken = !!process.env.APIFY_TOKEN;
       let localUp = false;
@@ -1525,7 +1528,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/browser-mode", async (req, res) => {
+  app.post("/api/settings/browser-mode", requireRole("admin"), async (req, res) => {
     try {
       const { mode } = req.body;
       if (mode !== 'local' && mode !== 'cloud') {
@@ -1555,7 +1558,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/providers", async (req, res) => {
+  app.post("/api/settings/providers", requireRole("admin"), async (req, res) => {
     try {
       const config = req.body;
       await storage.setSetting('providersConfig', JSON.stringify(config));
@@ -1566,7 +1569,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Competitor subdomain prefixes
-  app.get("/api/settings/competitor-subdomains", async (req, res) => {
+  app.get("/api/settings/competitor-subdomains", requireRole("admin"), async (req, res) => {
     try {
       const value = await storage.getSetting('competitorSubdomains');
       // Default to "docs" if not set
@@ -1577,7 +1580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/competitor-subdomains", async (req, res) => {
+  app.post("/api/settings/competitor-subdomains", requireRole("admin"), async (req, res) => {
     try {
       const { prefixes } = req.body;
       if (!Array.isArray(prefixes)) {
@@ -1592,7 +1595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Response method (browser vs API)
-  app.get("/api/settings/response-method", async (req, res) => {
+  app.get("/api/settings/response-method", requireRole("admin"), async (req, res) => {
     try {
       const { getResponseMethod } = await import('./services/openai');
       const method = getResponseMethod();
@@ -1603,7 +1606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/response-method", async (req, res) => {
+  app.post("/api/settings/response-method", requireRole("admin"), async (req, res) => {
     try {
       const { method } = req.body;
       if (method !== 'browser' && method !== 'api') {
@@ -1624,7 +1627,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Settings - Competitor blocklist
   const DEFAULT_BLOCKLIST = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
 
-  app.get("/api/settings/competitor-blocklist", async (req, res) => {
+  app.get("/api/settings/competitor-blocklist", requireRole("admin"), async (req, res) => {
     try {
       const value = await storage.getSetting('competitorBlocklist');
       const entries = value ? value.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_BLOCKLIST;
@@ -1634,7 +1637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/settings/competitor-blocklist", async (req, res) => {
+  app.post("/api/settings/competitor-blocklist", requireRole("admin"), async (req, res) => {
     try {
       const { entries } = req.body;
       if (!Array.isArray(entries)) {
@@ -1699,7 +1702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Save OpenAI API Key
-  app.post("/api/settings/openai-key", async (req, res) => {
+  app.post("/api/settings/openai-key", requireRole("admin"), async (req, res) => {
     try {
       const { apiKey } = req.body;
       
@@ -1731,7 +1734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Save Apify Token
-  app.post("/api/settings/apify-token", async (req, res) => {
+  app.post("/api/settings/apify-token", requireRole("admin"), async (req, res) => {
     try {
       const { token } = req.body;
 
@@ -1756,7 +1759,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Get Apify Token status
-  app.get("/api/settings/apify-token", async (req, res) => {
+  app.get("/api/settings/apify-token", requireRole("admin"), async (req, res) => {
     try {
       const { getSetting } = await import('./services/settings');
       const token = await getSetting('apifyToken');
@@ -1767,7 +1770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Get OpenAI key status
-  app.get("/api/settings/openai-key", async (req, res) => {
+  app.get("/api/settings/openai-key", requireRole("admin"), async (req, res) => {
     try {
       const { getSetting } = await import('./services/settings');
       const key = await getSetting('openaiApiKey');
@@ -1778,7 +1781,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Save ChatGPT credentials
-  app.post("/api/settings/chatgpt-credentials", async (req, res) => {
+  app.post("/api/settings/chatgpt-credentials", requireRole("admin"), async (req, res) => {
     try {
       const { email, password, totpSecret } = req.body;
       const { setSetting } = await import('./services/settings');
@@ -1792,7 +1795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/settings/chatgpt-credentials", async (req, res) => {
+  app.get("/api/settings/chatgpt-credentials", requireRole("admin"), async (req, res) => {
     try {
       const { getSetting } = await import('./services/settings');
       const email = await getSetting('chatgptEmail');
@@ -1810,7 +1813,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Settings - Save Analysis Configuration
-  app.post("/api/settings/analysis-config", async (req, res) => {
+  app.post("/api/settings/analysis-config", requireRole("admin"), async (req, res) => {
     try {
       const { promptsPerTopic, analysisFrequency } = req.body;
       
@@ -1834,7 +1837,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Analysis Progress - Get current progress (reads from job_queue table)
-  app.get("/api/analysis/progress", async (req, res) => {
+  app.get("/api/analysis/progress", requireRole("analyst"), async (req, res) => {
     try {
       const progress = await getAnalysisProgressFromDB();
       res.json(progress);
@@ -1845,7 +1848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Cancel analysis (DB-based)
-  app.post("/api/analysis/cancel", async (req, res) => {
+  app.post("/api/analysis/cancel", requireRole("analyst"), async (req, res) => {
     try {
       await cancelAnalysisRun();
       res.json({

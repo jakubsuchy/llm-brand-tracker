@@ -19,16 +19,19 @@ export default function Sidebar() {
   const [location] = useLocation();
   const { user, logout, hasRole } = useAuth();
 
+  const isAdminOrAnalyst = hasRole('admin') || hasRole('analyst');
+  const isAdmin = hasRole('admin');
+
   const navigationItems = [
-    { id: "prompt-generator", label: "Prompt Generator", icon: Zap, path: "/prompt-generator" },
+    ...(isAdminOrAnalyst ? [{ id: "prompt-generator", label: "Prompt Generator", icon: Zap, path: "/prompt-generator" }] : []),
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
     { id: "prompt-results", label: "Prompt Results", icon: MessageSquare, path: "/prompt-results" },
     { id: "competitors", label: "Competitors", icon: Users, path: "/competitors" },
     { id: "compare", label: "Compare", icon: Scale, path: "/compare" },
     { id: "sources", label: "Sources", icon: ExternalLink, path: "/sources" },
-    { id: "analysis", label: "Analysis Progress", icon: Activity, path: "/analysis-progress" },
-    { id: "settings", label: "Settings", icon: Settings, path: "/settings" },
-    ...(hasRole('admin') ? [{ id: 'users', label: 'Users', icon: Shield, path: '/users' }] : []),
+    ...(isAdminOrAnalyst ? [{ id: "analysis", label: "Analysis Progress", icon: Activity, path: "/analysis-progress" }] : []),
+    ...(isAdmin ? [{ id: "settings", label: "Settings", icon: Settings, path: "/settings" }] : []),
+    ...(isAdmin ? [{ id: 'users', label: 'Users', icon: Shield, path: '/users' }] : []),
   ];
 
   return (

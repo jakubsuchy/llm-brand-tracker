@@ -27,6 +27,20 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function RequireRole({ role, children }: { role: string; children: ReactNode }) {
+  const { hasRole } = useAuth();
+  // Admin can access everything
+  if (hasRole('admin') || hasRole(role)) return <>{children}</>;
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="text-center">
+        <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
+        <p className="text-gray-500 mt-2">You need the "{role}" role to access this page.</p>
+      </div>
+    </div>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -36,15 +50,15 @@ function Router() {
         <ProtectedRoute>
           <Layout>
             <Switch>
-              <Route path="/prompt-generator" component={PromptGeneratorPage} />
+              <Route path="/prompt-generator">{() => <RequireRole role="analyst"><PromptGeneratorPage /></RequireRole>}</Route>
               <Route path="/" component={Dashboard} />
               <Route path="/prompt-results" component={PromptResultsPage} />
               <Route path="/competitors" component={CompetitorsPage} />
               <Route path="/compare" component={ComparePage} />
               <Route path="/sources" component={SourcesPage} />
-              <Route path="/analysis-progress" component={AnalysisProgressPage} />
-              <Route path="/settings" component={SettingsPage} />
-              <Route path="/users" component={UsersPage} />
+              <Route path="/analysis-progress">{() => <RequireRole role="analyst"><AnalysisProgressPage /></RequireRole>}</Route>
+              <Route path="/settings">{() => <RequireRole role="admin"><SettingsPage /></RequireRole>}</Route>
+              <Route path="/users">{() => <RequireRole role="admin"><UsersPage /></RequireRole>}</Route>
               <Route component={NotFound} />
             </Switch>
           </Layout>
