@@ -19,6 +19,8 @@ declare global {
 }
 
 const app = express();
+// Trust proxy headers (X-Forwarded-Proto, X-Forwarded-Host) when behind ingress/load balancer
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 

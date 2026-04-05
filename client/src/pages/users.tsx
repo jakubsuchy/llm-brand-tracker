@@ -248,10 +248,11 @@ function AuthProvidersTab() {
                 <Input
                   id="google-callback"
                   type="text"
-                  value="/api/auth/google/callback"
+                  value={`${window.location.origin}/api/auth/google/callback`}
                   readOnly
                   className="bg-muted"
                 />
+                <p className="text-xs text-muted-foreground">Register this URL in Google Console as an authorized redirect URI</p>
               </div>
 
               <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
@@ -368,10 +369,11 @@ function AuthProvidersTab() {
                 <Input
                   id="saml-callback"
                   type="text"
-                  value="/api/auth/saml/callback"
+                  value={`${window.location.origin}/api/auth/saml/callback`}
                   readOnly
                   className="bg-muted"
                 />
+                <p className="text-xs text-muted-foreground">Register this URL with your Identity Provider</p>
               </div>
 
               <div className="space-y-2">

@@ -260,7 +260,7 @@ export async function configureAuthProviders(): Promise<void> {
         {
           clientID: config.google.clientId,
           clientSecret: config.google.clientSecret,
-          callbackURL: config.google.callbackUrl || '/api/auth/google/callback',
+          callbackURL: config.google.callbackUrl || (process.env.APP_URL ? `${process.env.APP_URL}/api/auth/google/callback` : '/api/auth/google/callback'),
           scope: ['profile', 'email'],
         },
         async (_accessToken: string, _refreshToken: string, profile: any, done: any) => {
@@ -289,7 +289,7 @@ export async function configureAuthProviders(): Promise<void> {
           entryPoint: config.saml.entryPoint,
           issuer: config.saml.issuer,
           idpCert: config.saml.cert,
-          callbackUrl: config.saml.callbackUrl || '/api/auth/saml/callback',
+          callbackUrl: config.saml.callbackUrl || (process.env.APP_URL ? `${process.env.APP_URL}/api/auth/saml/callback` : '/api/auth/saml/callback'),
           signatureAlgorithm: (config.saml.signatureAlgorithm as any) || 'sha256',
           wantAssertionsSigned: config.saml.wantAssertionsSigned ?? true,
           wantAuthnResponseSigned: config.saml.wantAuthnResponseSigned ?? false,
