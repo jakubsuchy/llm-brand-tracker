@@ -74,10 +74,11 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const { configurePassport, configureAuthProviders, seedRoles } = await import('./services/auth');
+  const { configurePassport, configureAuthProviders, seedRoles, backfillApiKeys } = await import('./services/auth');
   configurePassport();
   await configureAuthProviders();
   await seedRoles();
+  await backfillApiKeys();
 
   const server = await registerRoutes(app);
 

@@ -178,6 +178,15 @@ export async function seedRoles() {
   }
 }
 
+export async function backfillApiKeys() {
+  const usersWithoutKey = await db.select({ id: users.id }).from(users).where(sql`${users.apiKey} IS NULL`);
+  if (usersWithoutKey.length === 0) return;
+  for (const u of usersWithoutKey) {
+    await db.update(users).set({ apiKey: generateApiKey() }).where(eq(users.id, u.id));
+  }
+  console.log(`[Auth] Backfilled API keys for ${usersWithoutKey.length} user(s)`);
+}
+
 // --- Auth provider configuration (DB-stored) ---
 
 export interface AuthProviderConfig {
