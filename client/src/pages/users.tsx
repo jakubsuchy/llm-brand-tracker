@@ -688,74 +688,141 @@ export default function UsersPage() {
                 ) : users.length === 0 ? (
                   <div className="flex items-center justify-center py-12 text-gray-500">No users found</div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Roles</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users.map((user) => (
-                        <TableRow key={user.id}>
-                          <TableCell className="font-medium">{user.fullName}</TableCell>
-                          <TableCell>{user.email}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1 flex-wrap">
-                              {user.roles.map((role) => (
-                                <Badge key={role} variant="outline" className={roleColor(role)}>
-                                  {role}
-                                </Badge>
-                              ))}
-                            </div>
-                          </TableCell>
-                          <TableCell>{formatDate(user.createdAt)}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
+                  <>
+                  {/* Mobile card view */}
+                  <div className="md:hidden p-3 space-y-3">
+                    {users.map((user) => (
+                      <div key={user.id} className="p-3 border rounded-lg">
+                        <div className="flex items-start justify-between mb-1">
+                          <div>
+                            <div className="font-medium text-sm">{user.fullName}</div>
+                            <div className="text-xs text-gray-500">{user.email}</div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => openEditDialog(user)}
+                              title="Edit user"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => { setNewPassword(""); setPasswordUser(user); }}
+                              title="Change password"
+                            >
+                              <Key className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => openRolesDialog(user)}
+                              title="Manage roles"
+                            >
+                              <UserCog className="h-3.5 w-3.5" />
+                            </Button>
+                            {user.id !== currentUser?.id && (
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => openEditDialog(user)}
-                                title="Edit user"
+                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                                onClick={() => setDeleteUser(user)}
+                                title="Delete user"
                               >
-                                <Pencil className="h-4 w-4" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => { setNewPassword(""); setPasswordUser(user); }}
-                                title="Change password"
-                              >
-                                <Key className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openRolesDialog(user)}
-                                title="Manage roles"
-                              >
-                                <UserCog className="h-4 w-4" />
-                              </Button>
-                              {user.id !== currentUser?.id && (
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          {user.roles.map((role) => (
+                            <Badge key={role} variant="outline" className={roleColor(role)}>
+                              {role}
+                            </Badge>
+                          ))}
+                          <span className="text-xs text-gray-400 ml-auto">{formatDate(user.createdAt)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop table view */}
+                  <div className="hidden md:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Roles</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {users.map((user) => (
+                          <TableRow key={user.id}>
+                            <TableCell className="font-medium">{user.fullName}</TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1 flex-wrap">
+                                {user.roles.map((role) => (
+                                  <Badge key={role} variant="outline" className={roleColor(role)}>
+                                    {role}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell>{formatDate(user.createdAt)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setDeleteUser(user)}
-                                  title="Delete user"
-                                  className="text-red-600 hover:text-red-700"
+                                  onClick={() => openEditDialog(user)}
+                                  title="Edit user"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Pencil className="h-4 w-4" />
                                 </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => { setNewPassword(""); setPasswordUser(user); }}
+                                  title="Change password"
+                                >
+                                  <Key className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openRolesDialog(user)}
+                                  title="Manage roles"
+                                >
+                                  <UserCog className="h-4 w-4" />
+                                </Button>
+                                {user.id !== currentUser?.id && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setDeleteUser(user)}
+                                    title="Delete user"
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  </>
                 )}
               </CardContent>
             </Card>

@@ -313,8 +313,8 @@ export default function PromptGeneratorPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Prompt Generator</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <h1 className="text-xl sm:text-2xl font-bold">Prompt Generator</h1>
         <div className="flex items-center space-x-2">
           <Button variant="outline" onClick={startOver}>
             Start Over
@@ -325,10 +325,10 @@ export default function PromptGeneratorPage() {
       {/* Progress Navigation */}
       <Card>
         <CardContent className="pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex space-x-2">
-              <Button 
-                variant={currentStep === 'url' ? "default" : "outline"} 
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex flex-wrap gap-1">
+              <Button
+                variant={currentStep === 'url' ? "default" : "outline"}
                 size="sm"
                 onClick={() => navigateToStep('url')}
               >
@@ -374,7 +374,7 @@ export default function PromptGeneratorPage() {
 
 
       {/* Progress indicator */}
-      <div className="flex items-center space-x-4">
+      <div className="hidden sm:flex items-center space-x-4">
         {['url', 'competitors', 'settings', 'topics', 'ready'].map((step, index) => (
           <div key={step} className="flex items-center">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
@@ -382,7 +382,7 @@ export default function PromptGeneratorPage() {
               ['url', 'competitors', 'settings', 'topics'].indexOf(currentStep) > index ? 'bg-green-600 text-white' :
               'bg-gray-200 text-gray-600'
             }`}>
-              {['url', 'competitors', 'settings', 'topics'].indexOf(currentStep) > index ? 
+              {['url', 'competitors', 'settings', 'topics'].indexOf(currentStep) > index ?
                 <CheckCircle className="h-4 w-4" /> : index + 1
               }
             </div>
@@ -634,10 +634,10 @@ export default function PromptGeneratorPage() {
       {/* Step 4: Topic & Prompt Review */}
       {currentStep === 'topics' && generatedTopics.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">Review Generated Topics & Prompts</h2>
-            <div className="flex space-x-2">
-              <Button 
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h2 className="text-lg sm:text-xl font-semibold">Review Generated Topics & Prompts</h2>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
                 variant="outline"
                 onClick={() => generatePromptsMutation.mutate()}
                 disabled={generatePromptsMutation.isPending}
@@ -645,9 +645,10 @@ export default function PromptGeneratorPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Regenerate
               </Button>
-              <Button 
+              <Button
                 onClick={() => runAnalysisMutation.mutate()}
                 disabled={runAnalysisMutation.isPending}
+                className="w-full sm:w-auto whitespace-normal text-center"
               >
                 {runAnalysisMutation.isPending ? (
                   <>
@@ -655,7 +656,7 @@ export default function PromptGeneratorPage() {
                     Starting Analysis...
                   </>
                 ) : (
-                  'Run Analysis with These Prompts'
+                  `Run Analysis with ${generatedTopics.reduce((sum, t) => sum + t.prompts.length, 0)} Prompts`
                 )}
               </Button>
             </div>

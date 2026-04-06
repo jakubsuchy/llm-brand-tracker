@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -150,15 +150,15 @@ export default function ComparePage() {
   })();
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 sm:p-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Compare</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Compare</h1>
           <p className="text-gray-600 mt-1">Compare your brand mentions against a competitor</p>
         </div>
         <Select value={selectedRun} onValueChange={updateRun}>
-          <SelectTrigger className="w-56">
+          <SelectTrigger className="w-full sm:w-56">
             <SelectValue placeholder="Filter by run" />
           </SelectTrigger>
           <SelectContent>
@@ -176,7 +176,7 @@ export default function ComparePage() {
       {/* Competitor selector */}
       <div>
         <Select value={selectedCompetitor} onValueChange={updateCompetitor}>
-          <SelectTrigger className="w-80">
+          <SelectTrigger className="w-full sm:w-80">
             <SelectValue placeholder="Select a competitor to compare..." />
           </SelectTrigger>
           <SelectContent>
@@ -201,7 +201,7 @@ export default function ComparePage() {
       {selectedCompetitor && competitor && (
         <>
           {/* Mention comparison */}
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base text-gray-600">Your Brand</CardTitle>
@@ -227,7 +227,7 @@ export default function ComparePage() {
           {/* Delta summary */}
           <Card>
             <CardContent className="p-4">
-              <div className="grid grid-cols-3 gap-4 text-center text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-center text-sm">
                 <div>
                   <div className="text-xs text-gray-500 uppercase font-medium mb-1">Both mentioned</div>
                   <div className="text-lg font-bold text-purple-600">
@@ -257,47 +257,81 @@ export default function ComparePage() {
                 <CardTitle className="text-lg">Topic Breakdown</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>TOPIC</TableHead>
-                      <TableHead className="w-28 text-center">PROMPTS</TableHead>
-                      <TableHead className="w-44 text-center">YOUR BRAND</TableHead>
-                      <TableHead className="w-44 text-center">{competitor.name.toUpperCase()}</TableHead>
-                      <TableHead className="w-28 text-center">DELTA</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topicBreakdown.map((t) => {
-                      const brandRate = t.total > 0 ? (t.brandHits / t.total) * 100 : 0;
-                      const compRate = t.total > 0 ? (t.compHits / t.total) * 100 : 0;
-                      const delta = brandRate - compRate;
-                      return (
-                        <TableRow key={t.name}>
-                          <TableCell className="font-medium">{t.name}</TableCell>
-                          <TableCell className="text-center text-sm text-gray-500">{t.total}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Progress value={brandRate} className="h-2 flex-1" />
-                              <span className="text-sm font-medium w-12 text-right text-indigo-600">{brandRate.toFixed(0)}%</span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Progress value={compRate} className="h-2 flex-1" />
-                              <span className="text-sm font-medium w-12 text-right text-blue-600">{compRate.toFixed(0)}%</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className={`text-sm font-bold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                              {delta > 0 ? '+' : ''}{delta.toFixed(0)}%
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                {/* Mobile card view */}
+                <div className="md:hidden p-3 space-y-3">
+                  {topicBreakdown.map((t) => {
+                    const brandRate = t.total > 0 ? (t.brandHits / t.total) * 100 : 0;
+                    const compRate = t.total > 0 ? (t.compHits / t.total) * 100 : 0;
+                    const delta = brandRate - compRate;
+                    return (
+                      <div key={t.name} className="p-3 border rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-sm">{t.name}</span>
+                          <span className={`text-sm font-bold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                            {delta > 0 ? '+' : ''}{delta.toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mb-2">{t.total} prompts</div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-indigo-600 w-16">Brand</span>
+                            <Progress value={brandRate} className="h-2 flex-1" />
+                            <span className="text-xs font-medium w-8 text-right text-indigo-600">{brandRate.toFixed(0)}%</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-blue-600 w-16 truncate">{competitor.name}</span>
+                            <Progress value={compRate} className="h-2 flex-1" />
+                            <span className="text-xs font-medium w-8 text-right text-blue-600">{compRate.toFixed(0)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Desktop table view */}
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>TOPIC</TableHead>
+                        <TableHead className="w-28 text-center">PROMPTS</TableHead>
+                        <TableHead className="w-44 text-center">YOUR BRAND</TableHead>
+                        <TableHead className="w-44 text-center">{competitor.name.toUpperCase()}</TableHead>
+                        <TableHead className="w-28 text-center">DELTA</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {topicBreakdown.map((t) => {
+                        const brandRate = t.total > 0 ? (t.brandHits / t.total) * 100 : 0;
+                        const compRate = t.total > 0 ? (t.compHits / t.total) * 100 : 0;
+                        const delta = brandRate - compRate;
+                        return (
+                          <TableRow key={t.name}>
+                            <TableCell className="font-medium">{t.name}</TableCell>
+                            <TableCell className="text-center text-sm text-gray-500">{t.total}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Progress value={brandRate} className="h-2 flex-1" />
+                                <span className="text-sm font-medium w-12 text-right text-indigo-600">{brandRate.toFixed(0)}%</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Progress value={compRate} className="h-2 flex-1" />
+                                <span className="text-sm font-medium w-12 text-right text-blue-600">{compRate.toFixed(0)}%</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className={`text-sm font-bold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                {delta > 0 ? '+' : ''}{delta.toFixed(0)}%
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -309,61 +343,28 @@ export default function ComparePage() {
                 <CardTitle className="text-lg">Sources Cited</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-6">
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                      <h4 className="text-sm font-semibold text-gray-700">Only your brand ({sourceOverlap.brandOnly.length})</h4>
-                    </div>
-                    {sourceOverlap.brandOnly.length === 0 ? (
-                      <p className="text-xs text-gray-400">None</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {sourceOverlap.brandOnly.map(d => (
-                          <div key={d} className="flex items-center gap-1 text-sm text-gray-700">
-                            <ExternalLink className="w-3 h-3 text-gray-400 shrink-0" />
-                            <span className="truncate">{d}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                      <h4 className="text-sm font-semibold text-gray-700">Shared ({sourceOverlap.shared.length})</h4>
-                    </div>
-                    {sourceOverlap.shared.length === 0 ? (
-                      <p className="text-xs text-gray-400">None</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {sourceOverlap.shared.map(d => (
-                          <div key={d} className="flex items-center gap-1 text-sm text-purple-700">
-                            <ExternalLink className="w-3 h-3 text-purple-400 shrink-0" />
-                            <span className="truncate">{d}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                      <h4 className="text-sm font-semibold text-gray-700">Only {competitor.name} ({sourceOverlap.compOnly.length})</h4>
-                    </div>
-                    {sourceOverlap.compOnly.length === 0 ? (
-                      <p className="text-xs text-gray-400">None</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {sourceOverlap.compOnly.map(d => (
-                          <div key={d} className="flex items-center gap-1 text-sm text-gray-700">
-                            <ExternalLink className="w-3 h-3 text-gray-400 shrink-0" />
-                            <span className="truncate">{d}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                  <SourceList
+                    label="Only your brand"
+                    items={sourceOverlap.brandOnly}
+                    dotColor="bg-indigo-500"
+                    textColor="text-gray-700"
+                    iconColor="text-gray-400"
+                  />
+                  <SourceList
+                    label="Shared"
+                    items={sourceOverlap.shared}
+                    dotColor="bg-purple-500"
+                    textColor="text-purple-700"
+                    iconColor="text-purple-400"
+                  />
+                  <SourceList
+                    label={`Only ${competitor.name}`}
+                    items={sourceOverlap.compOnly}
+                    dotColor="bg-blue-500"
+                    textColor="text-gray-700"
+                    iconColor="text-gray-400"
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -374,7 +375,95 @@ export default function ComparePage() {
             <h2 className="text-lg font-semibold mb-3">
               Prompts mentioning either ({sortedResponses.length})
             </h2>
-            <div className="bg-white rounded-lg border">
+
+            {/* Mobile card view */}
+            <div className="md:hidden space-y-3">
+              {paginatedResponses.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 bg-white rounded-lg border">
+                  Neither brand nor competitor mentioned in any prompt
+                </div>
+              ) : (
+                paginatedResponses.map((response) => {
+                  const compHit = isCompMentioned(response);
+                  return (
+                    <div
+                      key={response.id}
+                      className={`p-3 border rounded-lg bg-white cursor-pointer ${expandedPrompt === response.id ? 'ring-2 ring-blue-200' : ''}`}
+                      onClick={() => setExpandedPrompt(expandedPrompt === response.id ? null : response.id)}
+                    >
+                      <p className="text-sm font-medium text-gray-900 leading-relaxed mb-2">
+                        {response.prompt.text}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <div className="flex items-center gap-1 text-xs">
+                          <span className="text-gray-500">Brand:</span>
+                          {response.brandMentioned ? (
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-red-400" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 text-xs">
+                          <span className="text-gray-500">{competitor.name}:</span>
+                          {compHit ? (
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-red-400" />
+                          )}
+                        </div>
+                        <Badge variant="secondary" className="text-xs">
+                          {getTopicName(response.prompt.topicId)}
+                        </Badge>
+                      </div>
+                      {selectedRun === 'all' && getRunLabel(response.analysisRunId) && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {getRunLabel(response.analysisRunId)}
+                        </div>
+                      )}
+                      {expandedPrompt === response.id && (
+                        <div className="mt-3 pt-3 border-t space-y-3">
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Response</h4>
+                            <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded border max-h-96 overflow-y-auto leading-relaxed">
+                              {response.text}
+                            </div>
+                          </div>
+                          {response.competitorsMentioned && response.competitorsMentioned.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Competitors Mentioned</h4>
+                              <div className="flex flex-wrap gap-1">
+                                {response.competitorsMentioned.map((c, i) => (
+                                  <Badge
+                                    key={i}
+                                    variant="outline"
+                                    className={`text-xs ${competitorNames.has(c.toLowerCase()) ? 'border-blue-400 text-blue-700 bg-blue-50' : ''}`}
+                                  >
+                                    {c}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {response.sources && response.sources.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
+                              <div className="flex flex-wrap gap-1">
+                                {response.sources.map((s, i) => (
+                                  <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop table view */}
+            <div className="hidden md:block bg-white rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -426,7 +515,7 @@ export default function ComparePage() {
                             {selectedRun === 'all' && (
                               <TableCell>
                                 <span className="text-xs text-gray-500">
-                                  {getRunLabel(response.analysisRunId) || '—'}
+                                  {getRunLabel(response.analysisRunId) || '\u2014'}
                                 </span>
                               </TableCell>
                             )}
@@ -514,6 +603,56 @@ export default function ComparePage() {
             )}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+const SOURCES_LIMIT = 10;
+
+function SourceList({ label, items, dotColor, textColor, iconColor }: {
+  label: string;
+  items: string[];
+  dotColor: string;
+  textColor: string;
+  iconColor: string;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const displayed = showAll ? items : items.slice(0, SOURCES_LIMIT);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`w-2 h-2 rounded-full ${dotColor}`}></div>
+        <h4 className="text-sm font-semibold text-gray-700">{label} ({items.length})</h4>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-gray-400">None</p>
+      ) : (
+        <div className="space-y-1">
+          {displayed.map(d => (
+            <div key={d} className={`flex items-center gap-1 text-sm ${textColor}`}>
+              <ExternalLink className={`w-3 h-3 ${iconColor} shrink-0`} />
+              <span className="truncate">{d}</span>
+            </div>
+          ))}
+          {items.length > SOURCES_LIMIT && !showAll && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="text-xs text-indigo-600 hover:text-indigo-800 mt-1"
+            >
+              View {items.length - SOURCES_LIMIT} more...
+            </button>
+          )}
+          {showAll && items.length > SOURCES_LIMIT && (
+            <button
+              onClick={() => setShowAll(false)}
+              className="text-xs text-indigo-600 hover:text-indigo-800 mt-1"
+            >
+              Show less
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

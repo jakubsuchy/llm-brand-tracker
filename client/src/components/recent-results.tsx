@@ -105,9 +105,9 @@ export default function RecentResults({ runId, provider }: { runId?: string; pro
   return (
     <Card className="bg-white border-slate-200">
       <CardContent className="p-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <h3 className="text-lg font-semibold text-slate-900">Recent Prompt Results</h3>
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-1">
             <Button
               variant={filter === 'all' ? 'default' : 'ghost'}
               size="sm"
@@ -149,7 +149,7 @@ export default function RecentResults({ runId, provider }: { runId?: string; pro
                     <p className="text-sm font-medium text-slate-900 mb-1 line-clamp-2">
                       "{truncateText(result.prompt.text, 80)}"
                     </p>
-                    <div className="flex items-center space-x-3 text-xs text-slate-500">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
                       <span>{result.prompt.topic?.name || 'Uncategorized'}</span>
                       <span className="flex items-center">
                         <Clock className="w-3 h-3 mr-1" />

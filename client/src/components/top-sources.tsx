@@ -207,7 +207,7 @@ export default function TopSources({ runId, provider }: { runId?: string; provid
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="mt-1">
-                    <div className="pl-9 pr-3 space-y-1">
+                    <div className="pl-3 sm:pl-9 pr-3 space-y-1">
                       {source.urls.slice(0, 5).map((url: string, index: number) => (
                         <div key={index} className="flex items-center justify-between py-1 px-2 bg-slate-50 rounded text-xs">
                           <a 

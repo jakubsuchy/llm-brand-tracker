@@ -227,7 +227,7 @@ export default function AnalysisProgressPage() {
               <Progress value={progress?.progress || 0} className="h-2" />
             </div>
 
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-gray-50 p-2 rounded text-center">
                 <div className="text-lg font-bold">{progress?.totalPrompts || 0}</div>
                 <div className="text-xs text-gray-500">Total</div>
@@ -317,9 +317,9 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <CardTitle className="text-base">Jobs ({filtered.length})</CardTitle>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {['all', 'processing', 'pending', 'completed', 'failed', 'cancelled'].map(s => {
               const count = s === 'all' ? jobs.length : (counts[s] || 0);
               if (count === 0 && s !== 'all') return null;
@@ -354,89 +354,160 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow className="text-xs">
-              <TableHead className="w-12">#</TableHead>
-              <TableHead className="w-20">Provider</TableHead>
-              <TableHead>Prompt</TableHead>
-              <TableHead className="w-24">Status</TableHead>
-              <TableHead className="w-16 text-center">Try</TableHead>
-              <TableHead className="w-48">Error</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paged.map(job => {
+        {/* Mobile card view */}
+        <div className="md:hidden p-3 space-y-2">
+          {paged.length === 0 ? (
+            <div className="text-center text-sm text-gray-400 py-4">No jobs match</div>
+          ) : (
+            paged.map(job => {
               const hasRetry = job.status === 'failed' && jobs.some(j => j.originalJobId === job.id || (job.originalJobId && j.originalJobId === job.originalJobId && j.id > job.id));
-
               const isExpanded = expandedJob === job.id;
               return (
-                <React.Fragment key={job.id}>
-                  <TableRow
-                    className={`text-xs cursor-pointer hover:bg-gray-50 ${job.status === 'processing' ? 'bg-blue-50' : ''}`}
-                    onClick={() => setExpandedJob(isExpanded ? null : job.id)}
-                  >
-                    <TableCell className="font-mono text-gray-400">{job.id}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[300px] truncate text-gray-700" title={job.promptText}>
-                      {job.promptText.substring(0, 60)}{job.promptText.length > 60 ? '...' : ''}
-                    </TableCell>
-                    <TableCell>
-                      {job.status === 'completed' && (
-                        <Badge className="bg-green-100 text-green-700 text-[10px]"><CheckCircle className="h-3 w-3 mr-0.5" /> Done</Badge>
-                      )}
-                      {job.status === 'processing' && (
-                        <Badge className="bg-blue-100 text-blue-700 text-[10px]"><Activity className="h-3 w-3 mr-0.5 animate-pulse" /> Running</Badge>
-                      )}
-                      {job.status === 'pending' && (
-                        <Badge variant="outline" className="text-[10px] text-gray-500">Pending</Badge>
-                      )}
-                      {job.status === 'failed' && hasRetry && (
-                        <Badge className="bg-amber-100 text-amber-700 text-[10px]"><RefreshCw className="h-3 w-3 mr-0.5" /> Retried</Badge>
-                      )}
-                      {job.status === 'failed' && !hasRetry && (
-                        <Badge className="bg-red-100 text-red-700 text-[10px]"><XCircle className="h-3 w-3 mr-0.5" /> Failed</Badge>
-                      )}
-                      {job.status === 'cancelled' && (
-                        <Badge variant="outline" className="text-[10px] text-gray-400">Cancelled</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center text-gray-500">{job.attempts}/{job.maxAttempts}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-[10px] text-red-600 font-mono">
-                      {job.lastError ? job.lastError.substring(0, 50) + (job.lastError.length > 50 ? '...' : '') : ''}
-                    </TableCell>
-                  </TableRow>
+                <div
+                  key={job.id}
+                  className={`p-2.5 border rounded-lg cursor-pointer ${job.status === 'processing' ? 'bg-blue-50 border-blue-200' : 'bg-white'} ${isExpanded ? 'ring-2 ring-blue-200' : ''}`}
+                  onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {job.status === 'completed' && (
+                      <Badge className="bg-green-100 text-green-700 text-[10px]"><CheckCircle className="h-3 w-3 mr-0.5" /> Done</Badge>
+                    )}
+                    {job.status === 'processing' && (
+                      <Badge className="bg-blue-100 text-blue-700 text-[10px]"><Activity className="h-3 w-3 mr-0.5 animate-pulse" /> Running</Badge>
+                    )}
+                    {job.status === 'pending' && (
+                      <Badge variant="outline" className="text-[10px] text-gray-500">Pending</Badge>
+                    )}
+                    {job.status === 'failed' && hasRetry && (
+                      <Badge className="bg-amber-100 text-amber-700 text-[10px]"><RefreshCw className="h-3 w-3 mr-0.5" /> Retried</Badge>
+                    )}
+                    {job.status === 'failed' && !hasRetry && (
+                      <Badge className="bg-red-100 text-red-700 text-[10px]"><XCircle className="h-3 w-3 mr-0.5" /> Failed</Badge>
+                    )}
+                    {job.status === 'cancelled' && (
+                      <Badge variant="outline" className="text-[10px] text-gray-400">Cancelled</Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
+                    <span className="text-[10px] text-gray-400 font-mono ml-auto">#{job.id}</span>
+                  </div>
+                  <p className="text-xs text-gray-700 leading-relaxed mb-1">
+                    {job.promptText.substring(0, 100)}{job.promptText.length > 100 ? '...' : ''}
+                  </p>
+                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                    <span>Try {job.attempts}/{job.maxAttempts}</span>
+                    {job.lastError && (
+                      <span className="text-red-600 font-mono truncate">{job.lastError.substring(0, 40)}...</span>
+                    )}
+                  </div>
                   {isExpanded && (
-                    <TableRow className="bg-gray-50">
-                      <TableCell colSpan={6} className="p-3">
-                        <div className="space-y-2 text-xs">
-                          <div><span className="text-gray-500 font-medium">Prompt:</span> <span className="text-gray-700">{job.promptText}</span></div>
-                          {job.lastError && (
-                            <div><span className="text-gray-500 font-medium">Error:</span> <span className="text-red-600 font-mono whitespace-pre-wrap break-all">{job.lastError}</span></div>
-                          )}
-                          {job.originalJobId && (
-                            <div><span className="text-gray-500 font-medium">Retry of:</span> <span className="font-mono">#{job.originalJobId}</span></div>
-                          )}
-                          {job.lockedAt && (
-                            <div><span className="text-gray-500 font-medium">Started:</span> {new Date(job.lockedAt).toLocaleString()}</div>
-                          )}
-                          {job.completedAt && (
-                            <div><span className="text-gray-500 font-medium">Finished:</span> {new Date(job.completedAt).toLocaleString()}</div>
-                          )}
-                        </div>
+                    <div className="mt-2 pt-2 border-t space-y-1.5 text-xs">
+                      <div><span className="text-gray-500 font-medium">Prompt:</span> <span className="text-gray-700">{job.promptText}</span></div>
+                      {job.lastError && (
+                        <div><span className="text-gray-500 font-medium">Error:</span> <span className="text-red-600 font-mono whitespace-pre-wrap break-all">{job.lastError}</span></div>
+                      )}
+                      {job.originalJobId && (
+                        <div><span className="text-gray-500 font-medium">Retry of:</span> <span className="font-mono">#{job.originalJobId}</span></div>
+                      )}
+                      {job.lockedAt && (
+                        <div><span className="text-gray-500 font-medium">Started:</span> {new Date(job.lockedAt).toLocaleString()}</div>
+                      )}
+                      {job.completedAt && (
+                        <div><span className="text-gray-500 font-medium">Finished:</span> {new Date(job.completedAt).toLocaleString()}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop table view */}
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow className="text-xs">
+                <TableHead className="w-12">#</TableHead>
+                <TableHead className="w-20">Provider</TableHead>
+                <TableHead>Prompt</TableHead>
+                <TableHead className="w-24">Status</TableHead>
+                <TableHead className="w-16 text-center">Try</TableHead>
+                <TableHead className="w-48">Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {paged.map(job => {
+                const hasRetry = job.status === 'failed' && jobs.some(j => j.originalJobId === job.id || (job.originalJobId && j.originalJobId === job.originalJobId && j.id > job.id));
+
+                const isExpanded = expandedJob === job.id;
+                return (
+                  <React.Fragment key={job.id}>
+                    <TableRow
+                      className={`text-xs cursor-pointer hover:bg-gray-50 ${job.status === 'processing' ? 'bg-blue-50' : ''}`}
+                      onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                    >
+                      <TableCell className="font-mono text-gray-400">{job.id}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[300px] truncate text-gray-700" title={job.promptText}>
+                        {job.promptText.substring(0, 60)}{job.promptText.length > 60 ? '...' : ''}
+                      </TableCell>
+                      <TableCell>
+                        {job.status === 'completed' && (
+                          <Badge className="bg-green-100 text-green-700 text-[10px]"><CheckCircle className="h-3 w-3 mr-0.5" /> Done</Badge>
+                        )}
+                        {job.status === 'processing' && (
+                          <Badge className="bg-blue-100 text-blue-700 text-[10px]"><Activity className="h-3 w-3 mr-0.5 animate-pulse" /> Running</Badge>
+                        )}
+                        {job.status === 'pending' && (
+                          <Badge variant="outline" className="text-[10px] text-gray-500">Pending</Badge>
+                        )}
+                        {job.status === 'failed' && hasRetry && (
+                          <Badge className="bg-amber-100 text-amber-700 text-[10px]"><RefreshCw className="h-3 w-3 mr-0.5" /> Retried</Badge>
+                        )}
+                        {job.status === 'failed' && !hasRetry && (
+                          <Badge className="bg-red-100 text-red-700 text-[10px]"><XCircle className="h-3 w-3 mr-0.5" /> Failed</Badge>
+                        )}
+                        {job.status === 'cancelled' && (
+                          <Badge variant="outline" className="text-[10px] text-gray-400">Cancelled</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center text-gray-500">{job.attempts}/{job.maxAttempts}</TableCell>
+                      <TableCell className="max-w-[200px] truncate text-[10px] text-red-600 font-mono">
+                        {job.lastError ? job.lastError.substring(0, 50) + (job.lastError.length > 50 ? '...' : '') : ''}
                       </TableCell>
                     </TableRow>
-                  )}
-                </React.Fragment>
-              );
-            })}
-            {paged.length === 0 && (
-              <TableRow><TableCell colSpan={6} className="text-center text-sm text-gray-400 py-4">No jobs match</TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
+                    {isExpanded && (
+                      <TableRow className="bg-gray-50">
+                        <TableCell colSpan={6} className="p-3">
+                          <div className="space-y-2 text-xs">
+                            <div><span className="text-gray-500 font-medium">Prompt:</span> <span className="text-gray-700">{job.promptText}</span></div>
+                            {job.lastError && (
+                              <div><span className="text-gray-500 font-medium">Error:</span> <span className="text-red-600 font-mono whitespace-pre-wrap break-all">{job.lastError}</span></div>
+                            )}
+                            {job.originalJobId && (
+                              <div><span className="text-gray-500 font-medium">Retry of:</span> <span className="font-mono">#{job.originalJobId}</span></div>
+                            )}
+                            {job.lockedAt && (
+                              <div><span className="text-gray-500 font-medium">Started:</span> {new Date(job.lockedAt).toLocaleString()}</div>
+                            )}
+                            {job.completedAt && (
+                              <div><span className="text-gray-500 font-medium">Finished:</span> {new Date(job.completedAt).toLocaleString()}</div>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {paged.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="text-center text-sm text-gray-400 py-4">No jobs match</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
 
         {/* Pagination */}
         {totalPages > 1 && (

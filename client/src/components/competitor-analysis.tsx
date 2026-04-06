@@ -113,36 +113,28 @@ export default function CompetitorAnalysis({ runId, provider }: { runId?: string
               const isNegative = competitor.changeRate < 0;
               
               return (
-                <div key={competitor.competitorId} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                  <div className="flex items-center space-x-2">
-                    <div className={`w-6 h-6 ${color.bg} rounded-full flex items-center justify-center`}>
-                      <span className={`text-xs font-semibold ${color.text}`}>
-                        {getCompetitorInitial(competitor.name)}
-                      </span>
+                <Link key={competitor.competitorId} href={`/competitors?competitor=${encodeURIComponent(competitor.name)}${runId ? `&runId=${runId}` : ''}`}>
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded hover:bg-slate-100 transition-colors cursor-pointer">
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <div className={`w-6 h-6 ${color.bg} rounded-full flex items-center justify-center shrink-0`}>
+                        <span className={`text-xs font-semibold ${color.text}`}>
+                          {getCompetitorInitial(competitor.name)}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-900 truncate">{competitor.name}</p>
+                        <p className="text-xs text-slate-500 truncate">{competitor.category || 'Platform'} · {competitor.promptsAppeared}/{competitor.totalPrompts} prompts</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">{competitor.name}</p>
-                      <p className="text-xs text-slate-500">{competitor.category || 'Platform'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
+                    <div className="text-right shrink-0 ml-2">
                       <p className={`text-sm font-semibold ${
                         competitor.promptPercentage >= 50 ? 'text-green-600' : 'text-red-600'
                       }`}>
                         {competitor.promptPercentage.toFixed(0)}%
                       </p>
-                      <p className="text-xs text-slate-500">
-                        {competitor.promptsAppeared}/{competitor.totalPrompts} prompts
-                      </p>
                     </div>
-                    <Link href={`/competitors?competitor=${encodeURIComponent(competitor.name)}${runId ? `&runId=${runId}` : ''}`}>
-                      <span className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer">
-                        View details <ExternalLink className="h-3 w-3" />
-                      </span>
-                    </Link>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>

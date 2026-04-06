@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
-export default function Sidebar() {
+export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
   const { user, logout, hasRole } = useAuth();
 
@@ -60,10 +60,11 @@ export default function Sidebar() {
               <Link
                 key={item.id}
                 href={item.path}
+                onClick={() => onNavigate?.()}
                 className={`
                   flex items-center space-x-3 px-3 py-2 rounded-lg w-full text-left transition-colors
-                  ${isActive 
-                    ? 'bg-indigo-50 text-indigo-700 font-medium' 
+                  ${isActive
+                    ? 'bg-indigo-50 text-indigo-700 font-medium'
                     : 'text-slate-600 hover:bg-slate-100'
                   }
                 `}

@@ -112,12 +112,12 @@ export default function SettingsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="max-w-2xl">
-        <TabsList className="mb-6">
+        <TabsList className="mb-6 h-auto flex-wrap gap-1">
           <TabsTrigger value="brand">Brand</TabsTrigger>
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
           <TabsTrigger value="providers">Providers</TabsTrigger>
-          <TabsTrigger value="sources">Competitor Sources</TabsTrigger>
-          <TabsTrigger value="danger">Danger Zone</TabsTrigger>
+          <TabsTrigger value="sources">Sources</TabsTrigger>
+          <TabsTrigger value="danger">Danger</TabsTrigger>
         </TabsList>
 
         <TabsContent value="brand" className="space-y-6">

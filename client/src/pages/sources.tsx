@@ -127,7 +127,7 @@ export default function SourcesPage() {
 
   if (isLoading) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <div className="animate-pulse">
           <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="h-4 bg-gray-200 rounded w-1/2 mb-8"></div>
@@ -142,14 +142,14 @@ export default function SourcesPage() {
   }
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-8 space-y-8">
       {/* Source Domains Section */}
       <div>
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-3xl font-bold text-gray-900">Source Domains</h1>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Source Domains</h1>
             <Select value={selectedRun} onValueChange={setSelectedRun}>
-              <SelectTrigger className="w-56">
+              <SelectTrigger className="w-full sm:w-56">
                 <SelectValue placeholder="Filter by run" />
               </SelectTrigger>
               <SelectContent>
@@ -166,8 +166,8 @@ export default function SourcesPage() {
           <p className="text-gray-600 mb-4">Which domains hold the most influence for your relevant queries</p>
 
           {/* Source type filter */}
-          <div className="flex items-center gap-6 mb-6 p-3 bg-gray-50 rounded-lg">
-            <span className="text-sm font-medium text-gray-700">Show citations from:</span>
+          <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-6 p-3 bg-gray-50 rounded-lg">
+            <span className="text-sm font-medium text-gray-700 w-full sm:w-auto">Show citations from:</span>
             <div className="flex items-center gap-2">
               <Checkbox id="show-brand" checked={showBrand} onCheckedChange={(v) => setShowBrand(!!v)} />
               <Label htmlFor="show-brand" className="text-sm text-green-700 font-medium cursor-pointer">Your brand</Label>
@@ -183,7 +183,7 @@ export default function SourcesPage() {
           </div>
 
           {/* Category Filter Pills */}
-          <div className="flex items-center gap-4 mb-6">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
             <Button
               variant={categoryFilter === 'all' ? 'default' : 'outline'}
               onClick={() => setCategoryFilter('all')}
@@ -222,8 +222,8 @@ export default function SourcesPage() {
           </div>
 
           {/* Controls */}
-          <div className="flex items-center justify-between">
-            <div className="relative w-80">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1 sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
                 placeholder="Search domains..."
@@ -232,15 +232,127 @@ export default function SourcesPage() {
                 className="pl-10"
               />
             </div>
-            <Button variant="outline" className="flex items-center gap-2">
+            <Button variant="outline" className="flex items-center justify-center gap-2">
               <Download className="w-4 h-4" />
               Export Data
             </Button>
           </div>
         </div>
 
-        {/* Domains Table */}
-        <div className="bg-white rounded-lg border">
+        {/* Mobile card view */}
+        <div className="md:hidden space-y-3">
+          {filteredDomains.length === 0 ? (
+            <div className="text-center py-8 text-gray-500 bg-white rounded-lg border">
+              No domains found matching your filters
+            </div>
+          ) : (
+            filteredDomains.map((domain, index) => {
+              const isExpanded = expandedDomain === domain.domain;
+              const toggleExpand = () => {
+                if (isExpanded) {
+                  setExpandedDomain(null);
+                  setExpandedView(null);
+                } else {
+                  setExpandedDomain(domain.domain);
+                  setExpandedView('prompts');
+                }
+              };
+              return (
+                <div key={domain.domain} className="p-3 border rounded-lg bg-white">
+                  <div className="cursor-pointer" onClick={toggleExpand}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs text-gray-400 font-mono">{index + 1}</span>
+                      <img
+                        src={getFavicon(domain.domain)}
+                        alt=""
+                        className="w-4 h-4"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                      <span className="font-medium text-sm truncate">{domain.domain}</span>
+                      {domain.sourceType === 'brand' && (
+                        <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border-green-200">Brand</Badge>
+                      )}
+                      {domain.sourceType === 'competitor' && (
+                        <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border-red-200">Competitor</Badge>
+                      )}
+                      {isExpanded
+                        ? <ChevronUp className="h-4 w-4 text-gray-400 ml-auto shrink-0" />
+                        : <ChevronDown className="h-4 w-4 text-gray-400 ml-auto shrink-0" />
+                      }
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <Badge className={`text-xs ${getCategoryColor(domain.category)}`}>
+                        {domain.category}
+                      </Badge>
+                      <span className="text-xs text-gray-600">{domain.citations} citations</span>
+                      <span className="text-xs text-gray-600">{domain.urls.length} pages</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-gray-200 rounded-full h-2">
+                        <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${domain.impact}%` }} />
+                      </div>
+                      <span className="text-xs font-medium w-10 text-right">{domain.impact.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t">
+                      <div className="flex flex-wrap gap-2 items-center mb-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setExpandedView('prompts'); }}
+                          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                            expandedView === 'prompts'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          <MessageSquare className="h-3 w-3 inline mr-1 -mt-0.5" />
+                          Prompts
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setExpandedView('pages'); }}
+                          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                            expandedView === 'pages'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          <FileText className="h-3 w-3 inline mr-1 -mt-0.5" />
+                          Pages ({domain.urls.length})
+                        </button>
+                        {domain.sourceType !== 'competitor' ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'competitor'); }}
+                            className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1 ml-auto"
+                          >
+                            <ArrowRightLeft className="h-3 w-3" />
+                            Mark as competitor
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'neutral'); }}
+                            className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1 ml-auto"
+                          >
+                            <ArrowRightLeft className="h-3 w-3" />
+                            Mark as neutral
+                          </button>
+                        )}
+                      </div>
+                      {expandedView === 'prompts' && (
+                        <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} />
+                      )}
+                      {expandedView === 'pages' && (
+                        <DomainPages urls={domain.urls} domain={domain.domain} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop table view */}
+        <div className="hidden md:block bg-white rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>

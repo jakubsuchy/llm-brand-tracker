@@ -113,7 +113,7 @@ export default function PromptResultsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-8">
         <div className="animate-pulse">
           <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="h-4 bg-gray-200 rounded w-1/2 mb-8"></div>
@@ -128,16 +128,16 @@ export default function PromptResultsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Prompt Results</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Prompt Results</h1>
             <p className="text-gray-600 mt-1">Results from prompts where your brand should be mentioned</p>
           </div>
           <Select value={selectedRun} onValueChange={updateRun}>
-            <SelectTrigger className="w-56">
+            <SelectTrigger className="w-full sm:w-56">
               <SelectValue placeholder="Filter by run" />
             </SelectTrigger>
             <SelectContent>
@@ -153,7 +153,7 @@ export default function PromptResultsPage() {
         </div>
 
         {/* Filter Pills */}
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
           <Button
             variant={filter === 'all' ? 'default' : 'outline'}
             onClick={() => updateFilter('all')}
@@ -178,8 +178,8 @@ export default function PromptResultsPage() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
               placeholder="Search prompts and responses..."
@@ -188,35 +188,109 @@ export default function PromptResultsPage() {
               className="pl-10"
             />
           </div>
-          <Select value={selectedTopic} onValueChange={updateTopic}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Filter by topic" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Topics</SelectItem>
-              {topics?.map(topic => (
-                <SelectItem key={topic.id} value={topic.id.toString()}>
-                  {topic.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedProvider} onValueChange={updateProvider}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Provider" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Providers</SelectItem>
-              {providers.map(p => (
-                <SelectItem key={p} value={p!}>{p}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2 sm:gap-4">
+            <Select value={selectedTopic} onValueChange={updateTopic}>
+              <SelectTrigger className="w-full sm:w-48">
+                <SelectValue placeholder="Filter by topic" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Topics</SelectItem>
+                {topics?.map(topic => (
+                  <SelectItem key={topic.id} value={topic.id.toString()}>
+                    {topic.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedProvider} onValueChange={updateProvider}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="Provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Providers</SelectItem>
+                {providers.map(p => (
+                  <SelectItem key={p} value={p!}>{p}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-lg border">
+      {/* Mobile card view */}
+      <div className="md:hidden space-y-3">
+        {paginatedPrompts.length === 0 ? (
+          <div className="text-center py-8 text-gray-500 bg-white rounded-lg border">
+            No queries found matching your filters
+          </div>
+        ) : (
+          paginatedPrompts.map((prompt) => (
+            <div
+              key={prompt.id}
+              id={`prompt-mobile-${prompt.id}`}
+              className={`p-3 border rounded-lg bg-white cursor-pointer ${expandedPrompt === prompt.id ? 'ring-2 ring-blue-200' : ''}`}
+              onClick={() => setExpandedPrompt(expandedPrompt === prompt.id ? null : prompt.id)}
+            >
+              <p className="text-sm font-medium text-gray-900 leading-relaxed mb-2">
+                {prompt.prompt.text}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="text-xs">{prompt.provider || 'api'}</Badge>
+                {prompt.brandMentioned ? (
+                  <Badge className="text-xs bg-green-100 text-green-700 border-green-200">
+                    <CheckCircle className="w-3 h-3 mr-1" />Yes
+                  </Badge>
+                ) : (
+                  <Badge className="text-xs bg-red-100 text-red-700 border-red-200">
+                    <XCircle className="w-3 h-3 mr-1" />No
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="text-xs">
+                  {getTopicName(prompt.prompt.topicId)}
+                </Badge>
+              </div>
+              {selectedRun === 'all' && getRunLabel(prompt.analysisRunId) && (
+                <div className="text-xs text-gray-500 mt-2">
+                  {getRunLabel(prompt.analysisRunId)}
+                </div>
+              )}
+              {expandedPrompt === prompt.id && (
+                <div className="mt-3 pt-3 border-t space-y-3">
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.provider || 'API'} Response</h4>
+                    <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded border max-h-96 overflow-y-auto leading-relaxed">
+                      {prompt.text}
+                    </div>
+                  </div>
+                  {prompt.competitorsMentioned && prompt.competitorsMentioned.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Competitors Mentioned</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {prompt.competitorsMentioned.map((c, i) => (
+                          <Badge key={i} variant="outline" className="text-xs">{c}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {prompt.sources && prompt.sources.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
+                      <div className="flex flex-wrap gap-1">
+                        {prompt.sources.map((s, i) => (
+                          <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden md:block bg-white rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>

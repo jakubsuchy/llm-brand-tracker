@@ -242,14 +242,14 @@ export default function CompetitorsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Competitor Analysis</h1>
-          <p className="text-gray-600 mt-1">
-            Percentage of prompts where each competitor is mentioned by ChatGPT
+          <h1 className="text-xl sm:text-2xl font-bold">Competitor Analysis</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Percentage of prompts where each competitor is mentioned across LLM providers
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {mergeMode ? (
             <>
               <Button variant="outline" onClick={() => { setMergeMode(false); setSelectedForMerge(new Set()); }}>
@@ -371,16 +371,6 @@ export default function CompetitorsPage() {
                       {competitor.promptPercentage.toFixed(1)}%
                     </div>
                     <div className="text-xs text-gray-500">of prompts</div>
-                    {!mergeMode && (
-                      <button
-                        onClick={() => handleNotACompetitor(competitor.competitorId, competitor.name)}
-                        className="text-xs text-gray-400 hover:text-red-500 mt-1 flex items-center gap-0.5 ml-auto"
-                        title="Not a competitor — reclassify as neutral"
-                      >
-                        <ShieldX className="h-3 w-3" />
-                        Not a competitor
-                      </button>
-                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -454,6 +444,17 @@ export default function CompetitorsPage() {
                         );
                       })}
                     </div>
+                  )}
+
+                  {!mergeMode && (
+                    <button
+                      onClick={() => handleNotACompetitor(competitor.competitorId, competitor.name)}
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 pt-2 border-t w-full"
+                      title="Mark as not a competitor — reclassify as neutral"
+                    >
+                      <ShieldX className="h-3 w-3" />
+                      Mark as not a competitor
+                    </button>
                   )}
                 </div>
               </CardContent>
