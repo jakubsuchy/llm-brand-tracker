@@ -752,6 +752,22 @@ export class DatabaseStorage implements IStorage {
     console.log(`[${new Date().toISOString()}] DatabaseStorage: All competitors cleared successfully`);
   }
 
+  async clearResultsOnly(): Promise<void> {
+    console.log(`[${new Date().toISOString()}] DatabaseStorage: Clearing results (keeping prompts/topics)...`);
+    await db.delete(jobQueue);
+    await db.delete(competitorMentions);
+    await db.delete(competitorMerges);
+    await db.delete(sourceUrls);
+    await db.delete(responses);
+    await db.delete(competitors);
+    await db.delete(sources);
+    await db.delete(analytics);
+    await db.delete(apiUsage);
+    await db.delete(apifyUsage);
+    await db.delete(analysisRuns);
+    console.log(`[${new Date().toISOString()}] DatabaseStorage: Results cleared, prompts and topics preserved`);
+  }
+
   async clearAllAnalysisData(): Promise<void> {
     console.log(`[${new Date().toISOString()}] DatabaseStorage: Clearing ALL analysis data...`);
     // Order matters — respect foreign key constraints

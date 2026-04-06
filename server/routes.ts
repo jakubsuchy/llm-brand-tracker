@@ -1040,11 +1040,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (type === 'responses') {
         await storage.clearAllResponses();
         res.json({ success: true, message: "All responses cleared successfully" });
+      } else if (type === 'results') {
+        await storage.clearResultsOnly();
+        res.json({ success: true, message: "Results cleared. Prompts and topics preserved." });
       } else if (type === 'nuclear') {
         await storage.clearAllAnalysisData();
-        res.json({ success: true, message: "All analysis data cleared. Settings and topics preserved." });
+        res.json({ success: true, message: "All analysis data cleared. Settings preserved." });
       } else {
-        res.status(400).json({ error: "Invalid type. Use 'all', 'prompts', 'responses', or 'nuclear'" });
+        res.status(400).json({ error: "Invalid type" });
       }
     } catch (error) {
       console.error("Error clearing data:", error);
