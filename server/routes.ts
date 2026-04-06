@@ -1480,7 +1480,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/settings/brand", requireRole("admin"), async (req, res) => {
+  app.get("/api/settings/brand", async (req, res) => {
     try {
       const brandUrl = await storage.getSetting('brandUrl');
       const brandName = await storage.getSetting('brandName');
