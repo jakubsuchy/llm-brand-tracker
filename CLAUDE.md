@@ -105,20 +105,20 @@ analytics (id, date, total_prompts, brand_mention_rate, top_competitor, ...)
 
 ### Authentication & Route Protection
 
-All API routes are protected by PassportJS session auth. The auth guard is in `server/routes.ts`:
+All API routes are protected by PassportJS session auth. The auth guard in `server/routes.ts` checks authentication (logged in) on all `/api/*` routes.
 
-- **Auth routes** (`/api/auth/*`, `/api/initialize`) are registered BEFORE the guard middleware, so they're automatically exempt
-- **Public API paths** that don't require auth (e.g., health checks) are listed in `server/config.ts` → `PUBLIC_API_PATHS` set
+- **Auth routes** (`/api/auth/*`, `/api/initialize`) are registered BEFORE the guard, so they're automatically exempt
+- **Public API paths** (e.g., health checks) are in `server/config.ts` → `PUBLIC_API_PATHS`
 - **All other `/api/*` routes** return 401 if not authenticated
-- **Role-based access**: use `requireRole('admin')` middleware on specific routes (e.g., `/api/users`)
+- **Role-based access**: use `requireRole('admin')` or `requireRole('analyst')` middleware per-route
+- Routes without `requireRole` are accessible to any authenticated user
+
+**IMPORTANT: When adding new API routes, ALWAYS add `requireRole('admin')` by default.** Then ask the user which role should actually have access. This prevents accidentally exposing admin functionality. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
 
 To make an API path public (no auth required):
-1. Add the path to `PUBLIC_API_PATHS` in `server/config.ts` (path is relative to `/api`, e.g., `'/test'` for `/api/test`)
+1. Add the path to `PUBLIC_API_PATHS` in `server/config.ts` (path relative to `/api`, e.g., `'/test'` for `/api/test`)
 
-To protect a route with a specific role:
-1. Add `requireRole('admin')` (or other role) as middleware: `app.get("/api/thing", requireRole('admin'), handler)`
-
-Auth provider configs (Google OAuth, SAML) are stored in DB via `app_settings` key `authProviders`, configurable at `/users` → Auth Providers tab.
+Auth provider configs (Google OAuth, SAML) stored in DB via `app_settings` key `authProviders`, configurable at `/users` → Auth Providers tab.
 
 ## Common Pitfalls
 
