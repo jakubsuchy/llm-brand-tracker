@@ -182,7 +182,7 @@ export class BrandAnalyzer {
         const config = raw ? JSON.parse(raw) : {
           perplexity: { enabled: true, type: 'browser' },
           chatgpt: { enabled: true, type: 'browser' },
-          gemini: { enabled: false, type: 'browser' },
+          gemini: { enabled: true, type: 'browser' },
         };
 
         const { isBrowserAvailable } = await import('./chatgpt-browser');

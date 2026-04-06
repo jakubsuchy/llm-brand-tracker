@@ -70,7 +70,7 @@ export default function InitializePage() {
     try {
       await apiRequest('POST', '/api/initialize', { email, fullName, password });
       await login(email, password);
-      setLocation("/");
+      setLocation("/setup");
     } catch (error: any) {
       toast({
         title: "Setup failed",

@@ -288,7 +288,7 @@ function BrowserPreview() {
 
   if (browserStatus?.mode !== 'local' || !browserStatus?.localContainerUp) return null;
 
-  const vncUrl = `${window.location.protocol}//${window.location.hostname}:6080/vnc_lite.html`;
+  const vncUrl = `${window.location.protocol}//${window.location.hostname}:6080/vnc_lite.html?resize=scale&autoconnect=true`;
 
   return (
     <Card>

@@ -131,12 +131,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
           )}</TabsList>
 
         <TabsContent value="brand" className="space-y-6">
-          <BrandDetailsCard />
-          {wizardMode && (
-            <Button onClick={() => handleTabChange('credentials')} className="w-full">
-              Save and continue to Credentials →
-            </Button>
-          )}
+          <BrandDetailsCard wizardMode={wizardMode} onContinue={() => handleTabChange('credentials')} />
         </TabsContent>
 
         <TabsContent value="credentials" className="space-y-6">
@@ -190,7 +185,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
           <ApifyTokenCard />
           {wizardMode && (
             <Button onClick={() => handleTabChange('providers')} className="w-full">
-              Save and continue to Providers →
+              Continue to Providers →
             </Button>
           )}
         </TabsContent>
@@ -307,7 +302,7 @@ function ProvidersCard() {
   );
 }
 
-function BrandDetailsCard() {
+function BrandDetailsCard({ wizardMode, onContinue }: { wizardMode?: boolean; onContinue?: () => void } = {}) {
   const [brandUrl, setBrandUrl] = useState('');
   const [brandName, setBrandName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -389,9 +384,9 @@ function BrandDetailsCard() {
           />
           <p className="text-xs text-gray-500">Used to detect brand mentions in LLM responses</p>
         </div>
-        <Button onClick={handleSave} disabled={isSaving} className="w-full">
+        <Button onClick={async () => { await handleSave(); if (wizardMode && onContinue) onContinue(); }} disabled={isSaving} className="w-full">
           <Save className="h-4 w-4 mr-2" />
-          {isSaving ? 'Saving...' : 'Save Brand Details'}
+          {isSaving ? 'Saving...' : wizardMode ? 'Save and continue to Credentials →' : 'Save Brand Details'}
         </Button>
       </CardContent>
     </Card>
