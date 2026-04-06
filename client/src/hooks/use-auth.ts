@@ -2,7 +2,7 @@ import React, { createContext, useContext, ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 
-type AuthUser = { id: number; email: string; fullName: string; roles: string[] };
+type AuthUser = { id: number; email: string; fullName: string; roles: string[]; apiKey?: string };
 type AuthContextType = {
   user: AuthUser | null;
   isLoading: boolean;

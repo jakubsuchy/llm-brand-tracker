@@ -14,6 +14,7 @@ declare global {
       email: string;
       fullName: string;
       roles: string[];
+      apiKey?: string | null;
     }
   }
 }
@@ -21,8 +22,15 @@ declare global {
 const app = express();
 // Trust proxy headers (X-Forwarded-Proto, X-Forwarded-Host) when behind ingress/load balancer
 app.set('trust proxy', 1);
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Skip body parsing for /mcp — the MCP transport reads the raw stream itself
+app.use((req, res, next) => {
+  if (req.path === '/mcp') return next();
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.path === '/mcp') return next();
+  express.urlencoded({ extended: false })(req, res, next);
+});
 
 const PgSession = connectPgSimple(session);
 app.use(session({
@@ -72,6 +80,9 @@ app.use((req, res, next) => {
   await seedRoles();
 
   const server = await registerRoutes(app);
+
+  const { registerMcpEndpoint } = await import('./mcp');
+  registerMcpEndpoint(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

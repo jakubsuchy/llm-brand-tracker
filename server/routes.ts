@@ -134,7 +134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { getAuthProviderConfig } = await import('./services/auth');
       const config = await getAuthProviderConfig();
       res.json({
-        user: req.user,
+        user: { ...req.user, apiKey: req.user!.apiKey },
         googleEnabled: !!config.google?.enabled,
         samlEnabled: !!config.saml?.enabled,
       });
@@ -320,6 +320,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
+  });
+
+  // --- API key regeneration (admin or self) ---
+  app.post("/api/users/:id/api-key", anyUser(), async (req, res) => {
+    const userId = parseInt(req.params.id);
+    // Allow admin or self
+    if (req.user!.id !== userId && !req.user!.roles.includes('admin')) {
+      return res.status(403).json({ message: "Can only regenerate your own key" });
+    }
+    const { regenerateApiKey } = await import('./services/auth');
+    const newKey = await regenerateApiKey(userId);
+    res.json({ apiKey: newKey });
   });
 
   // --- Auth provider configuration (admin only) ---

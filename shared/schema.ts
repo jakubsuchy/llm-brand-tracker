@@ -133,6 +133,7 @@ export const users = pgTable("users", {
   hashedPassword: text("hashed_password"),
   salt: text("salt"),
   googleId: text("google_id"),
+  apiKey: text("api_key"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

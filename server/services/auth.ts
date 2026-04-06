@@ -30,6 +30,14 @@ export async function verifyPassword(password: string, hash: string, salt: strin
   });
 }
 
+// --- API key generation ---
+
+export function generateApiKey(): string {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.pbkdf2Sync(crypto.randomBytes(32), salt, 100000, 32, 'sha256');
+  return key.toString('base64url');
+}
+
 // --- User queries ---
 
 export async function findUserByEmail(email: string) {
@@ -46,6 +54,7 @@ export async function findUserById(id: number): Promise<UserWithRoles | null> {
       hashedPassword: users.hashedPassword,
       salt: users.salt,
       googleId: users.googleId,
+      apiKey: users.apiKey,
       createdAt: users.createdAt,
       roleName: roles.name,
     })
@@ -66,6 +75,7 @@ export async function findUserById(id: number): Promise<UserWithRoles | null> {
     hashedPassword: user.hashedPassword,
     salt: user.salt,
     googleId: user.googleId,
+    apiKey: user.apiKey,
     createdAt: user.createdAt,
     roles: roleNames,
   };
@@ -88,7 +98,7 @@ export async function createUser(email: string, fullName: string, password: stri
 
   const result = await db
     .insert(users)
-    .values({ email, fullName, hashedPassword, salt })
+    .values({ email, fullName, hashedPassword, salt, apiKey: generateApiKey() })
     .returning();
 
   return result[0];
@@ -104,6 +114,18 @@ export async function removeUserRoles(userId: number) {
   await db.delete(userRoles).where(eq(userRoles.userId, userId));
 }
 
+export async function findUserByApiKey(key: string): Promise<UserWithRoles | null> {
+  const result = await db.select().from(users).where(eq(users.apiKey, key));
+  if (result.length === 0) return null;
+  return findUserById(result[0].id);
+}
+
+export async function regenerateApiKey(userId: number): Promise<string> {
+  const newKey = generateApiKey();
+  await db.update(users).set({ apiKey: newKey }).where(eq(users.id, userId));
+  return newKey;
+}
+
 export async function getAllUsersWithRoles(): Promise<UserWithRoles[]> {
   const result = await db
     .select({
@@ -113,6 +135,7 @@ export async function getAllUsersWithRoles(): Promise<UserWithRoles[]> {
       hashedPassword: users.hashedPassword,
       salt: users.salt,
       googleId: users.googleId,
+      apiKey: users.apiKey,
       createdAt: users.createdAt,
       roleName: roles.name,
     })
@@ -130,6 +153,7 @@ export async function getAllUsersWithRoles(): Promise<UserWithRoles[]> {
         hashedPassword: row.hashedPassword,
         salt: row.salt,
         googleId: row.googleId,
+        apiKey: row.apiKey,
         createdAt: row.createdAt,
         roles: [],
       });
@@ -242,7 +266,7 @@ export async function findOrCreateSamlUser(
   // Create new user
   const result = await db
     .insert(users)
-    .values({ email, fullName })
+    .values({ email, fullName, apiKey: generateApiKey() })
     .returning();
 
   await assignRole(result[0].id, 'user');
@@ -361,7 +385,7 @@ export async function findOrCreateGoogleUser(
   if (!email) throw new Error('Google profile has no email');
   const result = await db
     .insert(users)
-    .values({ email, fullName, googleId })
+    .values({ email, fullName, googleId, apiKey: generateApiKey() })
     .returning();
 
   await assignRole(result[0].id, 'user');
