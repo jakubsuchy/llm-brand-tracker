@@ -713,10 +713,10 @@ export default function PromptGeneratorPage() {
                       </div>
                     ))}
                   </div>
-                  <WriteInPrompt onAdd={(text) => {
+                  <WriteInPrompt topicId={topic.id} topicName={topic.name} topicDescription={topic.description} onAdd={(prompt) => {
                     setGeneratedTopics(prev => prev.map((t, i) =>
                       i === topicIndex
-                        ? { ...t, prompts: [...t.prompts, { text }] }
+                        ? { ...t, prompts: [...t.prompts, prompt] }
                         : t
                     ));
                   }} />
@@ -784,16 +784,49 @@ export default function PromptGeneratorPage() {
   );
 }
 
-function WriteInPrompt({ onAdd }: { onAdd: (text: string) => void }) {
+function WriteInPrompt({ topicId, topicName, topicDescription, onAdd }: {
+  topicId?: number;
+  topicName: string;
+  topicDescription: string;
+  onAdd: (prompt: PromptItem) => void;
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const [text, setText] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onAdd(trimmed);
-    setText('');
-    setIsOpen(false);
+    setIsSaving(true);
+    try {
+      // Ensure topic exists in DB
+      let resolvedTopicId = topicId;
+      if (!resolvedTopicId) {
+        const topicsRes = await fetch('/api/topics');
+        const topics = await topicsRes.json();
+        const existing = topics.find((t: any) => t.name === topicName);
+        if (existing) {
+          resolvedTopicId = existing.id;
+        } else {
+          const createRes = await apiRequest('POST', '/api/prompts/test', { text: trimmed, topicId: null });
+          // Topic will be created by save-and-analyze, just create the prompt directly
+        }
+      }
+      // Create prompt in DB
+      const res = await apiRequest('POST', '/api/prompts/test', { text: trimmed, topicId: resolvedTopicId || null });
+      const data = await res.json();
+      onAdd({ id: data.prompt?.id, text: trimmed });
+      setText('');
+      setIsOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+    } catch {
+      // Fallback: add to local state only
+      onAdd({ text: trimmed });
+      setText('');
+      setIsOpen(false);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!isOpen) {
@@ -817,8 +850,8 @@ function WriteInPrompt({ onAdd }: { onAdd: (text: string) => void }) {
         className="text-sm h-8"
         autoFocus
       />
-      <Button size="sm" className="h-8 shrink-0" onClick={handleAdd} disabled={!text.trim()}>
-        <Plus className="h-3 w-3 mr-1" /> Add
+      <Button size="sm" className="h-8 shrink-0" onClick={handleAdd} disabled={!text.trim() || isSaving}>
+        {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <><Plus className="h-3 w-3 mr-1" /> Add</>}
       </Button>
       <Button size="sm" variant="ghost" className="h-8 shrink-0" onClick={() => { setIsOpen(false); setText(''); }}>
         <X className="h-3 w-3" />
