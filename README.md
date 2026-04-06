@@ -1,172 +1,199 @@
 # LLM Brand Tracker
 
-A brand monitoring and competitive intelligence platform that analyzes how you and your competitor brands are mentioned and discussed across various topics in LLM responses. In its current iteration, this project only looks at ChatGPT (future platforms will be added).
+Track how your brand is mentioned across ChatGPT, Perplexity, Google Gemini, and other LLM providers. Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't.
 
-## 🎯 Overview
+## What it does
 
-A web application focused on brand positioning and mentions in LLMs, starting with ChatGPT today. Specific components:
-- prompt research & analysis
-- brand mentions, both your own and competitors
-- sources cited in prompts
+1. **Analyze your brand** — enter your website URL, the system scrapes it and identifies competitors
+2. **Generate prompts** — AI creates brand-neutral prompts across topics relevant to your industry
+3. **Run against LLM providers** — sends each prompt to Perplexity, ChatGPT, Gemini (configurable)
+4. **Track results** — brand mention rate, competitor analysis, source citations, topic breakdowns
+5. **Compare providers** — see which LLM mentions your brand most, which competitors dominate where
+6. **Find gaps** — identify prompts where your brand should be mentioned but isn't
 
-It automatically scrapes brand websites, generates targeted prompts, and processes responses to provide actionable areas of improvement, like where your brand should be mentioned. The flow:
-- analyze your own provided website
-- figure out competitors, with user input
-- use ChatGPT to generate diverse prompts
-- use ChatGPT to fetch prompt results
-- display prompt results and sources cited
+## Running prompts: Local vs Cloud
 
-## ✨ Key Features
+You choose how browser-based prompts are executed:
 
-- **Website Analysis**: Automatically scrapes and analyzes your brand website
-- **Competitor Tracking**: Identifies and monitors competitor mentions in ChatGPT responses
-- **Prompt Generation**: Creates diverse, relevant prompts for comprehensive brand analysis
-- **Source Attribution**: Tracks which sources and domains are cited in responses
-- **Progress Over Time**: Monitor analysis progress over time
-- **Actionable Next Steps**: Identifies where your brand should be mentioned but isn't
+### Local (free, slower)
+Run a browser container alongside the app. One prompt at a time (~1 prompt/min). May get blocked by anti-bot protections.
 
-## 🏗️ Architecture
-
-### Backend Stack
-- **Node.js/Express**: RESTful API server
-- **PostgreSQL**: Primary database with Drizzle ORM
-- **OpenAI API**: LLM integration for analysis
-- **WebSocket**: Real-time progress updates
-
-### Frontend Stack
-- **React 18**: Modern UI framework
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first styling
-- **Radix UI**: Accessible component primitives
-- **Vite**: Fast development and build tooling
-
-### Database Schema
-- **Topics**: Analysis categories and themes
-- **Prompts**: Generated analysis questions
-- **Responses**: AI-generated brand analysis
-- **Competitors**: Competitor tracking and mentions
-- **Sources**: Citation and domain tracking
-- **Analytics**: Aggregated metrics and insights
-
-## 🚀 Quick Start
-
-### Option 1: Docker (recommended)
-
-The easiest way to run the app. Includes PostgreSQL — no local database setup needed.
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/llm-brand-tracker.git
-   cd llm-brand-tracker
-   ```
-
-2. **Create a `.env` file**
-   ```env
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-3. **Start the app**
-   ```bash
-   docker compose up --build
-   ```
-   This builds the app, starts PostgreSQL, runs the schema migration, and serves the app on `http://localhost:3000`.
-
-4. **Stop / reset**
-   ```bash
-   docker compose down        # Stop containers (data preserved in pgdata volume)
-   docker compose down -v     # Stop and wipe database
-   ```
-
-### Option 2: Local development
-
-For development without Docker. Requires Node.js 18+ and a local PostgreSQL instance.
-
-1. **Clone and install**
-   ```bash
-   git clone https://github.com/yourusername/llm-brand-tracker.git
-   cd llm-brand-tracker
-   npm install
-   ```
-
-2. **Set up PostgreSQL**
-   ```bash
-   brew install postgresql   # macOS
-   brew services start postgresql
-
-   createdb brand_tracker
-   psql -d brand_tracker -c "CREATE USER admin WITH PASSWORD 'your_password';"
-   psql -d brand_tracker -c "GRANT ALL PRIVILEGES ON DATABASE brand_tracker TO admin;"
-   psql -d brand_tracker -c "GRANT ALL ON SCHEMA public TO admin;"
-   ```
-
-3. **Create a `.env` file**
-   ```env
-   DATABASE_URL=postgresql://admin:your_password@localhost:5432/brand_tracker
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-4. **Push schema and start**
-   ```bash
-   npm run db:push
-   npm run dev
-   ```
-
-5. **Open** `http://localhost:3000`
-
-### Available Scripts
 ```bash
-npm run dev          # Start dev server (port 3000)
-npm run build        # Vite build + esbuild server bundle
-npm run start        # Production server (node dist/index.js)
-npm run db:push      # Push schema to DB (drizzle-kit push)
-docker compose up --build   # Build and run with PostgreSQL
-docker compose down -v      # Stop and wipe DB
+docker compose --profile browser up -d
 ```
 
-## 📖 Usage
+### Apify Cloud (paid, faster)
+Use [Apify](https://apify.com) to run prompts in parallel with residential proxies (~15 prompts/min, ~$0.05/prompt). No anti-bot issues.
 
-### 1. Brand Analysis Setup
-- Navigate to the dashboard
-- Enter your brand URL (e.g., `https://yourbrand.com`)
-- Configure analysis settings (number of topics, prompts per topic)
+Set your Apify token in Settings → Credentials, or via environment:
+```env
+APIFY_TOKEN=apify_api_...
+```
 
-### 2. Run Analysis
-- Click "Start Analysis" to begin the automated process
-- Monitor real-time progress through the web interface
-- View live updates as prompts are generated and processed
+Switch between modes in Settings → Credentials → Browser Analysis Mode.
 
-### 3. Review Results
-- **Overview Metrics**: High-level brand mention statistics
-- **Topic Analysis**: Brand perception across different categories
-- **Competitor Analysis**: Competitive landscape insights
-- **Source Analysis**: Citation and domain tracking
+## Quick start
 
-## 🛠️ Development & Future
+### Docker (recommended)
 
-Recent improvements:
-- ~~Local Postgres only~~ — Dockerized with persistent volumes
-- ~~No deployment options~~ — Docker Compose with one-command startup
-- ~~Prompts are redundant~~ — Brand-neutral prompt generation with deduplication
-- ~~Prompt specificity~~ — Dynamic topic generation based on brand analysis
-- ~~Competitor completeness~~ — Improved detection with merge feature for duplicates
-- ~~Speed~~ — 3 concurrent workers with rate limit backoff
+```bash
+git clone https://github.com/jakubsuchy/llm-brand-tracker.git
+cd llm-brand-tracker
+cp example.env .env
+# Edit .env with your OPENAI_API_KEY
+docker compose up --build -d
+```
 
-Remaining areas for improvement:
-1. **Auth**. No user authentication — anyone with access can run analysis
-2. **Multi-LLM support**. Currently ChatGPT only — Claude, Gemini, Perplexity planned
-3. **Scheduled runs**. Analysis only runs manually — needs background scheduling
-4. **Export/reporting**. Limited export options — needs PDF reports, email digests
+Open `http://localhost:3000`. On first visit you'll create an admin account.
 
-This project is public. Contributions welcome.
+### With browser provider (local)
 
-## 🤝 Contributing
+```bash
+docker compose --profile browser up --build -d
+```
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### Environment variables
 
-## 🆘 Support
+```env
+# Required
+DATABASE_URL=postgresql://admin:password@db:5432/brand_tracker
+OPENAI_API_KEY=sk-...
 
-**Issues**: Report bugs and feature requests on GitHub. Better yet, contribute and fix them.
+# Optional — browser analysis
+APIFY_TOKEN=                    # Apify Cloud mode (paid, fast)
+BROWSER_ACTOR_URL=http://browser-actor:8888  # Local container mode (free)
+
+# Optional — authentication
+SESSION_SECRET=change-me-in-production
+GOOGLE_CLIENT_ID=               # Google OAuth
+GOOGLE_CLIENT_SECRET=
+
+# Optional — ChatGPT login (for browser mode)
+CHATGPT_EMAIL=
+CHATGPT_PASSWORD=
+CHATGPT_TOTP_SECRET=
+```
+
+## Features
+
+### Dashboard
+- Brand mention rate across all providers
+- Per-provider performance comparison (bar chart)
+- Top competitors with mention rates
+- Topic-level analysis
+- Source citations with brand/competitor/neutral classification
+- Filter by provider and analysis run
+
+### Prompt Generator
+- AI-generated brand-neutral prompts across configurable topics
+- Add custom write-in prompts
+- Prompts saved to DB, reusable across runs
+
+### Analysis
+- PostgreSQL job queue with retry logic
+- Concurrent workers (30 for cloud, 1 for local browser)
+- Real-time progress with job-level detail
+- Failed job tracking with full error messages
+- Crash recovery — resumes interrupted runs on restart
+
+### Competitors
+- Auto-detected from LLM responses
+- Merge duplicates (auto-suggested)
+- Block irrelevant entries
+- Per-prompt comparison (brand vs competitor)
+- Source overlap analysis
+
+### Authentication
+- PassportJS with local login (email/password)
+- Google OAuth 2.0
+- SAML SSO
+- Role-based access: user, analyst, admin
+- Admin can manage users, providers, settings
+- Auth provider config stored in DB, manageable via UI
+
+### Settings
+- Brand configuration
+- API keys (OpenAI, Apify)
+- Provider enable/disable (Perplexity, ChatGPT, Gemini)
+- Competitor source recognition rules
+- Danger zone (delete results or everything)
+
+## MCP Server
+
+The app includes an [MCP](https://modelcontextprotocol.io/) endpoint for querying brand data from Claude Desktop, Claude Code, or any MCP client.
+
+### Setup
+
+```bash
+# Claude Code
+claude mcp add --transport http brand-tracker http://localhost:3000/mcp --header "Authorization:Bearer YOUR_API_KEY"
+```
+
+Or add to `~/.claude/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "brand-tracker": {
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Your API key is in the sidebar (click the key icon next to your name).
+
+### Available tools (16)
+
+| Tool | Description |
+|------|-------------|
+| `brand-snapshot` | Quick health check: mention rate, top competitor, sources |
+| `brand-audit` | Comprehensive assessment with per-provider/topic/competitor breakdown |
+| `list-providers` | Provider mention rates |
+| `list-competitors` | Ranked competitors by mention rate |
+| `list-topics` | Topic breakdown with rates |
+| `list-sources` | Top sources with classification |
+| `list-runs` | Analysis run history |
+| `get-competitor` | Deep dive on a single competitor |
+| `get-source` | Deep dive on a source domain |
+| `get-response` | Full response text for a specific prompt |
+| `search-prompts` | Search prompt/response text with filters |
+| `find-unmentioned` | Prompts where brand is NOT mentioned |
+| `compare-providers` | Side-by-side provider comparison |
+| `compare-competitor` | Brand vs specific competitor head-to-head |
+| `compare-sources` | Source overlap (brand-only, competitor-only, shared) |
+| `get-run` | Single run details with metrics |
+
+### Example questions
+
+- "What's my brand mention rate?"
+- "Which provider performs best for us?"
+- "Who are our top competitors in LLM responses?"
+- "What prompts don't mention us?"
+- "Compare us with F5 BIG-IP"
+- "Which sources cite competitors but not us?"
+
+## Tech stack
+
+- **Backend**: Node.js, Express, TypeScript
+- **Frontend**: React 18, Vite, Tailwind CSS, Radix UI, wouter
+- **Database**: PostgreSQL with Drizzle ORM
+- **AI**: OpenAI API (GPT-4o) for prompt generation and response analysis
+- **Browser automation**: Apify actors with Camoufox (anti-detect Firefox)
+- **Auth**: PassportJS (local, Google OAuth, SAML)
+- **MCP**: Model Context Protocol server for LLM tool integration
+- **Deployment**: Docker Compose
+
+## Development
+
+```bash
+npm run dev          # Dev server (port 3000)
+npm run build        # Production build
+npm run db:push      # Push schema changes to DB
+```
+
+## License
+
+MIT
