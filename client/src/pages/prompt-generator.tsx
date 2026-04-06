@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, X, CheckCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { Loader2, Plus, X, CheckCircle, AlertCircle, RefreshCw, PenLine } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -713,6 +713,13 @@ export default function PromptGeneratorPage() {
                       </div>
                     ))}
                   </div>
+                  <WriteInPrompt onAdd={(text) => {
+                    setGeneratedTopics(prev => prev.map((t, i) =>
+                      i === topicIndex
+                        ? { ...t, prompts: [...t.prompts, { text }] }
+                        : t
+                    ));
+                  }} />
                 </CardContent>
               </Card>
             ))}
@@ -773,6 +780,49 @@ export default function PromptGeneratorPage() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function WriteInPrompt({ onAdd }: { onAdd: (text: string) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [text, setText] = useState('');
+
+  const handleAdd = () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onAdd(trimmed);
+    setText('');
+    setIsOpen(false);
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="mt-2 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+      >
+        <PenLine className="h-3 w-3" /> Add custom prompt
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex gap-2">
+      <Input
+        placeholder="Type your own prompt..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+        className="text-sm h-8"
+        autoFocus
+      />
+      <Button size="sm" className="h-8 shrink-0" onClick={handleAdd} disabled={!text.trim()}>
+        <Plus className="h-3 w-3 mr-1" /> Add
+      </Button>
+      <Button size="sm" variant="ghost" className="h-8 shrink-0" onClick={() => { setIsOpen(false); setText(''); }}>
+        <X className="h-3 w-3" />
+      </Button>
     </div>
   );
 }
