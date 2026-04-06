@@ -6,14 +6,24 @@ import { analyzer, BrandAnalyzer, cancelAnalysisRun, getAnalysisProgressFromDB, 
 import { generatePromptsForTopic } from "./services/openai";
 import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
 
+// Explicitly allows a route for the given role(s). Admin always passes.
+// Also marks the request so the default admin guard doesn't block it.
 function requireRole(...requiredRoles: string[]) {
   return (req: any, res: any, next: any) => {
     const userRoles: string[] = req.user?.roles || [];
-    // Admin can access everything
-    if (userRoles.includes('admin')) return next();
+    if (userRoles.includes('admin')) { req._roleChecked = true; return next(); }
     if (!userRoles.some((r: string) => requiredRoles.includes(r))) {
       return res.status(403).json({ message: "Insufficient permissions" });
     }
+    req._roleChecked = true;
+    next();
+  };
+}
+
+// Allows any authenticated user (no specific role needed).
+function anyUser() {
+  return (req: any, _res: any, next: any) => {
+    req._roleChecked = true;
     next();
   };
 }
@@ -204,11 +214,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // --- Auth guard: protect all subsequent API routes ---
+  // Default: require admin role. Routes that allow lower roles must
+  // explicitly use requireRole('analyst') or requireRole('user') which
+  // will run BEFORE this check (Express middleware runs in order).
   const { PUBLIC_API_PATHS } = await import('./config');
   app.use("/api", (req, res, next) => {
     if (PUBLIC_API_PATHS.has(req.path)) return next();
-    if (req.isAuthenticated()) return next();
-    res.status(401).json({ message: "Not authenticated" });
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Not authenticated" });
+    // If a previous requireRole middleware already called next(), we're here
+    // and the role was sufficient. If no requireRole ran, require admin.
+    if ((req as any)._roleChecked) return next();
+    const userRoles: string[] = (req.user as any)?.roles || [];
+    if (userRoles.includes('admin')) return next();
+    res.status(403).json({ message: "Admin access required" });
   });
 
   // --- User management routes (admin only) ---
@@ -430,7 +448,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Per-provider brand mention rates
-  app.get("/api/metrics/by-provider", async (req, res) => {
+  app.get("/api/metrics/by-provider", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const allResponses = await storage.getResponsesWithPrompts(runId);
@@ -471,7 +489,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Overview metrics endpoint
-  app.get("/api/metrics", async (req, res) => {
+  app.get("/api/metrics", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
@@ -542,7 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Total counts endpoint for accurate statistics
-  app.get("/api/counts", async (req, res) => {
+  app.get("/api/counts", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
@@ -577,7 +595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Topic analysis endpoint
-  app.get("/api/topics", async (req, res) => {
+  app.get("/api/topics", anyUser(), async (req, res) => {
     try {
       const topics = await storage.getTopics();
       res.json(topics);
@@ -588,7 +606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get topics with their prompts (for prompt generator review)
-  app.get("/api/topics/with-prompts", async (req, res) => {
+  app.get("/api/topics/with-prompts", anyUser(), async (req, res) => {
     try {
       const allTopics = await storage.getTopics();
       const allPrompts = await storage.getPrompts();
@@ -633,7 +651,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/topics/analysis", async (req, res) => {
+  app.get("/api/topics/analysis", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
@@ -664,7 +682,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Competitor merge endpoints — registered BEFORE /api/competitors
-  app.get("/api/competitors/merge-suggestions", async (req, res) => {
+  app.get("/api/competitors/merge-suggestions", anyUser(), async (req, res) => {
     try {
       const suggestions = await storage.getMergeSuggestions();
       res.json(suggestions);
@@ -702,7 +720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/competitors/merge-history", async (req, res) => {
+  app.get("/api/competitors/merge-history", anyUser(), async (req, res) => {
     try {
       const history = await storage.getMergeHistory();
       res.json(history);
@@ -713,7 +731,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Competitor analysis endpoint
-  app.get("/api/competitors", async (req, res) => {
+  app.get("/api/competitors", anyUser(), async (req, res) => {
     try {
       const competitors = await storage.getCompetitors();
       res.json(competitors);
@@ -723,7 +741,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/competitors/analysis", async (req, res) => {
+  app.get("/api/competitors/analysis", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
@@ -772,7 +790,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Sources endpoints
-  app.get("/api/sources", async (req, res) => {
+  app.get("/api/sources", anyUser(), async (req, res) => {
     try {
       const sources = await storage.getSources();
       res.json(sources);
@@ -840,7 +858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sources/analysis", async (req, res) => {
+  app.get("/api/sources/analysis", anyUser(), async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const provider = req.query.provider as string | undefined;
@@ -927,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get responses that cite a specific domain
-  app.get("/api/sources/:domain/responses", async (req, res) => {
+  app.get("/api/sources/:domain/responses", anyUser(), async (req, res) => {
     try {
       const domain = req.params.domain;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
@@ -946,7 +964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Prompts endpoint - shows only latest analysis prompts
-  app.get("/api/prompts", async (req, res) => {
+  app.get("/api/prompts", anyUser(), async (req, res) => {
     try {
       const latestPrompts = await storage.getLatestPrompts();
       // Add topic information to each prompt
@@ -964,7 +982,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Prompt results endpoints - supports full dataset access
-  app.get("/api/responses", async (req, res) => {
+  app.get("/api/responses", anyUser(), async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
@@ -986,7 +1004,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/responses/:id", async (req, res) => {
+  app.get("/api/responses/:id", anyUser(), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const response = await storage.getResponseById(id);
@@ -1001,7 +1019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Manual prompt testing
-  app.post("/api/prompts/test", async (req, res) => {
+  app.post("/api/prompts/test", requireRole("analyst"), async (req, res) => {
     try {
       const { text, topicId } = insertPromptSchema.parse(req.body);
       
@@ -1277,7 +1295,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // List all analysis runs
-  app.get("/api/analysis/runs", async (req, res) => {
+  app.get("/api/analysis/runs", anyUser(), async (req, res) => {
     try {
       const runs = await storage.getAnalysisRuns();
       // Include response count per run, filter out empty runs
@@ -1360,7 +1378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Apify usage statistics
-  app.get("/api/apify-usage", async (req, res) => {
+  app.get("/api/apify-usage", anyUser(), async (req, res) => {
     try {
       const { apifyUsage } = await import("@shared/schema");
       const { db } = await import("./db");
@@ -1417,7 +1435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Settings - Get brand info
   // API usage statistics
-  app.get("/api/usage", async (req, res) => {
+  app.get("/api/usage", anyUser(), async (req, res) => {
     try {
       const { apiUsage, analysisRuns } = await import("@shared/schema");
       const { db } = await import("./db");
@@ -1551,7 +1569,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     gemini: { enabled: false, type: 'browser', label: 'Google Gemini' },
   };
 
-  app.get("/api/settings/providers", async (req, res) => {
+  app.get("/api/settings/providers", anyUser(), async (req, res) => {
     try {
       const raw = await storage.getSetting('providersConfig');
       const config = raw ? JSON.parse(raw) : DEFAULT_PROVIDERS_CONFIG;
@@ -1866,7 +1884,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Analysis Progress - Start new analysis
   // Export data
-  app.get("/api/export", async (req, res) => {
+  app.get("/api/export", anyUser(), async (req, res) => {
     try {
       const topics = await storage.getTopics();
       const prompts = await storage.getPrompts();
