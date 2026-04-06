@@ -18,6 +18,19 @@ import {
   Check,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+const McpIcon = () => (
+  <svg viewBox="0 0 120 120" className="w-5 h-5" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M60 12L108 36V84L60 108L12 84V36L60 12Z" stroke="currentColor" strokeWidth="6" fill="none"/>
+    <circle cx="60" cy="36" r="8" fill="currentColor"/>
+    <circle cx="36" cy="72" r="8" fill="currentColor"/>
+    <circle cx="84" cy="72" r="8" fill="currentColor"/>
+    <path d="M60 44V56M52 64L40 70M68 64L80 70" stroke="currentColor" strokeWidth="4"/>
+    <circle cx="60" cy="60" r="6" fill="currentColor"/>
+  </svg>
+);
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
@@ -84,6 +97,87 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 
       </nav>
+
+      {/* MCP Connect Banner */}
+      <div className="px-4 pb-2">
+        <Dialog>
+          <DialogTrigger asChild>
+            <button className="w-full flex items-center gap-2.5 p-2.5 rounded-lg bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 hover:border-indigo-200 transition-colors text-left">
+              <McpIcon />
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-indigo-900">Chat with your data</p>
+                <p className="text-[10px] text-indigo-600">with Claude AI</p>
+              </div>
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <McpIcon />
+                Connect to Claude AI
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Query your brand tracking data using natural language in Claude Desktop or Claude Code.
+              </p>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-700">Install command (Claude Code):</p>
+                <div className="relative">
+                  <pre className="bg-gray-50 border rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+{`claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${user?.apiKey || 'YOUR_API_KEY'}"`}
+                  </pre>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="absolute top-1 right-1 h-7 w-7 p-0"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        `claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${user?.apiKey || ''}"`
+                      );
+                    }}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+
+              {user?.apiKey && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-700">Your API Key:</p>
+                  <div className="flex items-center gap-2 bg-gray-50 border rounded-lg p-2">
+                    <code className="text-xs text-gray-600 truncate flex-1">{user.apiKey}</code>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 shrink-0"
+                      onClick={() => navigator.clipboard.writeText(user.apiKey || '')}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-700">Example questions you can ask:</p>
+                <div className="grid gap-1.5">
+                  {[
+                    "What's my brand mention rate?",
+                    "Which provider performs best for us?",
+                    "Who are our top competitors?",
+                    "What prompts don't mention us?",
+                    "Which sources cite competitors but not us?",
+                  ].map(q => (
+                    <div key={q} className="text-xs text-gray-600 bg-gray-50 rounded px-2.5 py-1.5">"{q}"</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
 
       {/* User Profile */}
       <div className="p-4 border-t border-slate-200 space-y-2">
