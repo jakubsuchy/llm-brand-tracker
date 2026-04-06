@@ -65,13 +65,6 @@ BROWSER_ACTOR_URL=http://browser-actor:8888  # Local container mode (free)
 
 # Optional — authentication
 SESSION_SECRET=change-me-in-production
-GOOGLE_CLIENT_ID=               # Google OAuth
-GOOGLE_CLIENT_SECRET=
-
-# Optional — ChatGPT login (for browser mode)
-CHATGPT_EMAIL=
-CHATGPT_PASSWORD=
-CHATGPT_TOTP_SECRET=
 ```
 
 ## Features
@@ -194,6 +187,3 @@ npm run build        # Production build
 npm run db:push      # Push schema changes to DB
 ```
 
-## License
-
-MIT
