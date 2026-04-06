@@ -781,6 +781,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(sources);
     await db.delete(analytics);
     await db.delete(apiUsage);
+    await db.delete(apifyUsage);
     await db.delete(analysisRuns);
     await db.delete(topics);
     console.log(`[${new Date().toISOString()}] DatabaseStorage: All analysis data cleared`);

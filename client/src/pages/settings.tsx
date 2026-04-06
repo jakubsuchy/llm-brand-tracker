@@ -13,8 +13,9 @@ import { Switch } from "@/components/ui/switch";
 import { Settings, Key, Save, CheckCircle, XCircle, Globe, X, Plus, ShieldX, Trash2 } from "lucide-react";
 
 const SETTINGS_TABS = ['brand', 'credentials', 'providers', 'sources', 'danger'] as const;
+const WIZARD_TABS = ['brand', 'credentials', 'providers'] as const;
 
-export default function SettingsPage() {
+export default function SettingsPage({ wizardMode = false }: { wizardMode?: boolean }) {
   const [, setLocation] = useLocation();
   const hash = typeof window !== 'undefined' ? window.location.hash.slice(1) : '';
   const initialTab = SETTINGS_TABS.includes(hash as any) ? hash : 'brand';
@@ -106,22 +107,36 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3">
         <Settings className="h-8 w-8 text-blue-600" />
         <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-gray-600">Configure your brand tracker</p>
+          <h1 className="text-2xl font-bold">{wizardMode ? 'Setup' : 'Settings'}</h1>
+          <p className="text-gray-600">{wizardMode ? 'Configure your brand tracker to get started' : 'Configure your brand tracker'}</p>
         </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="max-w-2xl">
         <TabsList className="mb-6 h-auto flex-wrap gap-1">
-          <TabsTrigger value="brand">Brand</TabsTrigger>
-          <TabsTrigger value="credentials">Credentials</TabsTrigger>
-          <TabsTrigger value="providers">Providers</TabsTrigger>
-          <TabsTrigger value="sources">Sources</TabsTrigger>
-          <TabsTrigger value="danger">Danger</TabsTrigger>
-        </TabsList>
+          {wizardMode ? (
+            <>
+              <TabsTrigger value="brand">1. Brand</TabsTrigger>
+              <TabsTrigger value="credentials">2. Credentials</TabsTrigger>
+              <TabsTrigger value="providers">3. Providers</TabsTrigger>
+            </>
+          ) : (
+            <>
+              <TabsTrigger value="brand">Brand</TabsTrigger>
+              <TabsTrigger value="credentials">Credentials</TabsTrigger>
+              <TabsTrigger value="providers">Providers</TabsTrigger>
+              <TabsTrigger value="sources">Sources</TabsTrigger>
+              <TabsTrigger value="danger">Danger</TabsTrigger>
+            </>
+          )}</TabsList>
 
         <TabsContent value="brand" className="space-y-6">
           <BrandDetailsCard />
+          {wizardMode && (
+            <Button onClick={() => handleTabChange('credentials')} className="w-full">
+              Save and continue to Credentials →
+            </Button>
+          )}
         </TabsContent>
 
         <TabsContent value="credentials" className="space-y-6">
@@ -173,20 +188,34 @@ export default function SettingsPage() {
           </Card>
 
           <ApifyTokenCard />
+          {wizardMode && (
+            <Button onClick={() => handleTabChange('providers')} className="w-full">
+              Save and continue to Providers →
+            </Button>
+          )}
         </TabsContent>
 
         <TabsContent value="providers" className="space-y-6">
           <ProvidersCard />
+          {wizardMode && (
+            <Button onClick={() => setLocation('/prompt-generator')} className="w-full">
+              Continue to Prompt Generator →
+            </Button>
+          )}
         </TabsContent>
 
-        <TabsContent value="sources" className="space-y-6">
-          <CompetitorSubdomainsCard />
-          <CompetitorExclusionsCard />
-        </TabsContent>
+        {!wizardMode && (
+          <TabsContent value="sources" className="space-y-6">
+            <CompetitorSubdomainsCard />
+            <CompetitorExclusionsCard />
+          </TabsContent>
+        )}
 
-        <TabsContent value="danger" className="space-y-6">
-          <DangerZoneCard />
-        </TabsContent>
+        {!wizardMode && (
+          <TabsContent value="danger" className="space-y-6">
+            <DangerZoneCard />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

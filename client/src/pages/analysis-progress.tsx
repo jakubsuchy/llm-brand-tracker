@@ -19,7 +19,9 @@ import {
   BarChart3,
   Search,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Monitor,
+  Maximize2,
 } from "lucide-react";
 
 interface AnalysisProgress {
@@ -261,6 +263,9 @@ export default function AnalysisProgressPage() {
           </CardContent>
         </Card>
 
+        {/* VNC viewer for local browser mode */}
+        <BrowserPreview />
+
         {/* Job list */}
         {allJobs && allJobs.length > 0 && (
           <JobsTable jobs={allJobs} />
@@ -271,6 +276,48 @@ export default function AnalysisProgressPage() {
 
       </div>
     </div>
+  );
+}
+
+function BrowserPreview() {
+  const { data: browserStatus } = useQuery<{ mode: string; localContainerUp: boolean }>({
+    queryKey: ['/api/settings/browser-status'],
+    refetchInterval: 10000,
+  });
+  const [showVnc, setShowVnc] = useState(false);
+
+  if (browserStatus?.mode !== 'local' || !browserStatus?.localContainerUp) return null;
+
+  const vncUrl = `${window.location.protocol}//${window.location.hostname}:6080/vnc_lite.html`;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Monitor className="h-4 w-4" />
+            Browser Preview
+          </CardTitle>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowVnc(!showVnc)}>
+              {showVnc ? 'Hide' : 'Show'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.open(vncUrl, '_blank')}>
+              <Maximize2 className="h-3 w-3 mr-1" /> Expand
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      {showVnc && (
+        <CardContent className="p-0">
+          <iframe
+            src={vncUrl}
+            className="w-full h-[400px] sm:h-[500px] border-t rounded-b-lg"
+            title="Browser VNC"
+          />
+        </CardContent>
+      )}
+    </Card>
   );
 }
 

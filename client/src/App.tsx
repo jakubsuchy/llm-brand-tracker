@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
@@ -20,10 +20,27 @@ import UsersPage from "@/pages/users";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, hasRole } = useAuth();
   const [location] = useLocation();
+
+  const { data: brandData } = useQuery<{ brandName: string | null }>({
+    queryKey: ['/api/settings/brand'],
+    enabled: isAuthenticated,
+  });
+  const { data: promptsData } = useQuery<any[]>({
+    queryKey: ['/api/prompts'],
+    enabled: isAuthenticated,
+  });
+
   if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
   if (!isAuthenticated) return <Redirect to={`/login?redirect=${encodeURIComponent(location)}`} />;
+
+  // Redirect to setup wizard if brand is empty and no prompts (admin/analyst only)
+  const needsSetup = !brandData?.brandName && (!promptsData || promptsData.length === 0);
+  if (needsSetup && location !== '/setup' && (hasRole('admin') || hasRole('analyst'))) {
+    return <Redirect to="/setup" />;
+  }
+
   return <>{children}</>;
 }
 
@@ -57,6 +74,7 @@ function Router() {
               <Route path="/compare" component={ComparePage} />
               <Route path="/sources" component={SourcesPage} />
               <Route path="/analysis-progress">{() => <RequireRole role="analyst"><AnalysisProgressPage /></RequireRole>}</Route>
+              <Route path="/setup">{() => <SettingsPage wizardMode />}</Route>
               <Route path="/settings">{() => <RequireRole role="admin"><SettingsPage /></RequireRole>}</Route>
               <Route path="/users">{() => <RequireRole role="admin"><UsersPage /></RequireRole>}</Route>
               <Route component={NotFound} />
