@@ -17,9 +17,7 @@ services:
       retries: 5
 
   browser-actor:
-    build:
-      context: ./browser-actor
-      dockerfile: Dockerfile-local
+    image: ghcr.io/jakubsuchy/llm-prompt-fetch-local:latest
     profiles: ["browser"]
     restart: unless-stopped
     ports:
@@ -38,7 +36,7 @@ services:
       start_period: 15s
 
   app:
-    build: .
+    image: ghcr.io/jakubsuchy/llm-brand-tracker/app:latest
     restart: unless-stopped
     ports:
       - "3000:3000"

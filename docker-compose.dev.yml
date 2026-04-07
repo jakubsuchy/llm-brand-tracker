@@ -1,0 +1,12 @@
+# Development override — builds containers from source instead of pulling from GHCR.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  browser-actor:
+    build:
+      context: ./browser-actor
+      dockerfile: Dockerfile-local
+    image: !reset null
+
+  app:
+    build: .
+    image: !reset null
