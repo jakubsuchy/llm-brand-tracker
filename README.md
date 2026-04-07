@@ -11,67 +11,64 @@ Track how your brand is mentioned across ChatGPT, Perplexity, Google Gemini, and
 5. **Compare providers** — see which LLM mentions your brand most, which competitors dominate where
 6. **Find gaps** — identify prompts where your brand should be mentioned but isn't
 
-## Running prompts: Local vs Cloud
+## Quick start
 
-You choose how browser-based prompts are executed:
+```bash
+curl -O https://raw.githubusercontent.com/jakubsuchy/llm-brand-tracker/main/docker-compose.yml
+docker compose up -d
+```
 
-### Local (free, slower)
-Run a browser container alongside the app. One prompt at a time (~1 prompt/min). May get blocked by anti-bot protections.
+Open `http://localhost:3000`. Create an admin account, then configure your OpenAI API key and brand details in the setup wizard. Everything is configurable in the web UI — no `.env` file needed.
+
+### With local browser provider (free)
 
 ```bash
 docker compose --profile browser up -d
 ```
 
-### Apify Cloud (paid, faster)
-Use [Apify](https://apify.com) to run prompts in parallel with residential proxies (~15 prompts/min, ~$0.05/prompt). No anti-bot issues.
+## Launch with Claude Code
 
-Set your Apify token in Settings → Credentials, or via environment:
-```env
-APIFY_TOKEN=apify_api_...
+You can set up LLM Brand Tracker directly from Claude Code:
+
 ```
+Download docker-compose.yml from
+https://raw.githubusercontent.com/jakubsuchy/llm-brand-tracker/main/docker-compose.yml
+and run docker compose up -d. Then open http://localhost:3000
+```
+
+After setup, connect Claude to your data via MCP:
+
+```
+claude mcp add --transport http brand-tracker http://localhost:3000/mcp --header "Authorization:Bearer YOUR_API_KEY"
+```
+
+Then ask questions like:
+- "What's my brand mention rate?"
+- "Which provider performs best for us?"
+- "What prompts don't mention us?"
+- "Which sources cite competitors but not us?"
+
+## Running prompts: Local vs Cloud
+
+You choose how browser-based prompts are executed:
+
+### Local (free, ~1 prompt/min)
+Run a browser container alongside the app. One prompt at a time. May get blocked by anti-bot protections.
+
+```bash
+docker compose --profile browser up -d
+```
+
+### Apify Cloud (~$0.05/prompt, ~15 prompts/min)
+Use [Apify](https://apify.com) for parallel execution with residential proxies. No anti-bot issues. Set your Apify token in Settings → Credentials.
 
 Switch between modes in Settings → Credentials → Browser Analysis Mode.
-
-## Quick start
-
-### Docker (recommended)
-
-```bash
-git clone https://github.com/jakubsuchy/llm-brand-tracker.git
-cd llm-brand-tracker
-cp example.env .env
-# Edit .env with your OPENAI_API_KEY
-docker compose up --build -d
-```
-
-Open `http://localhost:3000`. On first visit you'll create an admin account.
-
-### With browser provider (local)
-
-```bash
-docker compose --profile browser up --build -d
-```
-
-### Environment variables
-
-```env
-# Required
-DATABASE_URL=postgresql://admin:password@db:5432/brand_tracker
-OPENAI_API_KEY=sk-...
-
-# Optional — browser analysis
-APIFY_TOKEN=                    # Apify Cloud mode (paid, fast)
-BROWSER_ACTOR_URL=http://browser-actor:8888  # Local container mode (free)
-
-# Optional — authentication
-SESSION_SECRET=change-me-in-production
-```
 
 ## Features
 
 ### Dashboard
 - Brand mention rate across all providers
-- Per-provider performance comparison (bar chart)
+- Per-provider performance comparison
 - Top competitors with mention rates
 - Topic-level analysis
 - Source citations with brand/competitor/neutral classification
@@ -97,16 +94,15 @@ SESSION_SECRET=change-me-in-production
 - Source overlap analysis
 
 ### Authentication
-- PassportJS with local login (email/password)
+- Local login (email/password)
 - Google OAuth 2.0
 - SAML SSO
 - Role-based access: user, analyst, admin
-- Admin can manage users, providers, settings
-- Auth provider config stored in DB, manageable via UI
+- Auth provider config manageable via UI
 
 ### Settings
 - Brand configuration
-- API keys (OpenAI, Apify)
+- API keys (OpenAI, Apify) — all configurable in the UI
 - Provider enable/disable (Perplexity, ChatGPT, Gemini)
 - Competitor source recognition rules
 - Danger zone (delete results or everything)
@@ -118,22 +114,7 @@ The app includes an [MCP](https://modelcontextprotocol.io/) endpoint for queryin
 ### Setup
 
 ```bash
-# Claude Code
 claude mcp add --transport http brand-tracker http://localhost:3000/mcp --header "Authorization:Bearer YOUR_API_KEY"
-```
-
-Or add to `~/.claude/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "brand-tracker": {
-      "url": "http://localhost:3000/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY"
-      }
-    }
-  }
-}
 ```
 
 Your API key is in the sidebar (click the key icon next to your name).
@@ -159,15 +140,6 @@ Your API key is in the sidebar (click the key icon next to your name).
 | `compare-sources` | Source overlap (brand-only, competitor-only, shared) |
 | `get-run` | Single run details with metrics |
 
-### Example questions
-
-- "What's my brand mention rate?"
-- "Which provider performs best for us?"
-- "Who are our top competitors in LLM responses?"
-- "What prompts don't mention us?"
-- "Compare us with F5 BIG-IP"
-- "Which sources cite competitors but not us?"
-
 ## Tech stack
 
 - **Backend**: Node.js, Express, TypeScript
@@ -182,8 +154,12 @@ Your API key is in the sidebar (click the key icon next to your name).
 ## Development
 
 ```bash
+# Build from source instead of pulling images
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Or run directly
+npm install
 npm run dev          # Dev server (port 3000)
 npm run build        # Production build
 npm run db:push      # Push schema changes to DB
 ```
-

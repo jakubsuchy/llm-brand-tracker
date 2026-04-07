@@ -26,7 +26,6 @@ services:
     environment:
       APIFY_META_ORIGIN: STANDBY
       ACTOR_STANDBY_PORT: 8888
-      CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
       APIFY_PROXY_PASSWORD: ${APIFY_PROXY_PASSWORD:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8888/ || exit 1"]
@@ -45,15 +44,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://admin:password@db:5432/brand_tracker
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      CHATGPT_EMAIL: ${CHATGPT_EMAIL:-}
-      CHATGPT_PASSWORD: ${CHATGPT_PASSWORD:-}
-      CHATGPT_TOTP_SECRET: ${CHATGPT_TOTP_SECRET:-}
       BROWSER_ACTOR_URL: http://browser-actor:8888
-      APIFY_TOKEN: ${APIFY_TOKEN:-}
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-in-production}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       NODE_ENV: production
 
 volumes:
