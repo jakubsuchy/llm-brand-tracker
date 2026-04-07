@@ -118,12 +118,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Allowlist of user fields safe to return to clients
+  function safeUser(user: any) {
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      roles: user.roles,
+      apiKey: user.apiKey,
+      createdAt: user.createdAt,
+    };
+  }
+
   app.get("/api/auth/session", async (req, res) => {
     if (req.isAuthenticated()) {
       const { getAuthProviderConfig } = await import('./services/auth');
       const config = await getAuthProviderConfig();
       res.json({
-        user: { ...req.user, apiKey: req.user!.apiKey },
+        user: safeUser(req.user),
         googleEnabled: !!config.google?.enabled,
         samlEnabled: !!config.saml?.enabled,
       });
@@ -138,7 +150,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.status(401).json({ message: info?.message || 'Invalid credentials' });
       req.logIn(user, (err) => {
         if (err) return next(err);
-        res.json({ user });
+        res.json({ user: safeUser(user) });
       });
     })(req, res, next);
   });
@@ -304,12 +316,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // --- API key regeneration (admin or self) ---
+  // --- API key regeneration (admin or self — intentionally no requireRole, uses manual check) ---
   app.post("/api/users/:id/api-key", async (req, res) => {
     const userId = parseInt(req.params.id);
-    // Allow admin or self
-    if (req.user!.id !== userId && !req.user!.roles.includes('admin')) {
-      return res.status(403).json({ message: "Can only regenerate your own key" });
+    const isAdmin = req.user!.roles?.includes('admin');
+    const isSelf = req.user!.id === userId;
+    if (!isAdmin && !isSelf) {
+      return res.status(403).json({ message: "Can only regenerate your own key or must be admin" });
     }
     const { regenerateApiKey } = await import('./services/auth');
     const newKey = await regenerateApiKey(userId);

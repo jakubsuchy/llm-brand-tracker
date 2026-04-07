@@ -1066,6 +1066,15 @@ export function registerMcpEndpoint(app: Express) {
 
   // Handle GET for SSE streams (Streamable HTTP transport)
   app.get('/mcp', async (req: Request, res: Response) => {
+    // Authenticate
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing Authorization header' });
+      return;
+    }
+    const user = await findUserByApiKey(authHeader.slice(7));
+    if (!user) { res.status(401).json({ error: 'Invalid API key' }); return; }
+
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
     if (!sessionId || !transports.has(sessionId)) {
       res.status(400).json({ error: 'Invalid or missing session ID' });
@@ -1077,6 +1086,15 @@ export function registerMcpEndpoint(app: Express) {
 
   // Handle DELETE for session termination
   app.delete('/mcp', async (req: Request, res: Response) => {
+    // Authenticate
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing Authorization header' });
+      return;
+    }
+    const user = await findUserByApiKey(authHeader.slice(7));
+    if (!user) { res.status(401).json({ error: 'Invalid API key' }); return; }
+
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
     if (!sessionId || !transports.has(sessionId)) {
       res.status(400).json({ error: 'Invalid or missing session ID' });

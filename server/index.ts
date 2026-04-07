@@ -32,10 +32,16 @@ app.use((req, res, next) => {
   express.urlencoded({ extended: false })(req, res, next);
 });
 
+import crypto from 'crypto';
+
 const PgSession = connectPgSimple(session);
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  console.warn('[SECURITY] SESSION_SECRET not set — generated random secret. Sessions will not survive restarts. Set SESSION_SECRET in production.');
+}
 app.use(session({
   store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: { httpOnly: true, maxAge: 24 * 60 * 60 * 1000, sameSite: 'lax' },
