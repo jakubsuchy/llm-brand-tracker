@@ -959,9 +959,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const provider = req.query.provider as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
       if (provider) allResponses = allResponses.filter(r => r.provider === provider);
-      // Filter responses whose text contains this domain
+      // Filter responses that cite this domain (in text body OR sources array)
+      const domainLower = domain.toLowerCase();
       const matching = allResponses.filter(r =>
-        r.text.toLowerCase().includes(domain.toLowerCase())
+        r.text.toLowerCase().includes(domainLower) ||
+        (r.sources && r.sources.some(s => s.toLowerCase().includes(domainLower)))
       );
       res.json(matching);
     } catch (error) {
