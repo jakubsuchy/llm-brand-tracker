@@ -761,28 +761,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uniquePrompts = new Set(allResponses.map(r => r.prompt?.text?.toLowerCase().trim() || ''));
       const totalUniquePrompts = uniquePrompts.size;
 
-      // For each competitor: count unique prompts where they were mentioned
-      const competitorPrompts = new Map<string, Set<string>>();
+      // Build name→primary lookup including merged competitors
+      const allCompsIncMerged = await storage.getAllCompetitorsIncludingMerged();
+      const activeComps = await storage.getCompetitors(); // non-merged only
+      const activeById = new Map(activeComps.map(c => [c.id, c]));
+      // Map every competitor name (including merged) to its primary ID
+      const nameToPrimaryId = new Map<string, number>();
+      for (const c of allCompsIncMerged) {
+        const primaryId = c.mergedInto || c.id;
+        if (activeById.has(primaryId)) {
+          nameToPrimaryId.set(c.name.toLowerCase(), primaryId);
+        }
+      }
+
+      // Count unique prompts per primary competitor (merges roll up)
+      const primaryPrompts = new Map<number, Set<string>>();
       for (const r of allResponses) {
         const promptKey = r.prompt?.text?.toLowerCase().trim() || '';
         if (r.competitorsMentioned && Array.isArray(r.competitorsMentioned)) {
           for (const name of r.competitorsMentioned) {
-            if (!competitorPrompts.has(name)) competitorPrompts.set(name, new Set());
-            competitorPrompts.get(name)!.add(promptKey);
+            const primaryId = nameToPrimaryId.get(name.toLowerCase());
+            if (!primaryId) continue; // unknown or blocked competitor
+            if (!primaryPrompts.has(primaryId)) primaryPrompts.set(primaryId, new Set());
+            primaryPrompts.get(primaryId)!.add(promptKey);
           }
         }
       }
 
-      const allCompetitors = await storage.getCompetitors();
-      const compByName = new Map(allCompetitors.map(c => [c.name.toLowerCase(), c]));
-
-      const analysis = [...competitorPrompts.entries()].map(([name, prompts]) => {
-        const comp = compByName.get(name.toLowerCase());
+      const analysis = [...primaryPrompts.entries()].map(([primaryId, prompts]) => {
+        const comp = activeById.get(primaryId)!;
         const mentionCount = prompts.size;
         return {
-          competitorId: comp?.id || 0,
-          name: comp?.name || name,
-          category: comp?.category || null,
+          competitorId: comp.id,
+          name: comp.name,
+          category: comp.category || null,
           mentionCount,
           mentionRate: totalUniquePrompts > 0 ? (mentionCount / totalUniquePrompts) * 100 : 0,
           changeRate: 0
