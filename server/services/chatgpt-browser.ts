@@ -176,7 +176,7 @@ async function recordApifyUsage(runData: any, model: string) {
       analysisRunId: _currentContext?.analysisRunId || null,
       jobId: _currentContext?.jobId || null,
       apifyRunId: runData.id,
-      provider: model,
+      model: model,
       status: runData.status,
       costUsd: runData.usageTotalUsd || null,
       durationMs: stats.durationMillis ? Math.round(stats.durationMillis) : null,

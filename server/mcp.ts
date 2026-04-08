@@ -74,7 +74,7 @@ async function classifySources() {
 /** Filter responses by optional model. */
 function filterByModel(responses: ResponseWithPrompt[], model?: string) {
   if (!model) return responses;
-  return responses.filter((r) => r.provider === model);
+  return responses.filter((r) => r.model === model);
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ function createMcpServer(): McpServer {
       // Per-model breakdown
       const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
-        const p = r.provider || 'unknown';
+        const p = r.model || 'unknown';
         if (!modelGroups.has(p)) modelGroups.set(p, []);
         modelGroups.get(p)!.push(r);
       }
@@ -207,7 +207,7 @@ function createMcpServer(): McpServer {
         }
         const entry = promptMentionMap.get(key)!;
         if (r.brandMentioned) entry.brandMentioned = true;
-        if (r.provider && !entry.models.includes(r.provider)) entry.models.push(r.provider);
+        if (r.model && !entry.models.includes(r.model)) entry.models.push(r.model);
       }
       const gapPrompts = [...promptMentionMap.entries()]
         .filter(([, v]) => !v.brandMentioned)
@@ -244,7 +244,7 @@ function createMcpServer(): McpServer {
 
       const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
-        const p = r.provider || 'unknown';
+        const p = r.model || 'unknown';
         if (!modelGroups.has(p)) modelGroups.set(p, []);
         modelGroups.get(p)!.push(r);
       }
@@ -466,7 +466,7 @@ function createMcpServer(): McpServer {
       const prompts = matching.map((r) => ({
         promptText: r.prompt?.text || '',
         brandMentioned: !!r.brandMentioned,
-        model: r.provider,
+        model: r.model,
         topicName: r.prompt?.topic?.name || 'Uncategorized',
       }));
 
@@ -523,7 +523,7 @@ function createMcpServer(): McpServer {
         responses: matching.map((r) => ({
           promptText: r.prompt?.text || '',
           brandMentioned: !!r.brandMentioned,
-          model: r.provider,
+          model: r.model,
         })),
       });
     },
@@ -552,7 +552,7 @@ function createMcpServer(): McpServer {
         id: response.id,
         promptText: prompt?.text || '',
         topicName: topic?.name || null,
-        model: response.provider,
+        model: response.model,
         brandMentioned: !!response.brandMentioned,
         responseText: response.text,
         competitorsMentioned: response.competitorsMentioned || [],
@@ -619,7 +619,7 @@ function createMcpServer(): McpServer {
       const result = responses.map((r) => ({
         responseId: r.id,
         promptText: r.prompt?.text || '',
-        model: r.provider,
+        model: r.model,
         brandMentioned: !!r.brandMentioned,
         competitorsMentioned: r.competitorsMentioned || [],
         topicName: r.prompt?.topic?.name || 'Uncategorized',
@@ -668,7 +668,7 @@ function createMcpServer(): McpServer {
         }
         const entry = promptMap.get(key)!;
         if (r.brandMentioned) entry.brandEverMentioned = true;
-        if (r.provider) entry.models.add(r.provider);
+        if (r.model) entry.models.add(r.model);
         for (const c of r.competitorsMentioned || []) entry.competitors.add(c);
       }
 
@@ -702,7 +702,7 @@ function createMcpServer(): McpServer {
       // Per-model prompt mention maps
       const modelPromptMaps = new Map<string, Map<string, boolean>>();
       for (const r of responses) {
-        const p = r.provider || 'unknown';
+        const p = r.model || 'unknown';
         if (!modelPromptMaps.has(p))
           modelPromptMaps.set(p, new Map());
         const pMap = modelPromptMaps.get(p)!;
@@ -961,7 +961,7 @@ function createMcpServer(): McpServer {
       // Model breakdown
       const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
-        const p = r.provider || 'unknown';
+        const p = r.model || 'unknown';
         if (!modelGroups.has(p)) modelGroups.set(p, []);
         modelGroups.get(p)!.push(r);
       }

@@ -455,7 +455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Group by model, then by unique prompt text
       const modelMap = new Map<string, Map<string, boolean>>();
       for (const r of allResponses) {
-        const mdl = r.provider || 'unknown';
+        const mdl = r.model || 'unknown';
         if (!modelMap.has(mdl)) modelMap.set(mdl, new Map());
         const promptMap = modelMap.get(mdl)!;
         const key = r.prompt?.text?.toLowerCase().trim() || '';
@@ -493,7 +493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (model) allResponses = allResponses.filter(r => r.provider === model);
+      if (model) allResponses = allResponses.filter(r => r.model === model);
 
       // Group by unique prompt text — a prompt "mentions brand" if ANY response for it did
       const promptMap = new Map<string, { mentioned: boolean; count: number }>();
@@ -564,7 +564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (model) allResponses = allResponses.filter(r => r.provider === model);
+      if (model) allResponses = allResponses.filter(r => r.model === model);
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
 
@@ -656,7 +656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const model = (req.query.model || req.query.provider) as string | undefined;
       // Derive topic analysis from responses
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (model) allResponses = allResponses.filter(r => r.provider === model);
+      if (model) allResponses = allResponses.filter(r => r.model === model);
       const topicMap = new Map<number, { name: string; total: number; brandMentions: number }>();
       for (const r of allResponses) {
         const topicId = r.prompt?.topicId || 0;
@@ -747,7 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Unified approach: count unique prompts where each competitor was mentioned
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (model) allResponses = allResponses.filter(r => r.provider === model);
+      if (model) allResponses = allResponses.filter(r => r.model === model);
 
       // Count unique prompts total
       const uniquePrompts = new Set(allResponses.map(r => r.prompt?.text?.toLowerCase().trim() || ''));
@@ -962,7 +962,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (model) allResponses = allResponses.filter(r => r.provider === model);
+      if (model) allResponses = allResponses.filter(r => r.model === model);
       // Filter responses that cite this domain (in text body OR sources array)
       const domainLower = domain.toLowerCase();
       const matching = allResponses.filter(r =>
@@ -1008,7 +1008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         responses = await storage.getRecentResponses(limit, runId);
       }
-      if (model) responses = responses.filter(r => r.provider === model);
+      if (model) responses = responses.filter(r => r.model === model);
 
       res.json(responses.slice(0, limit));
     } catch (error) {
@@ -1340,7 +1340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const failures = await storage.getFailedJobs(targetRunId);
       res.json(failures.map(j => ({
         id: j.id,
-        model: j.provider,
+        model: j.model,
         promptText: j.promptText,
         error: j.lastError,
         attempts: j.attempts,
@@ -1369,7 +1369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const jobs = await db.select({
         id: jobQueue.id,
-        model: jobQueue.provider,
+        model: jobQueue.model,
         promptText: jobQueue.promptText,
         status: jobQueue.status,
         attempts: jobQueue.attempts,

@@ -338,7 +338,7 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
       if (q.startsWith('#')) {
         return job.id.toString() === q.slice(1);
       }
-      return job.promptText.toLowerCase().includes(q) || job.provider.toLowerCase().includes(q) || job.id.toString().includes(q);
+      return job.promptText.toLowerCase().includes(q) || job.model.toLowerCase().includes(q) || job.id.toString().includes(q);
     }
     return true;
   });
@@ -434,7 +434,7 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
                     {job.status === 'cancelled' && (
                       <Badge variant="outline" className="text-[10px] text-gray-400">Cancelled</Badge>
                     )}
-                    <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5">{job.model}</Badge>
                     <span className="text-[10px] text-gray-400 font-mono ml-auto">#{job.id}</span>
                   </div>
                   <p className="text-xs text-gray-700 leading-relaxed mb-1">
@@ -495,7 +495,7 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
                     >
                       <TableCell className="font-mono text-gray-400">{job.id}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px] px-1.5">{job.provider}</Badge>
+                        <Badge variant="outline" className="text-[10px] px-1.5">{job.model}</Badge>
                       </TableCell>
                       <TableCell className="max-w-[300px] truncate text-gray-700" title={job.promptText}>
                         {job.promptText.substring(0, 60)}{job.promptText.length > 60 ? '...' : ''}
@@ -683,7 +683,7 @@ function CostSummaryCard() {
                       {apifyUsage!.runs.map((run) => (
                         <TableRow key={run.id}>
                           <TableCell className="text-sm">{new Date(run.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
-                          <TableCell><Badge variant="outline" className="text-xs">{run.provider}</Badge></TableCell>
+                          <TableCell><Badge variant="outline" className="text-xs">{run.model}</Badge></TableCell>
                           <TableCell>
                             <Badge className={`text-xs ${run.status === 'SUCCEEDED' ? 'bg-green-100 text-green-700' : run.status === 'FAILED' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
                               {run.status}

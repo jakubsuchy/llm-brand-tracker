@@ -54,7 +54,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
   if (runId) runOnlyParams.set('runId', runId);
   const runOnlyParamStr = runOnlyParams.toString() ? `?${runOnlyParams.toString()}` : '';
 
-  const { data: modelMetrics } = useQuery<{ provider: string; label: string; total: number; mentioned: number; rate: number }[]>({
+  const { data: modelMetrics } = useQuery<{ model: string; label: string; total: number; mentioned: number; rate: number }[]>({
     queryKey: [`/api/metrics/by-model${runOnlyParamStr}`],
     enabled: !model, // only fetch when viewing all models
   });
@@ -191,7 +191,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
           {modelMetrics && modelMetrics.length > 0 ? (
             <div className="space-y-2">
               {modelMetrics.map(p => (
-                <div key={p.provider} className="flex items-center gap-2">
+                <div key={p.model} className="flex items-center gap-2">
                   <span className="text-xs text-slate-600 w-20 truncate" title={p.label}>{p.label}</span>
                   <Progress value={p.rate} className="h-2 flex-1" />
                   <span className="text-xs font-semibold text-slate-900 w-10 text-right">{p.rate}%</span>

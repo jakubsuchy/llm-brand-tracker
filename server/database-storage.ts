@@ -230,7 +230,7 @@ export class DatabaseStorage implements IStorage {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     for (const url of urls) {
-      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, provider: model || null });
+      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, model: model || null });
     }
   }
 
@@ -240,8 +240,8 @@ export class DatabaseStorage implements IStorage {
       : sql`${sourceUrls.sourceId} = ${sourceId}`;
     if (model) {
       condition = analysisRunId
-        ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId} AND ${sourceUrls.provider} = ${model}`
-        : sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.provider} = ${model}`;
+        ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId} AND ${sourceUrls.model} = ${model}`
+        : sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.model} = ${model}`;
     }
     const rows = await db
       .select({ url: sourceUrls.url })
@@ -580,7 +580,7 @@ export class DatabaseStorage implements IStorage {
       promptText: r.prompt_text,
       promptTopicId: r.prompt_topic_id,
       promptIsExisting: r.prompt_is_existing,
-      provider: r.provider,
+      model: r.model,
       status: r.status,
       attempts: r.attempts,
       maxAttempts: r.max_attempts,
@@ -616,7 +616,7 @@ export class DatabaseStorage implements IStorage {
         promptText: job.promptText,
         promptTopicId: job.promptTopicId,
         promptIsExisting: job.promptIsExisting,
-        provider: job.provider,
+        model: job.model,
         status: 'pending',
         attempts: retryAttempts,
         maxAttempts: job.maxAttempts,
@@ -668,7 +668,7 @@ export class DatabaseStorage implements IStorage {
           promptText: job.promptText,
           promptTopicId: job.promptTopicId,
           promptIsExisting: job.promptIsExisting,
-          provider: job.provider,
+          model: job.model,
           status: 'pending',
           attempts: job.attempts,
           maxAttempts: job.maxAttempts,
@@ -718,7 +718,7 @@ export class DatabaseStorage implements IStorage {
       promptText: r.prompt_text,
       promptTopicId: r.prompt_topic_id,
       promptIsExisting: r.prompt_is_existing,
-      provider: r.provider,
+      model: r.model,
       status: r.status,
       attempts: r.attempts,
       maxAttempts: r.max_attempts,

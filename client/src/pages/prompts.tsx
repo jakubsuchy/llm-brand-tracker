@@ -68,13 +68,13 @@ export default function PromptResultsPage() {
   const notMentionedCount = allPrompts.filter(p => !p.brandMentioned).length;
 
   // Get unique models for filter
-  const models = [...new Set(allPrompts.map(p => p.provider).filter(Boolean))];
+  const models = [...new Set(allPrompts.map(p => p.model).filter(Boolean))];
 
   const filteredPrompts = allPrompts.filter(prompt => {
     if (filter === 'mentioned' && !prompt.brandMentioned) return false;
     if (filter === 'not-mentioned' && prompt.brandMentioned) return false;
     if (selectedTopic !== 'all' && prompt.prompt.topicId !== parseInt(selectedTopic)) return false;
-    if (selectedModel !== 'all' && prompt.provider !== selectedModel) return false;
+    if (selectedModel !== 'all' && prompt.model !== selectedModel) return false;
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       const matchesPrompt = prompt.prompt.text.toLowerCase().includes(q);
@@ -235,7 +235,7 @@ export default function PromptResultsPage() {
                 {prompt.prompt.text}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="text-xs">{prompt.provider || 'api'}</Badge>
+                <Badge variant="outline" className="text-xs">{prompt.model || 'api'}</Badge>
                 {prompt.brandMentioned ? (
                   <Badge className="text-xs bg-green-100 text-green-700 border-green-200">
                     <CheckCircle className="w-3 h-3 mr-1" />Yes
@@ -257,7 +257,7 @@ export default function PromptResultsPage() {
               {expandedPrompt === prompt.id && (
                 <div className="mt-3 pt-3 border-t space-y-3">
                   <div>
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.provider || 'API'} Response</h4>
+                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.model || 'API'} Response</h4>
                     <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded border max-h-96 overflow-y-auto leading-relaxed">
                       {prompt.text}
                     </div>
@@ -323,7 +323,7 @@ export default function PromptResultsPage() {
                       </p>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-xs">{prompt.provider || 'api'}</Badge>
+                      <Badge variant="outline" className="text-xs">{prompt.model || 'api'}</Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -358,7 +358,7 @@ export default function PromptResultsPage() {
                       <TableCell colSpan={selectedRun === 'all' ? 5 : 4} className="bg-gray-50 p-0">
                         <div className="p-4 space-y-3">
                           <div>
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.provider || 'API'} Response</h4>
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.model || 'API'} Response</h4>
                             <div className="text-sm text-gray-800 whitespace-pre-wrap bg-white p-4 rounded border max-h-96 overflow-y-auto leading-relaxed">
                               {prompt.text}
                             </div>

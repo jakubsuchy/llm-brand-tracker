@@ -240,7 +240,7 @@ export class BrandAnalyzer {
           promptText: promptData.text,
           promptTopicId: promptData.topicId || null,
           promptIsExisting: !!(promptData._existing && promptData.id),
-          provider: model,
+          model: model,
           status: 'pending',
           attempts: 0,
           maxAttempts: process.env.APIFY_TOKEN ? 100 : 10,
@@ -351,7 +351,7 @@ export class BrandAnalyzer {
    * Process a single job: fetch response from model, analyze, save to DB.
    */
   private async processJob(job: JobQueueItem): Promise<void> {
-    const { provider: model, promptText, promptId, promptIsExisting, promptTopicId } = job;
+    const { model, promptText, promptId, promptIsExisting, promptTopicId } = job;
     const analysisRunId = job.analysisRunId;
 
     console.log(`[${new Date().toISOString()}] [${model}] Processing job ${job.id}: ${promptText.substring(0, 50)}...`);
@@ -468,7 +468,7 @@ export class BrandAnalyzer {
     const responseRecord = await storage.createResponse({
       promptId: prompt.id,
       analysisRunId,
-      provider: model || analysis.model || null,
+      model: model || analysis.model || null,
       text: analysis.response,
       brandMentioned: analysis.brandMentioned,
       competitorsMentioned: uniqueCompetitors.map(name => {
