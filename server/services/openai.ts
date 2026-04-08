@@ -22,7 +22,7 @@ export async function analyzePromptResponse(
 
   const { responseText, sources } = await getResponseViaBrowser(prompt, model, context);
 
-  console.log(`[analyzePromptResponse] ${effectiveModel} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+  console.log(`[analyzePromptResponse] ${model} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
   // Step 2a: Brand detection — regex match (no LLM needed)
   const brandMentioned = brandName ? isBrandMentioned(responseText, brandName) : false;
@@ -71,7 +71,7 @@ Rules:
       brandMentioned,
       competitors: analysis.competitors || [],
       sources,
-      model: effectiveModel,
+      model: model,
     };
   } catch (error) {
     console.error("Error analyzing prompt response:", error);
