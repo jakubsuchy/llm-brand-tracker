@@ -29,7 +29,7 @@ export default function PromptResultsPage() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
-  const [selectedProvider, setSelectedProvider] = useState<string>('all');
+  const [selectedModel, setSelectedModel] = useState<string>('all');
   const [selectedRun, setSelectedRun] = useState<string>(urlRunId || 'all');
   const [expandedPrompt, setExpandedPrompt] = useState<number | null>(urlPromptId ? parseInt(urlPromptId) : null);
   const [page, setPage] = useState(0);
@@ -67,14 +67,14 @@ export default function PromptResultsPage() {
   const mentionedCount = allPrompts.filter(p => p.brandMentioned).length;
   const notMentionedCount = allPrompts.filter(p => !p.brandMentioned).length;
 
-  // Get unique providers for filter
-  const providers = [...new Set(allPrompts.map(p => p.provider).filter(Boolean))];
+  // Get unique models for filter
+  const models = [...new Set(allPrompts.map(p => p.provider).filter(Boolean))];
 
   const filteredPrompts = allPrompts.filter(prompt => {
     if (filter === 'mentioned' && !prompt.brandMentioned) return false;
     if (filter === 'not-mentioned' && prompt.brandMentioned) return false;
     if (selectedTopic !== 'all' && prompt.prompt.topicId !== parseInt(selectedTopic)) return false;
-    if (selectedProvider !== 'all' && prompt.provider !== selectedProvider) return false;
+    if (selectedModel !== 'all' && prompt.provider !== selectedModel) return false;
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       const matchesPrompt = prompt.prompt.text.toLowerCase().includes(q);
@@ -94,7 +94,7 @@ export default function PromptResultsPage() {
   const updateTopic = (t: string) => { setSelectedTopic(t); setPage(0); };
   const updateSearch = (s: string) => { setSearchTerm(s); setPage(0); };
   const updateRun = (r: string) => { setSelectedRun(r); setPage(0); };
-  const updateProvider = (p: string) => { setSelectedProvider(p); setPage(0); };
+  const updateModel = (p: string) => { setSelectedModel(p); setPage(0); };
 
   const getTopicName = (topicId: number | null) => {
     if (!topicId) return 'General';
@@ -202,13 +202,13 @@ export default function PromptResultsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={selectedProvider} onValueChange={updateProvider}>
+            <Select value={selectedModel} onValueChange={updateModel}>
               <SelectTrigger className="w-full sm:w-40">
-                <SelectValue placeholder="Provider" />
+                <SelectValue placeholder="Model" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Providers</SelectItem>
-                {providers.map(p => (
+                <SelectItem value="all">All Models</SelectItem>
+                {models.map(p => (
                   <SelectItem key={p} value={p!}>{p}</SelectItem>
                 ))}
               </SelectContent>
@@ -295,7 +295,7 @@ export default function PromptResultsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>USER QUERY</TableHead>
-              <TableHead className="w-28">PROVIDER</TableHead>
+              <TableHead className="w-28">MODEL</TableHead>
               <TableHead className="w-48">IS BRAND MENTIONED?</TableHead>
               <TableHead className="w-32">TOPIC</TableHead>
               {selectedRun === 'all' && <TableHead className="w-36">RUN</TableHead>}

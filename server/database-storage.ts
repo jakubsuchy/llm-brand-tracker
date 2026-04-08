@@ -226,22 +226,22 @@ export class DatabaseStorage implements IStorage {
       .where(eq(sources.domain, domain));
   }
 
-  async addSourceUrls(domain: string, urls: string[], analysisRunId?: number, provider?: string): Promise<void> {
+  async addSourceUrls(domain: string, urls: string[], analysisRunId?: number, model?: string): Promise<void> {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     for (const url of urls) {
-      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, provider: provider || null });
+      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, provider: model || null });
     }
   }
 
-  async getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, provider?: string): Promise<string[]> {
+  async getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, model?: string): Promise<string[]> {
     let condition = analysisRunId
       ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId}`
       : sql`${sourceUrls.sourceId} = ${sourceId}`;
-    if (provider) {
+    if (model) {
       condition = analysisRunId
-        ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId} AND ${sourceUrls.provider} = ${provider}`
-        : sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.provider} = ${provider}`;
+        ? sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.analysisRunId} = ${analysisRunId} AND ${sourceUrls.provider} = ${model}`
+        : sql`${sourceUrls.sourceId} = ${sourceId} AND ${sourceUrls.provider} = ${model}`;
     }
     const rows = await db
       .select({ url: sourceUrls.url })

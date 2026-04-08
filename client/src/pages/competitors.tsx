@@ -246,7 +246,7 @@ export default function CompetitorsPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold">Competitor Analysis</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Percentage of prompts where each competitor is mentioned across LLM providers
+            Percentage of prompts where each competitor is mentioned across LLM models
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

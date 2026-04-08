@@ -23,17 +23,20 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, hasRole } = useAuth();
   const [location] = useLocation();
 
-  const { data: brandData } = useQuery<{ brandName: string | null }>({
+  const { data: brandData, isLoading: brandLoading } = useQuery<{ brandName: string | null }>({
     queryKey: ['/api/settings/brand'],
     enabled: isAuthenticated,
   });
-  const { data: promptsData } = useQuery<any[]>({
+  const { data: promptsData, isLoading: promptsLoading } = useQuery<any[]>({
     queryKey: ['/api/prompts'],
     enabled: isAuthenticated,
   });
 
   if (isLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
   if (!isAuthenticated) return <Redirect to={`/login?redirect=${encodeURIComponent(location)}`} />;
+
+  // Wait for data before deciding on setup redirect
+  if (brandLoading || promptsLoading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
 
   // Redirect to setup wizard if brand is empty and no prompts (admin/analyst only)
   const needsSetup = !brandData?.brandName && (!promptsData || promptsData.length === 0);

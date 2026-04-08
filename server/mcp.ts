@@ -71,10 +71,10 @@ async function classifySources() {
   };
 }
 
-/** Filter responses by optional provider. */
-function filterProvider(responses: ResponseWithPrompt[], provider?: string) {
-  if (!provider) return responses;
-  return responses.filter((r) => r.provider === provider);
+/** Filter responses by optional model. */
+function filterByModel(responses: ResponseWithPrompt[], model?: string) {
+  if (!model) return responses;
+  return responses.filter((r) => r.provider === model);
 }
 
 // ---------------------------------------------------------------------------
@@ -94,17 +94,17 @@ function createMcpServer(): McpServer {
   // ---- brand-snapshot ----
   server.tool(
     'brand-snapshot',
-    'Quick brand health check. Returns mention rate, total prompts, top competitor, source count. Use for "how am I doing?" or "give me a summary". Do NOT use for detailed per-topic or per-provider breakdowns.',
+    'Quick brand health check. Returns mention rate, total prompts, top competitor, source count. Use for "how am I doing?" or "give me a summary". Do NOT use for detailed per-topic or per-model breakdowns.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ runId, provider }) => {
+    async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const { rate, mentioned, total } = computeMentionRate(responses);
 
@@ -124,7 +124,7 @@ function createMcpServer(): McpServer {
           : null,
         totalSourceDomains: sources.length,
         totalResponses: responses.length,
-        filters: { provider: provider || 'all', runId: runId || 'all' },
+        filters: { model: model || 'all', runId: runId || 'all' },
       });
     },
   );
@@ -132,30 +132,30 @@ function createMcpServer(): McpServer {
   // ---- brand-audit ----
   server.tool(
     'brand-audit',
-    'Comprehensive brand assessment. Returns per-provider rates, per-topic rates, top competitors with rates, top sources, AND the list of prompts where brand is NOT mentioned (the gap list). Use when you need a full picture. Do NOT use for a single quick number — use brand-snapshot instead.',
+    'Comprehensive brand assessment. Returns per-model rates, per-topic rates, top competitors with rates, top sources, AND the list of prompts where brand is NOT mentioned (the gap list). Use when you need a full picture. Do NOT use for a single quick number — use brand-snapshot instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ runId, provider }) => {
+    async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const { rate, mentioned, total } = computeMentionRate(responses);
 
-      // Per-provider breakdown
-      const providerGroups = new Map<string, ResponseWithPrompt[]>();
+      // Per-model breakdown
+      const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
         const p = r.provider || 'unknown';
-        if (!providerGroups.has(p)) providerGroups.set(p, []);
-        providerGroups.get(p)!.push(r);
+        if (!modelGroups.has(p)) modelGroups.set(p, []);
+        modelGroups.get(p)!.push(r);
       }
-      const providerRates = [...providerGroups.entries()].map(([name, resps]) => {
+      const modelRates = [...modelGroups.entries()].map(([name, resps]) => {
         const m = computeMentionRate(resps);
-        return { provider: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
+        return { model: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
       });
 
       // Per-topic breakdown
@@ -195,35 +195,35 @@ function createMcpServer(): McpServer {
         .slice(0, 5);
 
       // Gap list: prompts where brand is NOT mentioned
-      const promptMentionMap = new Map<string, { brandMentioned: boolean; providers: string[]; topicName: string }>();
+      const promptMentionMap = new Map<string, { brandMentioned: boolean; models: string[]; topicName: string }>();
       for (const r of responses) {
         const key = r.prompt?.text?.toLowerCase().trim() || '';
         if (!promptMentionMap.has(key)) {
           promptMentionMap.set(key, {
             brandMentioned: false,
-            providers: [],
+            models: [],
             topicName: r.prompt?.topic?.name || 'Uncategorized',
           });
         }
         const entry = promptMentionMap.get(key)!;
         if (r.brandMentioned) entry.brandMentioned = true;
-        if (r.provider && !entry.providers.includes(r.provider)) entry.providers.push(r.provider);
+        if (r.provider && !entry.models.includes(r.provider)) entry.models.push(r.provider);
       }
       const gapPrompts = [...promptMentionMap.entries()]
         .filter(([, v]) => !v.brandMentioned)
-        .map(([text, v]) => ({ promptText: text, providers: v.providers, topicName: v.topicName }));
+        .map(([text, v]) => ({ promptText: text, models: v.models, topicName: v.topicName }));
 
       return textResult({
         brandMentionRate: rate,
         mentionedPrompts: mentioned,
         totalUniquePrompts: total,
         totalResponses: responses.length,
-        providerBreakdown: providerRates,
+        modelBreakdown: modelRates,
         topicBreakdown: topicRates,
         topCompetitors,
         topSources: sourceSummary,
         gapPrompts,
-        filters: { provider: provider || 'all', runId: runId || 'all' },
+        filters: { model: model || 'all', runId: runId || 'all' },
       });
     },
   );
@@ -232,21 +232,21 @@ function createMcpServer(): McpServer {
   // 2. LIST / BROWSE
   // =========================================================================
 
-  // ---- list-providers ----
+  // ---- list-models ----
   server.tool(
-    'list-providers',
-    'Per-provider mention rate breakdown. Returns an array with each provider\'s mention rate, count, and total prompts. Use when asked "which provider mentions us most?" or "show provider comparison". Do NOT use for full side-by-side diff — use compare-providers instead.',
+    'list-models',
+    'Per-model mention rate breakdown. Returns an array with each model\'s mention rate, count, and total prompts. Use when asked "which model mentions us most?" or "show model comparison". Do NOT use for full side-by-side diff — use compare-models instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
     },
     async ({ runId }) => {
       const responses = await storage.getResponsesWithPrompts(runId);
 
-      const providerGroups = new Map<string, ResponseWithPrompt[]>();
+      const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
         const p = r.provider || 'unknown';
-        if (!providerGroups.has(p)) providerGroups.set(p, []);
-        providerGroups.get(p)!.push(r);
+        if (!modelGroups.has(p)) modelGroups.set(p, []);
+        modelGroups.get(p)!.push(r);
       }
 
       const labels: Record<string, string> = {
@@ -255,10 +255,10 @@ function createMcpServer(): McpServer {
         gemini: 'Gemini',
       };
 
-      const result = [...providerGroups.entries()].map(([name, resps]) => {
+      const result = [...modelGroups.entries()].map(([name, resps]) => {
         const m = computeMentionRate(resps);
         return {
-          provider: name,
+          model: name,
           label: labels[name] || name,
           mentionRate: m.rate,
           mentionedCount: m.mentioned,
@@ -276,14 +276,14 @@ function createMcpServer(): McpServer {
     'Ranked list of competitors by mention rate (unique prompt count). Returns name, category, mention rate, mention count, total prompts. Use for "who are my competitors?" or "show competitor ranking". Do NOT use for a single competitor deep dive — use get-competitor instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ runId, provider }) => {
+    async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const { total } = computeMentionRate(responses);
       const compCounts = competitorPromptCounts(responses);
@@ -313,14 +313,14 @@ function createMcpServer(): McpServer {
     'Topic-level mention rate breakdown. Returns topicId, topicName, mentionRate, totalPrompts, brandMentions. Use for "which topics mention us?" or "show topic analysis". Do NOT use for response-level data — use search-prompts instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ runId, provider }) => {
+    async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const topicGroups = new Map<
         string,
@@ -371,12 +371,12 @@ function createMcpServer(): McpServer {
         .optional()
         .describe('Filter by source type: brand, competitor, or neutral'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ sourceType, runId, provider }) => {
+    async ({ sourceType, runId, model }) => {
       const allSources = await storage.getSources();
       const classify = await classifySources();
 
@@ -385,7 +385,7 @@ function createMcpServer(): McpServer {
           const urls = await storage.getSourceUrlsBySourceId(
             source.id,
             runId,
-            provider,
+            model,
           );
           const type = classify(source.domain);
           if (sourceType && type !== sourceType) return null;
@@ -437,14 +437,14 @@ function createMcpServer(): McpServer {
     {
       name: z.string().describe('Competitor name (case-insensitive)'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ name, runId, provider }) => {
+    async ({ name, runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const nameLower = name.toLowerCase();
       const matching = responses.filter((r) =>
@@ -466,7 +466,7 @@ function createMcpServer(): McpServer {
       const prompts = matching.map((r) => ({
         promptText: r.prompt?.text || '',
         brandMentioned: !!r.brandMentioned,
-        provider: r.provider,
+        model: r.provider,
         topicName: r.prompt?.topic?.name || 'Uncategorized',
       }));
 
@@ -491,12 +491,12 @@ function createMcpServer(): McpServer {
     {
       domain: z.string().describe('Source domain (e.g. example.com)'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ domain, runId, provider }) => {
+    async ({ domain, runId, model }) => {
       const source = await storage.getSourceByDomain(domain);
       if (!source) {
         return textResult({ error: `Source domain "${domain}" not found` });
@@ -505,12 +505,12 @@ function createMcpServer(): McpServer {
       const urls = await storage.getSourceUrlsBySourceId(
         source.id,
         runId,
-        provider,
+        model,
       );
       const classify = await classifySources();
 
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
       const matching = responses.filter((r) =>
         r.text.toLowerCase().includes(domain.toLowerCase()),
       );
@@ -523,7 +523,7 @@ function createMcpServer(): McpServer {
         responses: matching.map((r) => ({
           promptText: r.prompt?.text || '',
           brandMentioned: !!r.brandMentioned,
-          provider: r.provider,
+          model: r.provider,
         })),
       });
     },
@@ -532,7 +532,7 @@ function createMcpServer(): McpServer {
   // ---- get-response ----
   server.tool(
     'get-response',
-    'Get a single full response by ID, including prompt text, provider, brand mention status, response text, competitors, and sources. Use when you have a specific response ID to inspect.',
+    'Get a single full response by ID, including prompt text, model, brand mention status, response text, competitors, and sources. Use when you have a specific response ID to inspect.',
     {
       id: z.number().describe('Response ID'),
     },
@@ -552,7 +552,7 @@ function createMcpServer(): McpServer {
         id: response.id,
         promptText: prompt?.text || '',
         topicName: topic?.name || null,
-        provider: response.provider,
+        model: response.provider,
         brandMentioned: !!response.brandMentioned,
         responseText: response.text,
         competitorsMentioned: response.competitorsMentioned || [],
@@ -569,7 +569,7 @@ function createMcpServer(): McpServer {
   // ---- search-prompts ----
   server.tool(
     'search-prompts',
-    'Search prompt and response text by keyword. Supports filtering by mention status, provider, and topic. Returns matching prompts with brand mention status and competitor info. Use for "find prompts about [topic]" or "which prompts mention [keyword]?". Do NOT use for a structured topic breakdown — use list-topics instead.',
+    'Search prompt and response text by keyword. Supports filtering by mention status, model, and topic. Returns matching prompts with brand mention status and competitor info. Use for "find prompts about [topic]" or "which prompts mention [keyword]?". Do NOT use for a structured topic breakdown — use list-topics instead.',
     {
       query: z
         .string()
@@ -579,19 +579,19 @@ function createMcpServer(): McpServer {
         .boolean()
         .optional()
         .describe('Filter by brand mention status'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
       topicName: z
         .string()
         .optional()
         .describe('Filter by topic name (case-insensitive)'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
     },
-    async ({ query, brandMentioned, provider, topicName, runId }) => {
+    async ({ query, brandMentioned, model, topicName, runId }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       if (query) {
         const q = query.toLowerCase();
@@ -619,7 +619,7 @@ function createMcpServer(): McpServer {
       const result = responses.map((r) => ({
         responseId: r.id,
         promptText: r.prompt?.text || '',
-        provider: r.provider,
+        model: r.provider,
         brandMentioned: !!r.brandMentioned,
         competitorsMentioned: r.competitorsMentioned || [],
         topicName: r.prompt?.topic?.name || 'Uncategorized',
@@ -633,24 +633,24 @@ function createMcpServer(): McpServer {
   // ---- find-unmentioned ----
   server.tool(
     'find-unmentioned',
-    'Find prompts where the brand is NOT mentioned. Groups by unique prompt text. Returns prompt text, providers that answered, topic name, and competitors that were mentioned instead. Use for "where are we missing?" or "show gaps in brand visibility".',
+    'Find prompts where the brand is NOT mentioned. Groups by unique prompt text. Returns prompt text, models that answered, topic name, and competitors that were mentioned instead. Use for "where are we missing?" or "show gaps in brand visibility".',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ runId, provider }) => {
+    async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       // Group by unique prompt, keeping only those where brand was NOT mentioned
       const promptMap = new Map<
         string,
         {
           brandEverMentioned: boolean;
-          providers: Set<string>;
+          models: Set<string>;
           topicName: string;
           competitors: Set<string>;
         }
@@ -661,14 +661,14 @@ function createMcpServer(): McpServer {
         if (!promptMap.has(key)) {
           promptMap.set(key, {
             brandEverMentioned: false,
-            providers: new Set(),
+            models: new Set(),
             topicName: r.prompt?.topic?.name || 'Uncategorized',
             competitors: new Set(),
           });
         }
         const entry = promptMap.get(key)!;
         if (r.brandMentioned) entry.brandEverMentioned = true;
-        if (r.provider) entry.providers.add(r.provider);
+        if (r.provider) entry.models.add(r.provider);
         for (const c of r.competitorsMentioned || []) entry.competitors.add(c);
       }
 
@@ -676,7 +676,7 @@ function createMcpServer(): McpServer {
         .filter(([, v]) => !v.brandEverMentioned)
         .map(([text, v]) => ({
           promptText: text,
-          providers: [...v.providers],
+          models: [...v.models],
           topicName: v.topicName,
           competitorsMentioned: [...v.competitors],
         }));
@@ -689,29 +689,29 @@ function createMcpServer(): McpServer {
   // 5. COMPARE
   // =========================================================================
 
-  // ---- compare-providers ----
+  // ---- compare-models ----
   server.tool(
-    'compare-providers',
-    'Side-by-side comparison of providers. Shows per-provider mention rates AND a diff of which prompts are mentioned by which provider. Use for "compare providers" or "which provider is best for us?". Do NOT use for a single provider summary — use list-providers instead.',
+    'compare-models',
+    'Side-by-side comparison of models. Shows per-model mention rates AND a diff of which prompts are mentioned by which model. Use for "compare models" or "which model is best for us?". Do NOT use for a single model summary — use list-models instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
     },
     async ({ runId }) => {
       const responses = await storage.getResponsesWithPrompts(runId);
 
-      // Per-provider prompt mention maps
-      const providerPromptMaps = new Map<string, Map<string, boolean>>();
+      // Per-model prompt mention maps
+      const modelPromptMaps = new Map<string, Map<string, boolean>>();
       for (const r of responses) {
         const p = r.provider || 'unknown';
-        if (!providerPromptMaps.has(p))
-          providerPromptMaps.set(p, new Map());
-        const pMap = providerPromptMaps.get(p)!;
+        if (!modelPromptMaps.has(p))
+          modelPromptMaps.set(p, new Map());
+        const pMap = modelPromptMaps.get(p)!;
         const key = r.prompt?.text?.toLowerCase().trim() || '';
         if (!pMap.has(key)) pMap.set(key, false);
         if (r.brandMentioned) pMap.set(key, true);
       }
 
-      const providers = [...providerPromptMaps.entries()].map(
+      const models = [...modelPromptMaps.entries()].map(
         ([name, pMap]) => {
           const total = pMap.size;
           const mentioned = [...pMap.values()].filter(Boolean).length;
@@ -727,28 +727,28 @@ function createMcpServer(): McpServer {
         },
       );
 
-      // Prompt differences: for each unique prompt, show which providers mention brand
+      // Prompt differences: for each unique prompt, show which models mention brand
       const allPrompts = new Set<string>();
-      for (const [, pMap] of providerPromptMaps) {
+      for (const [, pMap] of modelPromptMaps) {
         for (const key of pMap.keys()) allPrompts.add(key);
       }
 
       const promptDifferences = [...allPrompts].map((promptText) => {
-        const providerResults: Record<string, boolean> = {};
-        for (const [pName, pMap] of providerPromptMaps) {
-          providerResults[pName] = pMap.get(promptText) || false;
+        const modelResults: Record<string, boolean> = {};
+        for (const [pName, pMap] of modelPromptMaps) {
+          modelResults[pName] = pMap.get(promptText) || false;
         }
-        return { promptText, providerResults };
+        return { promptText, modelResults };
       });
 
-      // Only include prompts where providers disagree
+      // Only include prompts where models disagree
       const disagreements = promptDifferences.filter((d) => {
-        const vals = Object.values(d.providerResults);
+        const vals = Object.values(d.modelResults);
         return vals.some((v) => v) && vals.some((v) => !v);
       });
 
       return textResult({
-        providers,
+        models,
         promptDifferences: disagreements,
       });
     },
@@ -761,14 +761,14 @@ function createMcpServer(): McpServer {
     {
       competitor: z.string().describe('Competitor name to compare against'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ competitor, runId, provider }) => {
+    async ({ competitor, runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const compLower = competitor.toLowerCase();
 
@@ -855,14 +855,14 @@ function createMcpServer(): McpServer {
           'Competitor name. If omitted, compares brand-mentioned responses vs non-brand-mentioned.',
         ),
       runId: z.number().optional().describe('Filter by analysis run ID'),
-      provider: z
+      model: z
         .string()
         .optional()
-        .describe('Filter by provider (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini)'),
     },
-    async ({ competitor, runId, provider }) => {
+    async ({ competitor, runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
-      responses = filterProvider(responses, provider);
+      responses = filterByModel(responses, model);
 
       const compLower = competitor?.toLowerCase();
 
@@ -935,7 +935,7 @@ function createMcpServer(): McpServer {
   // ---- get-run ----
   server.tool(
     'get-run',
-    'Get details for a single analysis run including metrics, top competitors, failure count, and per-provider breakdown. Use for "show me run #X" or "how did the last run go?". Do NOT use for listing all runs — use list-runs instead.',
+    'Get details for a single analysis run including metrics, top competitors, failure count, and per-model breakdown. Use for "show me run #X" or "how did the last run go?". Do NOT use for listing all runs — use list-runs instead.',
     {
       id: z
         .number()
@@ -958,17 +958,17 @@ function createMcpServer(): McpServer {
       const responses = await storage.getResponsesWithPrompts(run.id);
       const { rate, mentioned, total } = computeMentionRate(responses);
 
-      // Provider breakdown
-      const providerGroups = new Map<string, ResponseWithPrompt[]>();
+      // Model breakdown
+      const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
         const p = r.provider || 'unknown';
-        if (!providerGroups.has(p)) providerGroups.set(p, []);
-        providerGroups.get(p)!.push(r);
+        if (!modelGroups.has(p)) modelGroups.set(p, []);
+        modelGroups.get(p)!.push(r);
       }
-      const providerBreakdown = [...providerGroups.entries()].map(
+      const modelBreakdown = [...modelGroups.entries()].map(
         ([name, resps]) => {
           const m = computeMentionRate(resps);
-          return { provider: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
+          return { model: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
         },
       );
 
@@ -1000,7 +1000,7 @@ function createMcpServer(): McpServer {
         totalResponses: responses.length,
         topCompetitors,
         failureCount,
-        providerBreakdown,
+        modelBreakdown,
       });
     },
   );

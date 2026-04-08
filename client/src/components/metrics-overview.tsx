@@ -31,10 +31,10 @@ interface AnalysisRun {
 
 const MIN_PROMPTS = 5;
 
-export default function MetricsOverview({ runId, provider }: { runId?: string; provider?: string }) {
+export default function MetricsOverview({ runId, model }: { runId?: string; model?: string }) {
   const params = new URLSearchParams();
   if (runId) params.set('runId', runId);
-  if (provider) params.set('provider', provider);
+  if (model) params.set('model', model);
   const paramStr = params.toString() ? `?${params.toString()}` : '';
 
   const { data: metrics, isLoading, error } = useQuery<Metrics>({
@@ -49,14 +49,14 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
     queryKey: [`/api/competitors/analysis${paramStr}`],
   });
 
-  // Per-provider breakdown (only for "all providers" view)
+  // Per-model breakdown (only for "all models" view)
   const runOnlyParams = new URLSearchParams();
   if (runId) runOnlyParams.set('runId', runId);
   const runOnlyParamStr = runOnlyParams.toString() ? `?${runOnlyParams.toString()}` : '';
 
-  const { data: providerMetrics } = useQuery<{ provider: string; label: string; total: number; mentioned: number; rate: number }[]>({
-    queryKey: [`/api/metrics/by-provider${runOnlyParamStr}`],
-    enabled: !provider, // only fetch when viewing all providers
+  const { data: modelMetrics } = useQuery<{ provider: string; label: string; total: number; mentioned: number; rate: number }[]>({
+    queryKey: [`/api/metrics/by-model${runOnlyParamStr}`],
+    enabled: !model, // only fetch when viewing all models
   });
 
   // Fetch all runs to find the previous one
@@ -79,7 +79,7 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
   // Fetch previous run metrics (only if we have a previous run)
   const prevParams = new URLSearchParams();
   if (prevRunId) prevParams.set('runId', prevRunId);
-  if (provider) prevParams.set('provider', provider);
+  if (model) prevParams.set('model', model);
   const prevParamStr = prevParams.toString() ? `?${prevParams.toString()}` : '';
 
   const { data: prevMetrics } = useQuery<Metrics>({
@@ -179,18 +179,18 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
         </CardContent>
       </Card>
 
-      {/* Provider Performance */}
+      {/* Model Performance */}
       <Card className="bg-white border-slate-200">
         <CardContent className="p-6">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium text-slate-600">Provider Performance</p>
+            <p className="text-sm font-medium text-slate-600">Model Performance</p>
             <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-violet-600" />
             </div>
           </div>
-          {providerMetrics && providerMetrics.length > 0 ? (
+          {modelMetrics && modelMetrics.length > 0 ? (
             <div className="space-y-2">
-              {providerMetrics.map(p => (
+              {modelMetrics.map(p => (
                 <div key={p.provider} className="flex items-center gap-2">
                   <span className="text-xs text-slate-600 w-20 truncate" title={p.label}>{p.label}</span>
                   <Progress value={p.rate} className="h-2 flex-1" />
@@ -198,10 +198,10 @@ export default function MetricsOverview({ runId, provider }: { runId?: string; p
                 </div>
               ))}
             </div>
-          ) : provider ? (
+          ) : model ? (
             <div className="text-sm text-slate-500">
               <p className="text-2xl font-semibold text-slate-900">{(metrics?.brandMentionRate || 0).toFixed(1)}%</p>
-              <p className="text-xs mt-1">{provider} mention rate</p>
+              <p className="text-xs mt-1">{model} mention rate</p>
             </div>
           ) : (
             <p className="text-sm text-slate-400">No data yet</p>

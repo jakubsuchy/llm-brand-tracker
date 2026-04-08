@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Settings, Key, Save, CheckCircle, XCircle, Globe, X, Plus, ShieldX, Trash2 } from "lucide-react";
 
-const SETTINGS_TABS = ['brand', 'credentials', 'providers', 'sources', 'danger'] as const;
-const WIZARD_TABS = ['brand', 'credentials', 'providers'] as const;
+const SETTINGS_TABS = ['brand', 'credentials', 'models', 'sources', 'danger'] as const;
+const WIZARD_TABS = ['brand', 'credentials', 'models'] as const;
 
 export default function SettingsPage({ wizardMode = false }: { wizardMode?: boolean }) {
   const [, setLocation] = useLocation();
@@ -35,6 +35,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
     window.location.hash = tab;
   };
 
+  const apifyRef = useRef<ApifyTokenCardRef>(null);
   const [apiKey, setApiKey] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'none' | 'valid' | 'invalid'>('none');
@@ -44,14 +45,14 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
   });
   const { toast } = useToast();
 
-  const handleSaveApiKey = async () => {
+  const handleSaveApiKey = async (): Promise<boolean> => {
     if (!apiKey.trim()) {
       toast({
         title: "Error",
         description: "Please enter an OpenAI API key",
         variant: "destructive",
       });
-      return;
+      return false;
     }
 
     setIsChecking(true);
@@ -70,6 +71,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
           description: "OpenAI API key saved and validated successfully",
         });
         setApiKey(""); // Clear the input for security
+        return true;
       } else {
         setKeyStatus('invalid');
         toast({
@@ -77,6 +79,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
           description: "Invalid OpenAI API key or connection failed",
           variant: "destructive",
         });
+        return false;
       }
     } catch (error) {
       setKeyStatus('invalid');
@@ -85,6 +88,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
         description: "Failed to save API key. Please try again.",
         variant: "destructive",
       });
+      return false;
     } finally {
       setIsChecking(false);
     }
@@ -118,13 +122,13 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
             <>
               <TabsTrigger value="brand">1. Brand</TabsTrigger>
               <TabsTrigger value="credentials">2. Credentials</TabsTrigger>
-              <TabsTrigger value="providers">3. Providers</TabsTrigger>
+              <TabsTrigger value="models">3. Models</TabsTrigger>
             </>
           ) : (
             <>
               <TabsTrigger value="brand">Brand</TabsTrigger>
               <TabsTrigger value="credentials">Credentials</TabsTrigger>
-              <TabsTrigger value="providers">Providers</TabsTrigger>
+              <TabsTrigger value="models">Models</TabsTrigger>
               <TabsTrigger value="sources">Sources</TabsTrigger>
               <TabsTrigger value="danger">Danger</TabsTrigger>
             </>
@@ -182,16 +186,27 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
             </CardContent>
           </Card>
 
-          <ApifyTokenCard />
+          <ApifyTokenCard ref={apifyRef} />
           {wizardMode && (
-            <Button onClick={() => handleTabChange('providers')} className="w-full">
-              Continue to Providers →
+            <Button onClick={async () => {
+              if (!openaiStatus?.hasKey && !apiKey.trim()) {
+                toast({ title: "OpenAI API Key required", description: "Please enter your OpenAI API key before continuing", variant: "destructive" });
+                return;
+              }
+              if (apiKey.trim()) {
+                const saved = await handleSaveApiKey();
+                if (!saved) return;
+              }
+              await apifyRef.current?.savePending();
+              handleTabChange('models');
+            }} className="w-full">
+              Continue to Models →
             </Button>
           )}
         </TabsContent>
 
-        <TabsContent value="providers" className="space-y-6">
-          <ProvidersCard />
+        <TabsContent value="models" className="space-y-6">
+          <ModelsCard />
           {wizardMode && (
             <Button onClick={() => setLocation('/prompt-generator')} className="w-full">
               Continue to Prompt Generator →
@@ -216,7 +231,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
   );
 }
 
-interface ProviderConfig {
+interface ModelConfig {
   [key: string]: {
     enabled: boolean;
     type: string;
@@ -224,7 +239,7 @@ interface ProviderConfig {
   };
 }
 
-const PROVIDER_INFO: Record<string, { label: string; description: string; icon: string }> = {
+const MODEL_INFO: Record<string, { label: string; description: string; icon: string }> = {
   perplexity: {
     label: 'Perplexity',
     description: 'Browser-based. Uses residential proxy. Returns responses with source citations.',
@@ -242,42 +257,42 @@ const PROVIDER_INFO: Record<string, { label: string; description: string; icon: 
   },
 };
 
-function ProvidersCard() {
+function ModelsCard() {
   const { toast } = useToast();
-  const { data: config, refetch } = useQuery<ProviderConfig>({
-    queryKey: ['/api/settings/providers'],
+  const { data: config, refetch } = useQuery<ModelConfig>({
+    queryKey: ['/api/settings/models'],
   });
 
-  const toggleProvider = async (name: string) => {
+  const toggleModel = async (name: string) => {
     if (!config) return;
     const updated = { ...config, [name]: { ...config[name], enabled: !config[name].enabled } };
     try {
-      const res = await fetch('/api/settings/providers', {
+      const res = await fetch('/api/settings/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
       if (!res.ok) throw new Error('Failed');
       refetch();
-      const provider = PROVIDER_INFO[name]?.label || name;
+      const model = MODEL_INFO[name]?.label || name;
       const enabled = updated[name].enabled;
-      toast({ title: enabled ? 'Enabled' : 'Disabled', description: `${provider} ${enabled ? 'will be included' : 'will be skipped'} in analysis runs` });
+      toast({ title: enabled ? 'Enabled' : 'Disabled', description: `${model} ${enabled ? 'will be included' : 'will be skipped'} in analysis runs` });
     } catch {
-      toast({ title: 'Error', description: 'Failed to update provider', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to update model', variant: 'destructive' });
     }
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Analysis Providers</CardTitle>
+        <CardTitle>Analysis Models</CardTitle>
         <p className="text-sm text-gray-600">
-          Choose which LLM providers to query during analysis. Each enabled provider generates one response per prompt.
+          Choose which models to query during analysis. Each enabled model generates one response per prompt.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         {config && Object.entries(config).map(([name, settings]) => {
-          const info = PROVIDER_INFO[name] || { label: name, description: '', icon: '🤖' };
+          const info = MODEL_INFO[name] || { label: name, description: '', icon: '🤖' };
           return (
             <div key={name} className={`flex items-center justify-between p-4 rounded-lg border ${settings.enabled ? 'border-blue-200 bg-blue-50/50' : 'border-gray-200 bg-gray-50'}`}>
               <div className="flex items-center gap-3">
@@ -292,7 +307,7 @@ function ProvidersCard() {
               </div>
               <Switch
                 checked={settings.enabled}
-                onCheckedChange={() => toggleProvider(name)}
+                onCheckedChange={() => toggleModel(name)}
               />
             </div>
           );
@@ -393,7 +408,11 @@ function BrandDetailsCard({ wizardMode, onContinue }: { wizardMode?: boolean; on
   );
 }
 
-function ApifyTokenCard() {
+export interface ApifyTokenCardRef {
+  savePending: () => Promise<void>;
+}
+
+const ApifyTokenCard = forwardRef<ApifyTokenCardRef>(function ApifyTokenCard(_props, ref) {
   const [token, setToken] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
@@ -406,6 +425,12 @@ function ApifyTokenCard() {
     queryKey: ['/api/settings/browser-status'],
     refetchInterval: 10000,
   });
+
+  useImperativeHandle(ref, () => ({
+    savePending: async () => {
+      if (token.trim()) await handleSave();
+    },
+  }));
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -488,7 +513,7 @@ function ApifyTokenCard() {
           )}
         </CardTitle>
         <p className="text-sm text-gray-600">
-          Browser providers (Perplexity, ChatGPT, Gemini) need a browser runtime to fetch responses.
+          Browser models (Perplexity, ChatGPT, Gemini) need a browser runtime to fetch responses.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -558,8 +583,8 @@ function ApifyTokenCard() {
                 </div>
                 <p className="text-xs text-gray-400">
                   Get token at{' '}
-                  <a href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                    console.apify.com
+                  <a href="https://apify.com/?fpr=1lkb9a" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    apify.com
                   </a>
                 </p>
               </div>
@@ -570,7 +595,7 @@ function ApifyTokenCard() {
       </CardContent>
     </Card>
   );
-}
+});
 
 function CompetitorSubdomainsCard() {
   const { toast } = useToast();

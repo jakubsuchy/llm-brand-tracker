@@ -41,7 +41,7 @@ const getDomainLabel = (domain: string) => {
   return 'Website';
 };
 
-export default function TopSources({ runId, provider }: { runId?: string; provider?: string }) {
+export default function TopSources({ runId, model }: { runId?: string; model?: string }) {
   const { toast } = useToast();
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
@@ -49,7 +49,7 @@ export default function TopSources({ runId, provider }: { runId?: string; provid
 
   const sourceParams = new URLSearchParams();
   if (runId) sourceParams.set('runId', runId);
-  if (provider) sourceParams.set('provider', provider);
+  if (model) sourceParams.set('model', model);
   const sourceParamStr = sourceParams.toString() ? `?${sourceParams.toString()}` : '';
 
   const { data: sources, isLoading, error } = useQuery<SourceAnalysis[]>({

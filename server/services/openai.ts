@@ -1,4 +1,4 @@
-import { chatCompletion, chatCompletionJSON, extractArray, openai } from "./llm";
+import { chatCompletion, chatCompletionJSON, extractArray } from "./llm";
 import { fetchWebsiteText } from "./scraper";
 
 export interface PromptAnalysisResult {
@@ -6,85 +6,56 @@ export interface PromptAnalysisResult {
   brandMentioned: boolean;
   competitors: string[];
   sources: string[];
-  provider: string;
-}
-
-// Response method: 'browser' uses ChatGPT web UI, 'api' uses OpenAI Responses API
-export type ResponseMethod = 'browser' | 'api';
-let activeResponseMethod: ResponseMethod = 'api';
-
-export function setResponseMethod(method: ResponseMethod) {
-  activeResponseMethod = method;
-  console.log(`[Response Method] Set to: ${method}`);
-}
-
-export function getResponseMethod(): ResponseMethod {
-  return activeResponseMethod;
+  model: string;
 }
 
 export async function analyzePromptResponse(
   prompt: string,
   brandName?: string,
   knownCompetitors?: string[],
-  provider: string = activeResponseMethod,
+  model: string = 'chatgpt',
   context?: { analysisRunId?: number; jobId?: number },
 ): Promise<PromptAnalysisResult> {
-  let responseText = "";
-  let sources: string[] = [];
   const startTime = Date.now();
-  const effectiveProvider = provider;
 
-  console.log(`[analyzePromptResponse] Provider: ${effectiveProvider} | Prompt: "${prompt.substring(0, 80)}..."`);
+  console.log(`[analyzePromptResponse] Model: ${model} | Prompt: "${prompt.substring(0, 80)}..."`);
 
-  if (effectiveProvider === 'api') {
-    const apiResult = await getResponseViaAPI(prompt);
-    responseText = apiResult.responseText;
-    sources = apiResult.sources;
-  } else {
-    // Browser provider (chatgpt, perplexity, etc.)
-    try {
-      const result = await getResponseViaBrowser(prompt, effectiveProvider, context);
-      responseText = result.responseText;
-      sources = result.sources;
-    } catch (browserError) {
-      console.error(`[analyzePromptResponse] Browser ${effectiveProvider} failed:`, (browserError as Error).message);
-      throw browserError; // Don't fallback silently — let the caller decide
-    }
-  }
+  const { responseText, sources } = await getResponseViaBrowser(prompt, model, context);
 
-  console.log(`[analyzePromptResponse] ${effectiveProvider} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
+  console.log(`[analyzePromptResponse] ${effectiveModel} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
-  // Step 2: Analyze for brand/competitor mentions (always via API — fast structured extraction)
+  // Step 2a: Brand detection — regex match (no LLM needed)
+  const brandMentioned = brandName ? isBrandMentioned(responseText, brandName) : false;
+
+  // Step 2b: Competitor extraction via LLM
   try {
     const brandContext = brandName
-      ? `\nOUR BRAND: "${brandName}" — any mention of this brand (including variations like ${brandName}.com, ${brandName}.org, ${brandName}.io, open-source ${brandName}, etc.) counts as a brand mention, NOT a competitor.`
+      ? `\nOUR BRAND: "${brandName}" — do NOT include this brand or its variations as a competitor.`
       : '';
     const competitorContext = knownCompetitors && knownCompetitors.length > 0
       ? `\nKNOWN COMPETITORS: ${knownCompetitors.join(', ')} — these are confirmed competitors.`
       : '';
 
-    const analysis = await chatCompletionJSON<{ brandMentioned: boolean; competitors: string[] }>({
+    const analysis = await chatCompletionJSON<{ competitors: string[] }>({
       model: "gpt-5.4-mini",
       messages: [
         {
           role: "system",
-          content: "You are an expert at analyzing text for brand mentions and extracting structured data. Respond only with valid JSON.",
+          content: "You extract competitor mentions from text. Respond only with valid JSON.",
         },
         {
           role: "user",
-          content: `Analyze the following AI response for brand mentions and competitor mentions.
+          content: `Extract competitor mentions from this AI response.
 
 Response to analyze: "${responseText}"
 ${brandContext}${competitorContext}
 
 Return JSON:
 {
-  "brandMentioned": boolean,
   "competitors": string[]
 }
 
 Rules:
-- "brandMentioned": true if our brand "${brandName || 'unknown'}" appears anywhere (any TLD variant: .com, .org, .io, etc.)
 - "competitors": list ALL companies, products, or services mentioned that compete in the same space as our brand. Include both company names (e.g. "Square") and product names (e.g. "Square Payments"). Be thorough — if it's mentioned as an alternative or option, include it.
 - Do NOT include platforms where content is hosted or discussed (e.g. Reddit, GitHub, Stack Overflow, YouTube, Medium, Wikipedia, etc.)
 - For cloud providers, prefer their specific product name if mentioned (e.g. "AWS Elastic Load Balancing" over just "AWS"), but include the cloud provider name if no specific product is named
@@ -95,14 +66,12 @@ Rules:
       max_completion_tokens: 512,
     });
 
-    console.log(`[DEBUG] parsed: brandMentioned=${analysis.brandMentioned}, competitors=${JSON.stringify(analysis.competitors)}`);
-
     return {
       response: responseText,
-      brandMentioned: analysis.brandMentioned || false,
+      brandMentioned,
       competitors: analysis.competitors || [],
       sources,
-      provider: effectiveProvider,
+      model: effectiveModel,
     };
   } catch (error) {
     console.error("Error analyzing prompt response:", error);
@@ -110,12 +79,24 @@ Rules:
   }
 }
 
+/**
+ * Check if a brand name appears in text via regex.
+ * Strips markdown formatting, then matches with word boundaries
+ * and an optional trailing dot+TLD (e.g. "Acme.com", "Acme.io").
+ */
+function isBrandMentioned(text: string, brandName: string): boolean {
+  const clean = text.replace(/\*{1,2}|`/g, '');
+  const escaped = brandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`\\b${escaped}(?:\\.[a-z]{2,})?\\b`, 'i');
+  return pattern.test(clean);
+}
+
 // --- Browser method: send to browser actor (local or Apify Cloud) ---
 
-async function getResponseViaBrowser(prompt: string, provider: string, context?: { analysisRunId?: number; jobId?: number }): Promise<{ responseText: string; sources: string[] }> {
+async function getResponseViaBrowser(prompt: string, model: string, context?: { analysisRunId?: number; jobId?: number }): Promise<{ responseText: string; sources: string[] }> {
   const { askBrowser } = await import('./chatgpt-browser');
 
-  const result = await askBrowser(prompt, provider as any, context);
+  const result = await askBrowser(prompt, model as any, context);
 
   // Extract URLs from markdown links in the response text
   const urlSources: string[] = [];
@@ -136,64 +117,6 @@ async function getResponseViaBrowser(prompt: string, provider: string, context?:
     responseText: result.answer,
     sources: [...new Set([...sidebarSources, ...urlSources])],
   };
-}
-
-// --- API method: OpenAI Responses API with web search ---
-
-async function getResponseViaAPI(prompt: string): Promise<{ responseText: string; sources: string[] }> {
-  console.log(`[API] Calling Responses API for: "${prompt.substring(0, 60)}..."`);
-  const responsesResult = await openai.responses.create({
-    model: "gpt-5.4",
-    tools: [{ type: "web_search" as any }],
-    input: [
-      {
-        role: "developer" as any,
-        content: `You are a helpful AI assistant answering questions about various products and services.
-Provide practical, unbiased recommendations focusing on the most popular and widely-used options.
-Be natural and conversational in your responses.`,
-      },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.7,
-    max_output_tokens: 2048,
-  } as any);
-
-  let responseText = "";
-  const sources: string[] = [];
-  for (const item of (responsesResult as any).output) {
-    if (item.type === "message") {
-      for (const content of item.content) {
-        if (content.type === "output_text") {
-          responseText += content.text;
-          if (content.annotations) {
-            for (const ann of content.annotations) {
-              if (ann.type === "url_citation" && ann.url) {
-                sources.push(ann.url);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Record token usage
-  const usage = (responsesResult as any).usage;
-  if (usage) {
-    try {
-      const { db } = await import("../db");
-      const { apiUsage } = await import("@shared/schema");
-      const { getCurrentRunId } = await import("./llm");
-      await db.insert(apiUsage).values({
-        analysisRunId: getCurrentRunId(),
-        model: (responsesResult as any).model || "gpt-5.4",
-        inputTokens: usage.input_tokens || 0,
-        outputTokens: usage.output_tokens || 0,
-      });
-    } catch {}
-  }
-
-  return { responseText, sources: [...new Set(sources)] };
 }
 
 export async function generatePromptsForTopic(topicName: string, topicDescription: string, count: number = 5, competitors: string[] = []): Promise<string[]> {
@@ -395,6 +318,31 @@ Return as: {"topics": [{"name": "Topic Name", "description": "Brief category des
       name: `Brand Analysis ${i + 1}`,
       description: `Comprehensive analysis of brand positioning and market dynamics`
     }));
+  }
+}
+
+export async function categorizeCompetitor(name: string, brandName?: string): Promise<string> {
+  try {
+    const response = await chatCompletion({
+      model: "gpt-5.4-mini",
+      messages: [
+        {
+          role: "system",
+          content: `Categorize this company/product. Return only the category name as a single word or short phrase (e.g. "Technology", "Cloud Platform", "Networking", etc.). No explanation.`
+        },
+        {
+          role: "user",
+          content: `Brand: ${brandName || 'Unknown'}\nCompetitor: ${name}\nCategory?`
+        }
+      ],
+      temperature: 0.1,
+      max_completion_tokens: 32
+    }, { timeoutMs: 15000 });
+
+    return response.choices[0].message.content?.trim() || 'Technology';
+  } catch (error) {
+    console.error(`Error categorizing competitor ${name}:`, error);
+    return 'Technology';
   }
 }
 

@@ -60,7 +60,7 @@ docker compose --profile browser up -d
 ```
 
 ### Apify Cloud (~$0.05/prompt, ~15 prompts/min)
-Use [Apify](https://apify.com) for parallel execution with residential proxies. No anti-bot issues. Set your Apify token in Settings → Credentials.
+Use [Apify](https://apify.com/?fpr=1lkb9a) for parallel execution with residential proxies. No anti-bot issues. Set your Apify token in Settings → Credentials.
 
 Switch between modes in Settings → Credentials → Browser Analysis Mode.
 

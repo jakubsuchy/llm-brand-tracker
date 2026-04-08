@@ -20,6 +20,8 @@ export default function InitializePage() {
   const { toast } = useToast();
   const { login } = useAuth();
 
+  const { isAuthenticated } = useAuth();
+
   const { data: setupData } = useQuery<{ needsSetup: boolean; googleEnabled: boolean }>({
     queryKey: ['/api/auth/needs-setup'],
     queryFn: async () => {
@@ -31,10 +33,12 @@ export default function InitializePage() {
   });
 
   useEffect(() => {
-    if (setupData && !setupData.needsSetup) {
+    if (isAuthenticated) {
+      setLocation("/setup");
+    } else if (setupData && !setupData.needsSetup) {
       setLocation("/login");
     }
-  }, [setupData, setLocation]);
+  }, [setupData, isAuthenticated, setLocation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

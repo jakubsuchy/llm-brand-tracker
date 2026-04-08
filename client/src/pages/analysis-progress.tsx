@@ -393,7 +393,7 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
         <div className="relative mt-2">
           <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-gray-400" />
           <Input
-            placeholder="Search by ID (#123), prompt, or provider..."
+            placeholder="Search by ID (#123), prompt, or model..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-7 h-8 text-sm"
@@ -475,7 +475,7 @@ function JobsTable({ jobs }: { jobs: JobItem[] }) {
             <TableHeader>
               <TableRow className="text-xs">
                 <TableHead className="w-12">#</TableHead>
-                <TableHead className="w-20">Provider</TableHead>
+                <TableHead className="w-20">Model</TableHead>
                 <TableHead>Prompt</TableHead>
                 <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-16 text-center">Try</TableHead>

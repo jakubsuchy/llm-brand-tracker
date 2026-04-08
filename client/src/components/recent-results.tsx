@@ -32,14 +32,14 @@ type FilterType = 'all' | 'mentioned' | 'not-mentioned';
 
 const PAGE_SIZE = 5;
 
-export default function RecentResults({ runId, provider }: { runId?: string; provider?: string }) {
+export default function RecentResults({ runId, model }: { runId?: string; model?: string }) {
   const [filter, setFilter] = useState<FilterType>('all');
   const [page, setPage] = useState(0);
   const runParam = runId ? `&runId=${runId}` : '';
-  const providerParam = provider ? `&provider=${provider}` : '';
+  const modelParam = model ? `&model=${model}` : '';
 
   const { data: results, isLoading, error } = useQuery<PromptResult[]>({
-    queryKey: [`/api/responses?limit=1000&full=true${runParam}${providerParam}`],
+    queryKey: [`/api/responses?limit=1000&full=true${runParam}${modelParam}`],
   });
 
   if (isLoading) {

@@ -162,7 +162,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <div className="grid gap-1.5">
                   {[
                     "What's my brand mention rate?",
-                    "Which provider performs best for us?",
+                    "Which model performs best for us?",
                     "Who are our top competitors?",
                     "What prompts don't mention us?",
                     "Which sources cite competitors but not us?",

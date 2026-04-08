@@ -20,7 +20,7 @@ interface AnalysisRun {
 
 export default function Dashboard() {
   const [brandName, setBrandName] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState<string>('all');
+  const [selectedModel, setSelectedModel] = useState<string>('all');
   const searchString = useSearch();
   const [, setLocation] = useLocation();
 
@@ -30,11 +30,11 @@ export default function Dashboard() {
     queryKey: ['/api/analysis/runs'],
   });
 
-  const { data: providersConfig } = useQuery<Record<string, { enabled: boolean; label?: string }>>({
-    queryKey: ['/api/settings/providers'],
+  const { data: modelsConfig } = useQuery<Record<string, { enabled: boolean; label?: string }>>({
+    queryKey: ['/api/settings/models'],
   });
-  const enabledProviders = providersConfig
-    ? Object.entries(providersConfig).filter(([, v]) => v.enabled)
+  const enabledModels = modelsConfig
+    ? Object.entries(modelsConfig).filter(([, v]) => v.enabled)
     : [];
 
   const selectedRunId = urlRunId || 'all';
@@ -43,7 +43,7 @@ export default function Dashboard() {
     setLocation(`/?runId=${id}`);
   };
 
-  const providerValue = selectedProvider !== 'all' ? selectedProvider : undefined;
+  const modelValue = selectedModel !== 'all' ? selectedModel : undefined;
 
   // Load brand name from DB
   useEffect(() => {
@@ -64,13 +64,13 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
-          <Select value={selectedProvider} onValueChange={setSelectedProvider}>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
             <SelectTrigger className="w-48">
-              <SelectValue placeholder="All Providers" />
+              <SelectValue placeholder="All Models" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Providers</SelectItem>
-              {enabledProviders.map(([key, config]) => (
+              <SelectItem value="all">All Models</SelectItem>
+              {enabledModels.map(([key, config]) => (
                 <SelectItem key={key} value={key}>{config.label || key}</SelectItem>
               ))}
             </SelectContent>
@@ -96,16 +96,16 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
+      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
-        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
+        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
+        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
-        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} provider={providerValue} />
+        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
+        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
       </div>
     </div>
   );

@@ -10,10 +10,10 @@ export interface BrowserScraperResult {
   sources: Array<{ href: string; title: string }>;
   url: string;
   timestamp: string;
-  provider: string;
+  model: string;
 }
 
-export type BrowserProvider = 'chatgpt' | 'perplexity';
+export type BrowserModel = 'chatgpt' | 'perplexity';
 
 const APIFY_ACTOR_ID = 'jakubsuchy~llm-prompt-response';
 const APIFY_API_BASE = 'https://api.apify.com/v2';
@@ -31,11 +31,11 @@ function getCredentials() {
   return { email, password, totpSecret };
 }
 
-function buildRequestBody(question: string, provider: BrowserProvider) {
+function buildRequestBody(question: string, model: BrowserModel) {
   const creds = getCredentials();
   const body: Record<string, any> = {
     prompts: [question],
-    provider,
+    provider: model,
   };
   if (creds.email) body.chatgptEmail = creds.email;
   if (creds.password) body.chatgptPassword = creds.password;
@@ -45,26 +45,26 @@ function buildRequestBody(question: string, provider: BrowserProvider) {
 
 // ─── Local mode: POST to browser-actor standby container ─────────
 
-async function askBrowserLocal(question: string, provider: BrowserProvider): Promise<BrowserScraperResult> {
+async function askBrowserLocal(question: string, model: BrowserModel): Promise<BrowserScraperResult> {
   const url = getBrowserActorUrl();
 
   const response = await fetch(`${url}/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRequestBody(question, provider)),
+    body: JSON.stringify(buildRequestBody(question, model)),
     signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
   });
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(`Browser actor ${provider} error (${response.status}): ${err.error}`);
+    throw new Error(`Browser actor ${model} error (${response.status}): ${err.error}`);
   }
 
   const results: any[] = await response.json();
   const item = results[0];
 
   if (!item || item.answer === null || item.answer === undefined) {
-    throw new Error(item?.error || `${provider} returned no answer`);
+    throw new Error(item?.error || `${model} returned no answer`);
   }
 
   return {
@@ -73,20 +73,20 @@ async function askBrowserLocal(question: string, provider: BrowserProvider): Pro
     sources: item.sources || [],
     url: item.url || '',
     timestamp: item.timestamp || new Date().toISOString(),
-    provider: item.provider || provider,
+    model: item.provider || model,
   };
 }
 
 // ─── Cloud mode: start Apify run, poll, fetch dataset ────────────
 
-async function askBrowserCloud(question: string, provider: BrowserProvider): Promise<BrowserScraperResult> {
+async function askBrowserCloud(question: string, model: BrowserModel): Promise<BrowserScraperResult> {
   const token = process.env.APIFY_TOKEN!;
 
   // Start a run
   const startRes = await fetch(`${APIFY_API_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRequestBody(question, provider)),
+    body: JSON.stringify(buildRequestBody(question, model)),
   });
 
   if (!startRes.ok) {
@@ -98,7 +98,7 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
   const runId = runData.data?.id;
   if (!runId) throw new Error('Apify run did not return a run ID');
 
-  console.log(`[Apify ${provider}] Started run ${runId}`);
+  console.log(`[Apify ${model}] Started run ${runId}`);
 
   // Poll for completion
   const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -121,7 +121,7 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
 
   // Record usage for any terminal status (fire-and-forget)
   if (runInfo?.data) {
-    recordApifyUsage(runInfo.data, provider).catch(() => {});
+    recordApifyUsage(runInfo.data, model).catch(() => {});
   }
 
   if (status === 'FAILED') {
@@ -149,10 +149,10 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
   const item = items[0];
 
   if (!item || item.answer === null || item.answer === undefined) {
-    throw new Error(item?.error || `${provider} returned no answer (Apify run ${runId})`);
+    throw new Error(item?.error || `${model} returned no answer (Apify run ${runId})`);
   }
 
-  console.log(`[Apify ${provider}] Run ${runId} completed: ${item.answer.length} chars, ${item.sources?.length || 0} sources`);
+  console.log(`[Apify ${model}] Run ${runId} completed: ${item.answer.length} chars, ${item.sources?.length || 0} sources`);
 
   return {
     question: item.question,
@@ -160,7 +160,7 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
     sources: item.sources || [],
     url: item.url || '',
     timestamp: item.timestamp || new Date().toISOString(),
-    provider: item.provider || provider,
+    model: item.provider || model,
   };
 }
 
@@ -168,7 +168,7 @@ async function askBrowserCloud(question: string, provider: BrowserProvider): Pro
 
 let _currentContext: { analysisRunId?: number; jobId?: number } | null = null;
 
-async function recordApifyUsage(runData: any, provider: string) {
+async function recordApifyUsage(runData: any, model: string) {
   try {
     const stats = runData.stats || {};
     const usage = runData.usageUsd || {};
@@ -176,7 +176,7 @@ async function recordApifyUsage(runData: any, provider: string) {
       analysisRunId: _currentContext?.analysisRunId || null,
       jobId: _currentContext?.jobId || null,
       apifyRunId: runData.id,
-      provider,
+      provider: model,
       status: runData.status,
       costUsd: runData.usageTotalUsd || null,
       durationMs: stats.durationMillis ? Math.round(stats.durationMillis) : null,
@@ -194,7 +194,7 @@ async function recordApifyUsage(runData: any, provider: string) {
 
 export async function askBrowser(
   question: string,
-  provider: BrowserProvider = 'chatgpt',
+  model: BrowserModel = 'chatgpt',
   context?: { analysisRunId?: number; jobId?: number },
 ): Promise<BrowserScraperResult> {
   const startTime = Date.now();
@@ -203,17 +203,17 @@ export async function askBrowser(
   const savedMode = await storage.getSetting('browserMode');
   const mode = savedMode === 'local' ? 'local' : savedMode === 'cloud' ? 'cloud' : (process.env.APIFY_TOKEN ? 'cloud' : 'local');
 
-  console.log(`[Browser ${provider}] Sending (${mode}): "${question.substring(0, 80)}..."`);
+  console.log(`[Browser ${model}] Sending (${mode}): "${question.substring(0, 80)}..."`);
 
   // Pass context to cloud mode for usage tracking
   _currentContext = context || null;
   const result = mode === 'cloud'
-    ? await askBrowserCloud(question, provider)
-    : await askBrowserLocal(question, provider);
+    ? await askBrowserCloud(question, model)
+    : await askBrowserLocal(question, model);
   _currentContext = null;
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[Browser ${provider}] Done in ${elapsed}s — ${result.answer.length} chars, ${result.sources.length} sources`);
+  console.log(`[Browser ${model}] Done in ${elapsed}s — ${result.answer.length} chars, ${result.sources.length} sources`);
 
   return result;
 }

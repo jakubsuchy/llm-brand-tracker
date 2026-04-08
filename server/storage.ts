@@ -66,8 +66,8 @@ export interface IStorage {
   createSource(source: InsertSource): Promise<Source>;
   getSourceByDomain(domain: string): Promise<Source | undefined>;
   updateSourceCitationCount(domain: string, increment: number): Promise<void>;
-  addSourceUrls(domain: string, urls: string[], analysisRunId?: number, provider?: string): Promise<void>;
-  getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, provider?: string): Promise<string[]>;
+  addSourceUrls(domain: string, urls: string[], analysisRunId?: number, model?: string): Promise<void>;
+  getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, model?: string): Promise<string[]>;
 
   // Competitor mentions
   createCompetitorMention(mention: InsertCompetitorMention): Promise<void>;
@@ -343,7 +343,7 @@ export class MemStorage implements IStorage {
 
   private sourceUrlsMap = new Map<number, Set<string>>();
 
-  async addSourceUrls(domain: string, urls: string[], _analysisRunId?: number, _provider?: string): Promise<void> {
+  async addSourceUrls(domain: string, urls: string[], _analysisRunId?: number, _model?: string): Promise<void> {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     if (!this.sourceUrlsMap.has(source.id)) {
@@ -353,7 +353,7 @@ export class MemStorage implements IStorage {
     for (const url of urls) set.add(url);
   }
 
-  async getSourceUrlsBySourceId(sourceId: number, _analysisRunId?: number, _provider?: string): Promise<string[]> {
+  async getSourceUrlsBySourceId(sourceId: number, _analysisRunId?: number, _model?: string): Promise<string[]> {
     return Array.from(this.sourceUrlsMap.get(sourceId) || []);
   }
 

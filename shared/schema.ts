@@ -45,7 +45,6 @@ export const sources = pgTable("sources", {
   id: serial("id").primaryKey(),
   domain: text("domain").notNull(),
   url: text("url").notNull(),
-  title: text("title"),
   citationCount: integer("citation_count").default(0),
   lastCited: timestamp("last_cited"),
 });

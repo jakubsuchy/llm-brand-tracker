@@ -89,14 +89,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Load persisted brand name from DB
   await loadBrandName();
 
-  // Load persisted response method
-  try {
-    const { setResponseMethod } = await import('./services/openai');
-    const savedMethod = await storage.getSetting('responseMethod');
-    if (savedMethod === 'browser' || savedMethod === 'api') {
-      setResponseMethod(savedMethod);
-    }
-  } catch {}
 
   // --- Load DB settings into env ---
   try {
@@ -369,7 +361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         resumeWorker.setAnalysisRunId(latestRun.id);
         if (latestRun.brandUrl) resumeWorker.setBrandUrl(latestRun.brandUrl);
 
-        // Default to serial (browser-safe) on resume — we don't know what providers are queued
+        // Default to serial (browser-safe) on resume — we don't know what models are queued
         resumeWorker.runWorkerLoop(latestRun.id, true).then(async () => {
           await resumeWorker.generateAnalytics();
           await storage.completeAnalysisRun(latestRun.id, 'complete');
@@ -396,9 +388,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else if (await isBrowserAvailable()) {
       console.log(`[STARTUP] Browser mode: local container (${process.env.BROWSER_ACTOR_URL || 'http://browser-actor:8888'})`);
     } else {
-      console.log('[STARTUP] Browser actor not available — browser providers disabled, API-only mode');
+      console.log('[STARTUP] Browser actor not available — browser models disabled, API-only mode');
       if (!process.env.APIFY_TOKEN) {
-        console.log('[STARTUP] To enable browser providers: set APIFY_TOKEN or start with --profile browser');
+        console.log('[STARTUP] To enable browser models: set APIFY_TOKEN or start with --profile browser');
       }
     }
   } catch (error) {
@@ -454,34 +446,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Per-provider brand mention rates
-  app.get("/api/metrics/by-provider", async (req, res) => {
+  // Per-model brand mention rates
+  app.get("/api/metrics/by-model", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const allResponses = await storage.getResponsesWithPrompts(runId);
 
-      // Group by provider, then by unique prompt text
-      const providerMap = new Map<string, Map<string, boolean>>();
+      // Group by model, then by unique prompt text
+      const modelMap = new Map<string, Map<string, boolean>>();
       for (const r of allResponses) {
-        const prov = r.provider || 'unknown';
-        if (!providerMap.has(prov)) providerMap.set(prov, new Map());
-        const promptMap = providerMap.get(prov)!;
+        const mdl = r.provider || 'unknown';
+        if (!modelMap.has(mdl)) modelMap.set(mdl, new Map());
+        const promptMap = modelMap.get(mdl)!;
         const key = r.prompt?.text?.toLowerCase().trim() || '';
         if (!promptMap.has(key)) promptMap.set(key, false);
         if (r.brandMentioned) promptMap.set(key, true);
       }
 
-      // Get display labels from provider config
+      // Get display labels from model config
       const defaultLabels: Record<string, string> = { perplexity: 'Perplexity', chatgpt: 'ChatGPT', gemini: 'Google Gemini' };
-      const provConfigRaw = await storage.getSetting('providersConfig');
-      const provConfig = provConfigRaw ? JSON.parse(provConfigRaw) : {};
+      const modelsConfigRaw = await storage.getSetting('modelsConfig');
+      const modelsConfig = modelsConfigRaw ? JSON.parse(modelsConfigRaw) : {};
 
-      const results = [...providerMap.entries()].map(([provider, promptMap]) => {
+      const results = [...modelMap.entries()].map(([model, promptMap]) => {
         const total = promptMap.size;
         const mentioned = [...promptMap.values()].filter(Boolean).length;
         return {
-          provider,
-          label: provConfig[provider]?.label || defaultLabels[provider] || provider,
+          model,
+          label: modelsConfig[model]?.label || defaultLabels[model] || model,
           total,
           mentioned,
           rate: total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0,
@@ -490,8 +482,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(results);
     } catch (error) {
-      console.error("Error fetching provider metrics:", error);
-      res.status(500).json({ error: "Failed to fetch provider metrics" });
+      console.error("Error fetching model metrics:", error);
+      res.status(500).json({ error: "Failed to fetch model metrics" });
     }
   });
 
@@ -499,9 +491,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/metrics", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
+      if (model) allResponses = allResponses.filter(r => r.provider === model);
 
       // Group by unique prompt text — a prompt "mentions brand" if ANY response for it did
       const promptMap = new Map<string, { mentioned: boolean; count: number }>();
@@ -528,10 +520,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allSources = await storage.getSources();
       let sourceCount = 0;
       let domainCount = 0;
-      if (runId || provider) {
+      if (runId || model) {
         const sourcesWithUrls = await Promise.all(
           allSources.map(async s => {
-            const urls = await storage.getSourceUrlsBySourceId(s.id, runId, provider);
+            const urls = await storage.getSourceUrlsBySourceId(s.id, runId, model);
             return urls.length > 0 ? s : null;
           })
         );
@@ -540,10 +532,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sourceCount = activeSources.reduce((sum, s) => {
           return sum; // counted below
         }, 0);
-        // Count total URLs for this run/provider
+        // Count total URLs for this run/model
         let totalUrls = 0;
         for (const s of allSources) {
-          const urls = await storage.getSourceUrlsBySourceId(s.id, runId, provider);
+          const urls = await storage.getSourceUrlsBySourceId(s.id, runId, model);
           totalUrls += urls.length;
         }
         sourceCount = totalUrls;
@@ -570,9 +562,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/counts", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
+      if (model) allResponses = allResponses.filter(r => r.provider === model);
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
 
@@ -661,10 +653,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/topics/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       // Derive topic analysis from responses
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
+      if (model) allResponses = allResponses.filter(r => r.provider === model);
       const topicMap = new Map<number, { name: string; total: number; brandMentions: number }>();
       for (const r of allResponses) {
         const topicId = r.prompt?.topicId || 0;
@@ -751,11 +743,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/competitors/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
 
       // Unified approach: count unique prompts where each competitor was mentioned
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
+      if (model) allResponses = allResponses.filter(r => r.provider === model);
 
       // Count unique prompts total
       const uniquePrompts = new Set(allResponses.map(r => r.prompt?.text?.toLowerCase().trim() || ''));
@@ -880,7 +872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/sources/analysis", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       const allSources = await storage.getSources();
 
       // Derive source type dynamically from brand name and competitor list
@@ -930,7 +922,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const results = await Promise.all(allSources.map(async source => {
-        const urls = await storage.getSourceUrlsBySourceId(source.id, runId, provider);
+        const urls = await storage.getSourceUrlsBySourceId(source.id, runId, model);
         if (urls.length === 0) return null;
 
         const domainLower = source.domain.toLowerCase();
@@ -968,9 +960,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const domain = req.params.domain;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       let allResponses = await storage.getResponsesWithPrompts(runId);
-      if (provider) allResponses = allResponses.filter(r => r.provider === provider);
+      if (model) allResponses = allResponses.filter(r => r.provider === model);
       // Filter responses that cite this domain (in text body OR sources array)
       const domainLower = domain.toLowerCase();
       const matching = allResponses.filter(r =>
@@ -1007,7 +999,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const provider = req.query.provider as string | undefined;
+      const model = (req.query.model || req.query.provider) as string | undefined;
       const useFullDataset = req.query.full === 'true' || limit > 100;
 
       let responses;
@@ -1016,7 +1008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         responses = await storage.getRecentResponses(limit, runId);
       }
-      if (provider) responses = responses.filter(r => r.provider === provider);
+      if (model) responses = responses.filter(r => r.provider === model);
 
       res.json(responses.slice(0, limit));
     } catch (error) {
@@ -1348,7 +1340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const failures = await storage.getFailedJobs(targetRunId);
       res.json(failures.map(j => ({
         id: j.id,
-        provider: j.provider,
+        model: j.provider,
         promptText: j.promptText,
         error: j.lastError,
         attempts: j.attempts,
@@ -1377,7 +1369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const jobs = await db.select({
         id: jobQueue.id,
-        provider: jobQueue.provider,
+        model: jobQueue.provider,
         promptText: jobQueue.promptText,
         status: jobQueue.status,
         attempts: jobQueue.attempts,
@@ -1583,30 +1575,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Settings - Providers configuration
-  const DEFAULT_PROVIDERS_CONFIG: Record<string, any> = {
+  // Settings - Models configuration
+  const DEFAULT_MODELS_CONFIG: Record<string, any> = {
     perplexity: { enabled: true, type: 'browser', label: 'Perplexity' },
     chatgpt: { enabled: true, type: 'browser', label: 'ChatGPT' },
     gemini: { enabled: true, type: 'browser', label: 'Google Gemini' },
   };
 
-  app.get("/api/settings/providers", async (req, res) => {
+  app.get("/api/settings/models", async (req, res) => {
     try {
-      const raw = await storage.getSetting('providersConfig');
-      const config = raw ? JSON.parse(raw) : DEFAULT_PROVIDERS_CONFIG;
+      const raw = await storage.getSetting('modelsConfig');
+      const config = raw ? JSON.parse(raw) : DEFAULT_MODELS_CONFIG;
       res.json(config);
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch providers config" });
+      res.status(500).json({ error: "Failed to fetch models config" });
     }
   });
 
-  app.post("/api/settings/providers", requireRole("admin"), async (req, res) => {
+  app.post("/api/settings/models", requireRole("admin"), async (req, res) => {
     try {
       const config = req.body;
-      await storage.setSetting('providersConfig', JSON.stringify(config));
+      await storage.setSetting('modelsConfig', JSON.stringify(config));
       res.json({ success: true });
     } catch (error) {
-      res.status(500).json({ error: "Failed to save providers config" });
+      res.status(500).json({ error: "Failed to save models config" });
     }
   });
 
@@ -1636,35 +1628,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Settings - Response method (browser vs API)
-  app.get("/api/settings/response-method", requireRole("admin"), async (req, res) => {
-    try {
-      const { getResponseMethod } = await import('./services/openai');
-      const method = getResponseMethod();
-      const hasCreds = !!(process.env.CHATGPT_EMAIL && process.env.CHATGPT_PASSWORD);
-      res.json({ method, browserAvailable: hasCreds });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch response method" });
-    }
-  });
-
-  app.post("/api/settings/response-method", requireRole("admin"), async (req, res) => {
-    try {
-      const { method } = req.body;
-      if (method !== 'browser' && method !== 'api') {
-        return res.status(400).json({ error: "method must be 'browser' or 'api'" });
-      }
-      if (method === 'browser' && (!process.env.CHATGPT_EMAIL || !process.env.CHATGPT_PASSWORD)) {
-        return res.status(400).json({ error: "CHATGPT_EMAIL and CHATGPT_PASSWORD environment variables are required for browser mode" });
-      }
-      const { setResponseMethod } = await import('./services/openai');
-      setResponseMethod(method);
-      await storage.setSetting('responseMethod', method);
-      res.json({ success: true, method });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to set response method" });
-    }
-  });
 
   // Settings - Competitor blocklist
   const DEFAULT_BLOCKLIST = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];

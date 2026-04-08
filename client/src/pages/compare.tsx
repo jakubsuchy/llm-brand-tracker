@@ -411,6 +411,9 @@ export default function ComparePage() {
                             <XCircle className="w-4 h-4 text-red-400" />
                           )}
                         </div>
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {response.provider || 'unknown'}
+                        </Badge>
                         <Badge variant="secondary" className="text-xs">
                           {getTopicName(response.prompt.topicId)}
                         </Badge>
@@ -468,6 +471,7 @@ export default function ComparePage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>USER QUERY</TableHead>
+                    <TableHead className="w-28">MODEL</TableHead>
                     <TableHead className="w-36 text-center">YOUR BRAND</TableHead>
                     <TableHead className="w-36 text-center">{competitor.name.toUpperCase()}</TableHead>
                     <TableHead className="w-32">TOPIC</TableHead>
@@ -478,7 +482,7 @@ export default function ComparePage() {
                 <TableBody>
                   {paginatedResponses.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={selectedRun === 'all' ? 6 : 5} className="text-center py-8 text-gray-500">
+                      <TableCell colSpan={selectedRun === 'all' ? 7 : 6} className="text-center py-8 text-gray-500">
                         Neither brand nor competitor mentioned in any prompt
                       </TableCell>
                     </TableRow>
@@ -492,6 +496,11 @@ export default function ComparePage() {
                               <p className="text-sm text-gray-900 leading-relaxed">
                                 {response.prompt.text}
                               </p>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {response.provider || 'unknown'}
+                              </Badge>
                             </TableCell>
                             <TableCell className="text-center">
                               {response.brandMentioned ? (
@@ -536,10 +545,10 @@ export default function ComparePage() {
                           </TableRow>
                           {expandedPrompt === response.id && (
                             <TableRow key={`${response.id}-detail`}>
-                              <TableCell colSpan={selectedRun === 'all' ? 6 : 5} className="bg-gray-50 p-0">
+                              <TableCell colSpan={selectedRun === 'all' ? 7 : 6} className="bg-gray-50 p-0">
                                 <div className="p-4 space-y-3">
                                   <div>
-                                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">ChatGPT Response</h4>
+                                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{response.provider ? `${response.provider} Response` : 'Response'}</h4>
                                     <div className="text-sm text-gray-800 whitespace-pre-wrap bg-white p-4 rounded border max-h-96 overflow-y-auto leading-relaxed">
                                       {response.text}
                                     </div>

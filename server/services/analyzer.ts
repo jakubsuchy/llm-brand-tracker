@@ -1,5 +1,5 @@
 import { storage } from "../storage";
-import { analyzePromptResponse, generatePromptsForTopic } from "./openai";
+import { analyzePromptResponse, generatePromptsForTopic, categorizeCompetitor } from "./openai";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
 import { setCurrentRunId } from "./llm";
 import type {
@@ -174,11 +174,11 @@ export class BrandAnalyzer {
         }
       }
 
-      // Determine which providers to use from settings
-      let activeProviders: string[] = [];
+      // Determine which models to use from settings
+      let activeModels: string[] = [];
 
       try {
-        const raw = await storage.getSetting('providersConfig');
+        const raw = await storage.getSetting('modelsConfig');
         const config = raw ? JSON.parse(raw) : {
           perplexity: { enabled: true, type: 'browser' },
           chatgpt: { enabled: true, type: 'browser' },
@@ -194,26 +194,26 @@ export class BrandAnalyzer {
             console.log(`[${new Date().toISOString()}] Skipping ${name} — browser not available`);
             continue;
           }
-          activeProviders.push(name);
+          activeModels.push(name);
         }
       } catch {
-        console.log(`[${new Date().toISOString()}] Failed to load provider config, using defaults`);
+        console.log(`[${new Date().toISOString()}] Failed to load model config, using defaults`);
       }
 
-      if (activeProviders.length === 0) {
-        throw new Error('No providers available. Enable at least one provider in Settings and ensure browser actor or Apify token is configured.');
+      if (activeModels.length === 0) {
+        throw new Error('No models available. Enable at least one model in Settings and ensure browser actor or Apify token is configured.');
       }
-      activeProviders = [...new Set(activeProviders)];
+      activeModels = [...new Set(activeModels)];
 
       // Enqueue jobs
-      await this.enqueueJobs(allPrompts, activeProviders, this.analysisRunId!);
+      await this.enqueueJobs(allPrompts, activeModels, this.analysisRunId!);
 
-      const totalTasks = allPrompts.length * activeProviders.length;
-      const hasBrowserProviders = activeProviders.some(p => p !== 'api');
-      console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeProviders.length} providers (${activeProviders.join(', ')}) = ${totalTasks} tasks`);
+      const totalTasks = allPrompts.length * activeModels.length;
+      const hasBrowserModels = activeModels.some(p => p !== 'api');
+      console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeModels.length} models (${activeModels.join(', ')}) = ${totalTasks} tasks`);
 
       // Run worker loop — browser jobs run serially, API jobs can run in parallel
-      await this.runWorkerLoop(this.analysisRunId!, hasBrowserProviders);
+      await this.runWorkerLoop(this.analysisRunId!, hasBrowserModels);
 
       // Generate analytics
       await this.generateAnalytics();
@@ -228,19 +228,19 @@ export class BrandAnalyzer {
   }
 
   /**
-   * Bulk insert one job per (prompt, provider) pair.
+   * Bulk insert one job per (prompt, model) pair.
    */
-  async enqueueJobs(allPrompts: any[], activeProviders: string[], analysisRunId: number): Promise<void> {
+  async enqueueJobs(allPrompts: any[], activeModels: string[], analysisRunId: number): Promise<void> {
     const jobs: InsertJobQueueItem[] = [];
     for (const promptData of allPrompts) {
-      for (const provider of activeProviders) {
+      for (const model of activeModels) {
         jobs.push({
           analysisRunId,
           promptId: promptData._existing && promptData.id ? promptData.id : null,
           promptText: promptData.text,
           promptTopicId: promptData.topicId || null,
           promptIsExisting: !!(promptData._existing && promptData.id),
-          provider,
+          provider: model,
           status: 'pending',
           attempts: 0,
           maxAttempts: process.env.APIFY_TOKEN ? 100 : 10,
@@ -264,11 +264,11 @@ export class BrandAnalyzer {
    * Spawn worker promises that poll the job queue.
    * Browser jobs run serially (concurrency 1), API jobs can run in parallel.
    */
-  async runWorkerLoop(analysisRunId: number, hasBrowserProviders: boolean = false): Promise<void> {
+  async runWorkerLoop(analysisRunId: number, hasBrowserModels: boolean = false): Promise<void> {
     // Cloud: all jobs fire in parallel (each is an independent Apify run).
     // Local browser: serial (single browser instance). API: 3 concurrent.
     const isCloud = !!process.env.APIFY_TOKEN;
-    const concurrency = isCloud ? 30 : (hasBrowserProviders ? 1 : 3);
+    const concurrency = isCloud ? 30 : (hasBrowserModels ? 1 : 3);
     const POLL_INTERVAL_MS = 500;
     const STALL_TIMEOUT_MS = 300000; // 5 minutes
 
@@ -348,13 +348,13 @@ export class BrandAnalyzer {
   }
 
   /**
-   * Process a single job: fetch response from provider, analyze, save to DB.
+   * Process a single job: fetch response from model, analyze, save to DB.
    */
   private async processJob(job: JobQueueItem): Promise<void> {
-    const { provider, promptText, promptId, promptIsExisting, promptTopicId } = job;
+    const { provider: model, promptText, promptId, promptIsExisting, promptTopicId } = job;
     const analysisRunId = job.analysisRunId;
 
-    console.log(`[${new Date().toISOString()}] [${provider}] Processing job ${job.id}: ${promptText.substring(0, 50)}...`);
+    console.log(`[${new Date().toISOString()}] [${model}] Processing job ${job.id}: ${promptText.substring(0, 50)}...`);
 
     // Resolve prompt record
     let prompt: { id: number; text: string; topicId: number | null };
@@ -368,7 +368,7 @@ export class BrandAnalyzer {
 
     // Get response from LLM
     const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
-    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, provider, { analysisRunId, jobId: job.id });
+    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id });
 
     // Process competitors
     const brandLower = (this.brandName || '').toLowerCase();
@@ -411,7 +411,7 @@ export class BrandAnalyzer {
         if (!competitor) {
           competitor = await storage.createCompetitor({
             name: competitorName,
-            category: await this.categorizeCompetitor(competitorName),
+            category: await categorizeCompetitor(competitorName, this.brandName),
             mentionCount: 0
           });
         }
@@ -447,11 +447,10 @@ export class BrandAnalyzer {
           source = await storage.createSource({
             domain,
             url: primaryUrl,
-            title: this.generateSourceTitle(domain, primaryUrl),
             citationCount: 0
           });
         }
-        await storage.addSourceUrls(domain, urls, analysisRunId || undefined, provider);
+        await storage.addSourceUrls(domain, urls, analysisRunId || undefined, model);
         await storage.updateSourceCitationCount(domain, 1);
 
         const domainBase = domain.toLowerCase().split('.')[0];
@@ -469,7 +468,7 @@ export class BrandAnalyzer {
     const responseRecord = await storage.createResponse({
       promptId: prompt.id,
       analysisRunId,
-      provider: provider || analysis.provider || null,
+      provider: model || analysis.model || null,
       text: analysis.response,
       brandMentioned: analysis.brandMentioned,
       competitorsMentioned: uniqueCompetitors.map(name => {
@@ -490,114 +489,10 @@ export class BrandAnalyzer {
       } catch {}
     }
 
-    console.log(`[${new Date().toISOString()}] [${provider}] Completed job ${job.id}`);
+    console.log(`[${new Date().toISOString()}] [${model}] Completed job ${job.id}`);
   }
 
-  private generateSourceTitle(domain: string, url: string): string {
-    const domainParts = domain.split('.');
-    const mainDomain = domainParts[0];
 
-    if (url.includes('/docs')) {
-      return `${mainDomain} Documentation`;
-    } else if (url.includes('/api')) {
-      return `${mainDomain} API Documentation`;
-    } else if (url.includes('/developer')) {
-      return `${mainDomain} Developer Portal`;
-    } else if (url.includes('/guide') || url.includes('/tutorial')) {
-      return `${mainDomain} Guides & Tutorials`;
-    } else if (domain.includes('github.com')) {
-      return 'GitHub Repository';
-    } else if (domain.includes('stackoverflow.com')) {
-      return 'Stack Overflow Discussion';
-    } else if (domain.includes('medium.com')) {
-      return 'Medium Article';
-    } else if (domain.includes('dev.to')) {
-      return 'Dev.to Article';
-    } else if (domain.includes('reddit.com')) {
-      return 'Reddit Discussion';
-    } else if (domain.includes('youtube.com')) {
-      return 'YouTube Video';
-    } else if (domain.includes('twitter.com') || domain.includes('x.com')) {
-      return 'Social Media Post';
-    } else if (domain.includes('linkedin.com')) {
-      return 'LinkedIn Article';
-    } else if (domain.includes('hackernews.com') || domain.includes('news.ycombinator.com')) {
-      return 'Hacker News Discussion';
-    } else if (domain.includes('discord.com') || domain.includes('discord.gg')) {
-      return 'Discord Community';
-    } else if (domain.includes('slack.com')) {
-      return 'Slack Community';
-    } else if (domain.includes('substack.com')) {
-      return 'Substack Newsletter';
-    } else if (domain.includes('hashnode.dev')) {
-      return 'Hashnode Article';
-    } else if (domain.includes('css-tricks.com')) {
-      return 'CSS-Tricks Article';
-    } else if (domain.includes('smashingmagazine.com')) {
-      return 'Smashing Magazine Article';
-    } else if (domain.includes('sitepoint.com')) {
-      return 'SitePoint Article';
-    } else if (domain.includes('toptal.com')) {
-      return 'Toptal Article';
-    } else if (domain.includes('freecodecamp.org')) {
-      return 'freeCodeCamp Resource';
-    } else if (domain.includes('mozilla.org')) {
-      return 'Mozilla Developer Network';
-    } else if (domain.includes('web.dev')) {
-      return 'Web.dev Article';
-    } else {
-      const tld = domainParts[domainParts.length - 1];
-      if (tld === 'org') {
-        return `${mainDomain} Organization`;
-      } else if (tld === 'edu') {
-        return `${mainDomain} Educational Resource`;
-      } else if (tld === 'gov') {
-        return `${mainDomain} Government Resource`;
-      } else if (tld === 'io') {
-        return `${mainDomain} Platform`;
-      } else if (tld === 'app') {
-        return `${mainDomain} Application`;
-      } else if (tld === 'dev') {
-        return `${mainDomain} Developer Resource`;
-      } else {
-        return `${mainDomain} Website`;
-      }
-    }
-  }
-
-  private async categorizeCompetitor(name: string): Promise<string> {
-    const existingCompetitor = await storage.getCompetitorByName(name);
-    if (existingCompetitor?.category) {
-      return existingCompetitor.category;
-    }
-
-    try {
-      console.log(`[${new Date().toISOString()}] Categorizing competitor: ${name}`);
-      const { chatCompletion } = await import("./llm");
-      const response = await chatCompletion({
-        model: "gpt-5.4-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Categorize this company/product. Return only the category name as a single word or short phrase (e.g. "Technology", "Cloud Platform", "Networking", etc.). No explanation.`
-          },
-          {
-            role: "user",
-            content: `Brand: ${this.brandName || 'Unknown'}\nCompetitor: ${name}\nCategory?`
-          }
-        ],
-        temperature: 0.1,
-        max_completion_tokens: 32
-      }, { timeoutMs: 15000 });
-
-      const category = response.choices[0].message.content?.trim() || 'Technology';
-      console.log(`[${new Date().toISOString()}] Categorized ${name} as: ${category}`);
-      return category;
-    } catch (error) {
-      console.error(`Error categorizing competitor ${name}:`, error);
-      return 'Technology';
-    }
-  }
 
   async generateAnalytics(): Promise<Analytics> {
     const responses = await storage.getResponsesWithPrompts();

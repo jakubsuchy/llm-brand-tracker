@@ -30,10 +30,10 @@ const getCompetitorColor = (index: number) => {
   return colors[index % colors.length];
 };
 
-export default function CompetitorAnalysis({ runId, provider }: { runId?: string; provider?: string }) {
+export default function CompetitorAnalysis({ runId, model }: { runId?: string; model?: string }) {
   const compParams = new URLSearchParams();
   if (runId) compParams.set('runId', runId);
-  if (provider) compParams.set('provider', provider);
+  if (model) compParams.set('model', model);
   const compParamStr = compParams.toString() ? `?${compParams.toString()}` : '';
 
   const { data: competitors, isLoading, error } = useQuery<CompetitorAnalysis[]>({

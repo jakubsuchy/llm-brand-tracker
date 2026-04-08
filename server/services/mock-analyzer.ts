@@ -128,7 +128,6 @@ export class MockBrandAnalyzer {
                 source = await storage.createSource({
                   domain,
                   url,
-                  title: `Resource from ${domain}`,
                   citationCount: 0
                 });
               }

@@ -22,11 +22,11 @@ const topicColors = [
   { bg: "bg-green-500", ring: "ring-green-200" },
 ];
 
-export default function TopicAnalysis({ runId, provider }: { runId?: string; provider?: string }) {
+export default function TopicAnalysis({ runId, model }: { runId?: string; model?: string }) {
   const [showAll, setShowAll] = useState(false);
   const topicParams = new URLSearchParams();
   if (runId) topicParams.set('runId', runId);
-  if (provider) topicParams.set('provider', provider);
+  if (model) topicParams.set('model', model);
   const topicParamStr = topicParams.toString() ? `?${topicParams.toString()}` : '';
   const { data: topics, isLoading, error } = useQuery<TopicAnalysis[]>({
     queryKey: [`/api/topics/analysis${topicParamStr}`],
