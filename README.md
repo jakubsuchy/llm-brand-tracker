@@ -1,6 +1,13 @@
 # LLM Brand Tracker
 
-Track how your brand is mentioned across ChatGPT, Perplexity, Google Gemini, and other LLM providers. Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't.
+Track how your brand is mentioned across LLMs.
+
+Currently supported models:
+- ChatGPT
+- Perplexity
+- Google Gemini
+
+Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't. All prompts run directly against the LLM model browser chat interfaces, so it models exactly what users ask.
 
 ## What it does
 
@@ -10,6 +17,14 @@ Track how your brand is mentioned across ChatGPT, Perplexity, Google Gemini, and
 4. **Track results** — brand mention rate, competitor analysis, source citations, topic breakdowns
 5. **Compare providers** — see which LLM mentions your brand most, which competitors dominate where
 6. **Find gaps** — identify prompts where your brand should be mentioned but isn't
+
+## Requirements
+
+1) Docker 
+
+2) OpenAI API key to process analysis itself, analyze competitors, etc.
+
+3) A way to gather responses. You can either use a local container, which is completely free, but runs the risk of being blocked, or sign up for [Apify](https://apify.com/?fpr=1lkb9a) (you get free credits after sign up) and use an automated browser actor
 
 ## Quick start
 
