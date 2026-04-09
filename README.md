@@ -20,11 +20,7 @@ docker compose up -d
 
 Open `http://localhost:3000`. Create an admin account, then configure your OpenAI API key and brand details in the setup wizard. Everything is configurable in the web UI — no `.env` file needed.
 
-### With local browser provider (free)
-
-```bash
-docker compose --profile browser up -d
-```
+The local browser container starts automatically alongside the app.
 
 ## Launch with Claude Code
 
@@ -53,11 +49,7 @@ Then ask questions like:
 You choose how browser-based prompts are executed:
 
 ### Local (free, ~1 prompt/min)
-Run a browser container alongside the app. One prompt at a time. May get blocked by anti-bot protections.
-
-```bash
-docker compose --profile browser up -d
-```
+Included by default — the browser container starts with `docker compose up -d`. One prompt at a time. May get blocked by anti-bot protections.
 
 ### Apify Cloud (~$0.05/prompt, ~15 prompts/min)
 Use [Apify](https://apify.com/?fpr=1lkb9a) for parallel execution with residential proxies. No anti-bot issues. Set your Apify token in Settings → Credentials.

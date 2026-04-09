@@ -18,7 +18,6 @@ services:
 
   browser-actor:
     image: ghcr.io/jakubsuchy/llm-prompt-fetch-local:latest
-    profiles: ["browser"]
     restart: unless-stopped
     ports:
       - "5900:5900"

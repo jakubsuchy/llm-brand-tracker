@@ -390,7 +390,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else {
       console.log('[STARTUP] Browser actor not available — browser models disabled, API-only mode');
       if (!process.env.APIFY_TOKEN) {
-        console.log('[STARTUP] To enable browser models: set APIFY_TOKEN or start with --profile browser');
+        console.log('[STARTUP] To enable browser models: set APIFY_TOKEN or ensure browser-actor container is running');
       }
     }
   } catch (error) {

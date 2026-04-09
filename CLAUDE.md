@@ -23,7 +23,7 @@ npm run build                        # Vite build + esbuild server bundle
 npm run start                        # Production server (node dist/index.js)
 npm run db:push                      # Push schema to DB (drizzle-kit push)
 docker compose up --build            # Build and run with postgres
-docker compose --profile browser up  # Include local browser container
+docker compose up                    # Includes local browser container
 docker compose down -v               # Wipe DB and stop
 ```
 

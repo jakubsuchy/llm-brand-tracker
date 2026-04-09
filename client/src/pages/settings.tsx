@@ -541,7 +541,7 @@ const ApifyTokenCard = forwardRef<ApifyTokenCardRef>(function ApifyTokenCard(_pr
             </div>
             {!browserStatus?.localContainerUp && (
               <p className="text-xs text-gray-400 mt-2">
-                Start with: <code className="bg-gray-100 px-1 rounded">docker compose --profile browser up -d</code>
+                Start with: <code className="bg-gray-100 px-1 rounded">docker compose up -d</code>
               </p>
             )}
           </div>
