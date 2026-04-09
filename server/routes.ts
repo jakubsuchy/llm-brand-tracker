@@ -447,6 +447,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Per-model brand mention rates
+  // Brand Visibility Score — average per-model mention rate across runs from last 2 weeks
+  app.get("/api/metrics/visibility-score", async (req, res) => {
+    try {
+      const runs = await storage.getAnalysisRuns();
+      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+      const recentRuns = runs.filter(r =>
+        r.status === 'complete' && r.startedAt && new Date(r.startedAt) >= twoWeeksAgo
+      );
+
+      if (recentRuns.length === 0) {
+        return res.json({ score: 0, runCount: 0, modelCount: 0 });
+      }
+
+      // For each run, compute per-model rates, then average them
+      const runScores: number[] = [];
+      const allModels = new Set<string>();
+      for (const run of recentRuns) {
+        const responses = await storage.getResponsesWithPrompts(run.id);
+        const modelMap = new Map<string, Map<string, boolean>>();
+        for (const r of responses) {
+          const mdl = r.model || 'unknown';
+          allModels.add(mdl);
+          if (!modelMap.has(mdl)) modelMap.set(mdl, new Map());
+          const promptMap = modelMap.get(mdl)!;
+          const key = r.prompt?.text?.toLowerCase().trim() || '';
+          if (!promptMap.has(key)) promptMap.set(key, false);
+          if (r.brandMentioned) promptMap.set(key, true);
+        }
+        const rates = [...modelMap.values()].map(pm => {
+          const total = pm.size;
+          const mentioned = [...pm.values()].filter(Boolean).length;
+          return total > 0 ? (mentioned / total) * 100 : 0;
+        });
+        if (rates.length > 0) {
+          runScores.push(rates.reduce((a, b) => a + b, 0) / rates.length);
+        }
+      }
+
+      const score = runScores.length > 0
+        ? runScores.reduce((a, b) => a + b, 0) / runScores.length
+        : 0;
+
+      res.json({
+        score: Math.round(score * 10) / 10,
+        runCount: recentRuns.length,
+        modelCount: allModels.size,
+      });
+    } catch (error) {
+      console.error("Error computing visibility score:", error);
+      res.status(500).json({ error: "Failed to compute visibility score" });
+    }
+  });
+
   app.get("/api/metrics/by-model", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;

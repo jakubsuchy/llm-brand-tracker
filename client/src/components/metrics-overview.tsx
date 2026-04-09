@@ -59,6 +59,10 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     enabled: !model, // only fetch when viewing all models
   });
 
+  const { data: visibilityData } = useQuery<{ score: number; runCount: number; modelCount: number }>({
+    queryKey: ['/api/metrics/visibility-score'],
+  });
+
   // Fetch all runs to find the previous one
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
@@ -92,6 +96,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     enabled: !!prevRunId,
   });
 
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -118,9 +123,11 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     );
   }
 
-  // metrics.totalPrompts = number of responses (the denominator for mention rate)
   const totalResponses = metrics?.totalPrompts || 0;
   const brandMentions = counts?.brandMentions || Math.round((metrics?.brandMentionRate || 0) / 100 * totalResponses);
+
+  // Brand Visibility Score from server (avg per-model rate across last 2 weeks of runs)
+  const visibilityScore = visibilityData?.score ?? (metrics?.brandMentionRate || 0);
 
   const topCompetitorData = competitorAnalysis?.find((comp: CompetitorAnalysis) => comp.name === metrics?.topCompetitor);
   const competitorMentionRate = topCompetitorData?.mentionRate || 0;
@@ -158,13 +165,13 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-      {/* Brand Mentions */}
+      {/* Brand Visibility Score */}
       <Card className="bg-white border-slate-200">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-600">Brand Mentions</p>
-              <p className="text-2xl font-semibold text-slate-900 mt-1">{brandMentions}/{totalResponses}</p>
+              <p className="text-sm font-medium text-slate-600">Brand Visibility Score</p>
+              <p className="text-2xl font-semibold text-slate-900 mt-1">{visibilityScore.toFixed(1)}%</p>
             </div>
             <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
               <Megaphone className="w-5 h-5 text-indigo-600" />
@@ -172,9 +179,8 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
           </div>
           <div className="flex items-center justify-between mt-4">
             <span className="text-sm font-medium text-slate-600">
-              {(metrics?.brandMentionRate || 0).toFixed(1)}% mention rate
+              avg across {visibilityData?.runCount || 1} run{(visibilityData?.runCount || 1) !== 1 ? 's' : ''}, {visibilityData?.modelCount || 1} model{(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}
             </span>
-            <TrendIndicator delta={brandDelta} />
           </div>
         </CardContent>
       </Card>
