@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { ChevronDown, ChevronUp, CheckCircle, XCircle, Scale, ExternalLink } from "lucide-react";
-import { ResponseFilters, type ResponseFilterValues } from "@/components/response-filters";
+import { ResponseFilters, RunSelector, type ResponseFilterValues } from "@/components/response-filters";
 import type { CompetitorAnalysis, ResponseWithPrompt, Topic, MergeHistoryEntry } from "@shared/schema";
 
 interface AnalysisRun {
@@ -184,20 +184,7 @@ export default function ComparePage() {
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Compare</h1>
           <p className="text-gray-600 mt-1">Compare your brand mentions against a competitor</p>
         </div>
-        <Select value={selectedRun} onValueChange={updateRun}>
-          <SelectTrigger className="w-full sm:w-56">
-            <SelectValue placeholder="Filter by run" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Runs</SelectItem>
-            {analysisRuns?.map(run => (
-              <SelectItem key={run.id} value={run.id.toString()}>
-                {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                {run.brandName ? ` \u2014 ${run.brandName}` : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <RunSelector value={selectedRun} onChange={updateRun} />
       </div>
 
       {/* Competitor selector */}

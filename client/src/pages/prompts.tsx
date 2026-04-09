@@ -3,19 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle, XCircle, Search } from "lucide-react";
-import type { ResponseWithPrompt, Topic } from "@shared/schema";
-
-interface AnalysisRun {
-  id: number;
-  startedAt: string;
-  status: string;
-  brandName: string | null;
-  responseCount: number;
-}
+import { CheckCircle, XCircle } from "lucide-react";
+import { ResponseFilters, RunSelector, type ResponseFilterValues } from "@/components/response-filters";
+import type { ResponseWithPrompt } from "@shared/schema";
 
 type FilterType = 'all' | 'mentioned' | 'not-mentioned';
 const PAGE_SIZE = 20;
@@ -27,19 +18,12 @@ export default function PromptResultsPage() {
   const urlPromptId = params.get('promptId');
 
   const [filter, setFilter] = useState<FilterType>('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTopic, setSelectedTopic] = useState<string>('all');
-  const [selectedModel, setSelectedModel] = useState<string>('all');
-  const [selectedRun, setSelectedRun] = useState<string>(urlRunId || 'all');
+  const [filters, setFilters] = useState<ResponseFilterValues>({ search: '', run: urlRunId || 'all', topic: 'all', model: 'all' });
   const [expandedPrompt, setExpandedPrompt] = useState<number | null>(urlPromptId ? parseInt(urlPromptId) : null);
   const [page, setPage] = useState(0);
   const [didAutoScroll, setDidAutoScroll] = useState(false);
 
-  const { data: analysisRuns } = useQuery<AnalysisRun[]>({
-    queryKey: ['/api/analysis/runs'],
-  });
-
-  const runParam = selectedRun !== 'all' ? `&runId=${selectedRun}` : '';
+  const runParam = filters.run !== 'all' ? `&runId=${filters.run}` : '';
   const { data: responses, isLoading } = useQuery<ResponseWithPrompt[]>({
     queryKey: [`/api/responses?limit=1000&full=true${runParam}`],
   });
@@ -59,27 +43,18 @@ export default function PromptResultsPage() {
     }
   }, [responses, urlPromptId, didAutoScroll]);
 
-  const { data: topics } = useQuery<Topic[]>({
-    queryKey: ['/api/topics'],
-  });
-
   const allPrompts = responses || [];
   const mentionedCount = allPrompts.filter(p => p.brandMentioned).length;
   const notMentionedCount = allPrompts.filter(p => !p.brandMentioned).length;
 
-  // Get unique models for filter
-  const models = [...new Set(allPrompts.map(p => p.model).filter(Boolean))];
-
   const filteredPrompts = allPrompts.filter(prompt => {
     if (filter === 'mentioned' && !prompt.brandMentioned) return false;
     if (filter === 'not-mentioned' && prompt.brandMentioned) return false;
-    if (selectedTopic !== 'all' && prompt.prompt.topicId !== parseInt(selectedTopic)) return false;
-    if (selectedModel !== 'all' && prompt.model !== selectedModel) return false;
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase();
-      const matchesPrompt = prompt.prompt.text.toLowerCase().includes(q);
-      const matchesResponse = prompt.text.toLowerCase().includes(q);
-      if (!matchesPrompt && !matchesResponse) return false;
+    if (filters.topic !== 'all' && prompt.prompt.topicId !== parseInt(filters.topic)) return false;
+    if (filters.model !== 'all' && prompt.model !== filters.model) return false;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      if (!prompt.prompt.text.toLowerCase().includes(q) && !prompt.text.toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -89,12 +64,8 @@ export default function PromptResultsPage() {
   const totalPages = Math.ceil(filteredPrompts.length / PAGE_SIZE);
   const paginatedPrompts = filteredPrompts.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  // Reset page when filters change
   const updateFilter = (f: FilterType) => { setFilter(f); setPage(0); };
-  const updateTopic = (t: string) => { setSelectedTopic(t); setPage(0); };
-  const updateSearch = (s: string) => { setSearchTerm(s); setPage(0); };
-  const updateRun = (r: string) => { setSelectedRun(r); setPage(0); };
-  const updateModel = (p: string) => { setSelectedModel(p); setPage(0); };
+  const updateFilters = (f: ResponseFilterValues) => { setFilters(f); setPage(0); };
 
   const getTopicName = (topicId: number | null) => {
     if (!topicId) return 'General';
@@ -136,20 +107,7 @@ export default function PromptResultsPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Prompt Results</h1>
             <p className="text-gray-600 mt-1">Results from prompts where your brand should be mentioned</p>
           </div>
-          <Select value={selectedRun} onValueChange={updateRun}>
-            <SelectTrigger className="w-full sm:w-56">
-              <SelectValue placeholder="Filter by run" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Runs</SelectItem>
-              {analysisRuns?.map(run => (
-                <SelectItem key={run.id} value={run.id.toString()}>
-                  {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  {run.brandName ? ` — ${run.brandName}` : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <RunSelector value={filters.run} onChange={(r) => updateFilters({ ...filters, run: r })} />
         </div>
 
         {/* Filter Pills */}
@@ -178,43 +136,7 @@ export default function PromptResultsPage() {
         </div>
 
         {/* Controls */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Search prompts and responses..."
-              value={searchTerm}
-              onChange={(e) => updateSearch(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <div className="flex gap-2 sm:gap-4">
-            <Select value={selectedTopic} onValueChange={updateTopic}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Filter by topic" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Topics</SelectItem>
-                {topics?.map(topic => (
-                  <SelectItem key={topic.id} value={topic.id.toString()}>
-                    {topic.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedModel} onValueChange={updateModel}>
-              <SelectTrigger className="w-full sm:w-40">
-                <SelectValue placeholder="Model" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Models</SelectItem>
-                {models.map(p => (
-                  <SelectItem key={p} value={p!}>{p}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+        <ResponseFilters values={filters} onChange={updateFilters} />
       </div>
 
       {/* Mobile card view */}
