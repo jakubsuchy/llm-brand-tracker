@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, ChevronDown, ChevronUp, Merge, X, ShieldX } from "lucide-react";
+import { Building2, Merge, X, ShieldX, Scale } from "lucide-react";
 import type { CompetitorAnalysis, MergeSuggestion, MergeHistoryEntry } from "@shared/schema";
 
 interface AnalysisRun {
@@ -26,14 +26,10 @@ export default function CompetitorsPage() {
   const searchString = useSearch();
   const params = new URLSearchParams(searchString);
   const urlRunId = params.get('runId');
-  const urlCompetitor = params.get('competitor');
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [expandedCompetitor, setExpandedCompetitor] = useState<string | null>(urlCompetitor);
-  const [expandedResponses, setExpandedResponses] = useState<Set<number>>(new Set());
   const [selectedRun, setSelectedRun] = useState<string>(urlRunId || 'all');
-  const [didAutoScroll, setDidAutoScroll] = useState(false);
 
   // Merge mode state
   const [mergeMode, setMergeMode] = useState(false);
@@ -42,26 +38,13 @@ export default function CompetitorsPage() {
   const [primaryId, setPrimaryId] = useState<number | null>(null);
   const [merging, setMerging] = useState(false);
 
-  const toggleResponse = useCallback((id: number) => {
-    setExpandedResponses(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
-
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
   });
 
   const runParam = selectedRun !== 'all' ? `?runId=${selectedRun}` : '';
-  const runAmpParam = selectedRun !== 'all' ? `&runId=${selectedRun}` : '';
   const { data: competitors, isLoading } = useQuery<CompetitorAnalysis[]>({
     queryKey: [`/api/competitors/analysis${runParam}`],
-  });
-
-  const { data: responses } = useQuery<any[]>({
-    queryKey: [`/api/responses?limit=1000&full=true${runAmpParam}`],
   });
 
   const { data: mergeSuggestions } = useQuery<MergeSuggestion[]>({
@@ -73,16 +56,6 @@ export default function CompetitorsPage() {
     queryKey: ['/api/competitors/merge-history'],
   });
 
-  // Auto-scroll to linked competitor
-  useEffect(() => {
-    if (didAutoScroll || !urlCompetitor || !competitors) return;
-    setDidAutoScroll(true);
-    setTimeout(() => {
-      document.getElementById(`competitor-${urlCompetitor}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
-  }, [competitors, urlCompetitor, didAutoScroll]);
-
-  const totalResponses = responses?.length || 0;
 
   // Build merged-names map from merge history
   const mergedNamesMap = new Map<number, { id: number; name: string }[]>();
@@ -94,25 +67,13 @@ export default function CompetitorsPage() {
     }
   }
 
-  const competitorsWithPromptPercentage = competitors?.map(competitor => {
-    // Include merged names when matching responses
-    const allNames = new Set([competitor.name.toLowerCase()]);
-    const merged = mergedNamesMap.get(competitor.competitorId);
-    if (merged) merged.forEach(m => allNames.add(m.name.toLowerCase()));
-
-    const matchingResponses = responses?.filter(response =>
-      response.competitorsMentioned?.some((c: string) => allNames.has(c.toLowerCase()))
-    ) || [];
-
-    return {
-      ...competitor,
-      promptPercentage: competitor.mentionRate,
-      promptsAppeared: competitor.mentionCount,
-      totalPrompts: totalResponses,
-      matchingResponses,
-      mergedNames: mergedNamesMap.get(competitor.competitorId) || [],
-    };
-  }) || [];
+  // Server already returns unique prompt counts — just add UI data
+  const competitorsWithPromptPercentage = competitors?.map(competitor => ({
+    ...competitor,
+    promptPercentage: competitor.mentionRate,
+    promptsAppeared: competitor.mentionCount,
+    mergedNames: mergedNamesMap.get(competitor.competitorId) || [],
+  })) || [];
 
   const toggleMergeSelection = (id: number) => {
     setSelectedForMerge(prev => {
@@ -325,8 +286,8 @@ export default function CompetitorsPage() {
               key={competitor.competitorId}
               id={`competitor-${competitor.name}`}
               className={`hover:shadow-md transition-shadow ${
-                expandedCompetitor === competitor.name && urlCompetitor ? 'ring-2 ring-blue-300' : ''
-              } ${mergeMode && selectedForMerge.has(competitor.competitorId) ? 'ring-2 ring-purple-400 bg-purple-50/30' : ''}`}
+                mergeMode && selectedForMerge.has(competitor.competitorId) ? 'ring-2 ring-purple-400 bg-purple-50/30' : ''
+              }`}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -379,8 +340,8 @@ export default function CompetitorsPage() {
                 <div className="space-y-4">
                   <div>
                     <div className="flex justify-between text-sm mb-1">
-                      <span>Prompt appearances</span>
-                      <span className="font-medium">{competitor.promptsAppeared}/{competitor.totalPrompts} prompts</span>
+                      <span>Unique prompts mentioned</span>
+                      <span className="font-medium">{competitor.promptsAppeared} prompts</span>
                     </div>
                     <Progress
                       value={competitor.promptPercentage}
@@ -407,43 +368,13 @@ export default function CompetitorsPage() {
                     </div>
                   </div>
 
-                  {!mergeMode && competitor.matchingResponses.length > 0 && (
-                    <button
-                      onClick={() => setExpandedCompetitor(
-                        expandedCompetitor === competitor.name ? null : competitor.name
-                      )}
+                  {!mergeMode && (
+                    <a
+                      href={`/compare?competitor=${competitor.competitorId}`}
                       className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 pt-2 border-t w-full"
                     >
-                      {expandedCompetitor === competitor.name ? (
-                        <><ChevronUp className="h-3 w-3" /> Hide prompts</>
-                      ) : (
-                        <><ChevronDown className="h-3 w-3" /> Show {competitor.matchingResponses.length} prompt{competitor.matchingResponses.length !== 1 ? 's' : ''}</>
-                      )}
-                    </button>
-                  )}
-
-                  {!mergeMode && expandedCompetitor === competitor.name && (
-                    <div className="space-y-2 pt-1">
-                      {competitor.matchingResponses.map((response: any) => {
-                        const isExpanded = expandedResponses.has(response.id);
-                        return (
-                          <div key={response.id} className="text-xs p-2 bg-gray-50 rounded border">
-                            <div className="font-medium text-gray-700 mb-1">
-                              {response.prompt?.text || `Prompt #${response.promptId}`}
-                            </div>
-                            <div className="text-gray-500 whitespace-pre-wrap">
-                              {isExpanded ? response.text : `${response.text?.substring(0, 200)}...`}
-                            </div>
-                            <button
-                              onClick={() => toggleResponse(response.id)}
-                              className="text-blue-600 hover:text-blue-800 mt-1"
-                            >
-                              {isExpanded ? 'Show less' : 'Show full response'}
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                      <Scale className="h-3 w-3" /> Compare & Show details
+                    </a>
                   )}
 
                   {!mergeMode && (

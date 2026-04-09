@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearch, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { ChevronDown, ChevronUp, CheckCircle, XCircle, Scale, ExternalLink } from "lucide-react";
+import { ResponseFilters, type ResponseFilterValues } from "@/components/response-filters";
 import type { CompetitorAnalysis, ResponseWithPrompt, Topic, MergeHistoryEntry } from "@shared/schema";
 
 interface AnalysisRun {
@@ -20,10 +22,26 @@ interface AnalysisRun {
 const PAGE_SIZE = 20;
 
 export default function ComparePage() {
-  const [selectedCompetitor, setSelectedCompetitor] = useState<string>('');
-  const [selectedRun, setSelectedRun] = useState<string>('all');
+  const searchString = useSearch();
+  const [, setLocation] = useLocation();
+  const urlParams = new URLSearchParams(searchString);
+  const urlCompetitor = urlParams.get('competitor') || '';
+  const urlRun = urlParams.get('runId') || 'all';
+
+  const [selectedCompetitor, setSelectedCompetitor] = useState<string>(urlCompetitor);
+  const [selectedRun, setSelectedRun] = useState<string>(urlRun);
   const [expandedPrompt, setExpandedPrompt] = useState<number | null>(null);
   const [page, setPage] = useState(0);
+  const [filters, setFilters] = useState<ResponseFilterValues>({ search: '', run: 'all', topic: 'all', model: 'all' });
+
+  // Sync selection to URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedCompetitor) params.set('competitor', selectedCompetitor);
+    if (selectedRun !== 'all') params.set('runId', selectedRun);
+    const qs = params.toString();
+    setLocation(`/compare${qs ? `?${qs}` : ''}`, { replace: true });
+  }, [selectedCompetitor, selectedRun, setLocation]);
 
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
@@ -71,10 +89,17 @@ export default function ComparePage() {
   const isCompMentioned = (r: ResponseWithPrompt) =>
     r.competitorsMentioned?.some((c: string) => competitorNames.has(c.toLowerCase())) || false;
 
-  // Responses where either brand or competitor is mentioned
+  // Responses where either brand or competitor is mentioned, with filters applied
   const relevantResponses = responses?.filter(r => {
     if (!competitor) return false;
-    return !!r.brandMentioned || isCompMentioned(r);
+    if (!r.brandMentioned && !isCompMentioned(r)) return false;
+    if (filters.topic !== 'all' && r.prompt?.topicId !== parseInt(filters.topic)) return false;
+    if (filters.model !== 'all' && r.model !== filters.model) return false;
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      if (!r.prompt.text.toLowerCase().includes(q) && !r.text.toLowerCase().includes(q)) return false;
+    }
+    return true;
   }) || [];
 
   const sortedResponses = [...relevantResponses].sort((a, b) =>
@@ -83,6 +108,8 @@ export default function ComparePage() {
 
   const totalPages = Math.ceil(sortedResponses.length / PAGE_SIZE);
   const paginatedResponses = sortedResponses.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const updateFilters = (f: ResponseFilterValues) => { setFilters(f); setPage(0); };
 
   const getTopicName = (topicId: number | null) => {
     if (!topicId) return 'General';
@@ -375,6 +402,9 @@ export default function ComparePage() {
             <h2 className="text-lg font-semibold mb-3">
               Prompts mentioning either ({sortedResponses.length})
             </h2>
+            <div className="mb-4">
+              <ResponseFilters values={filters} onChange={updateFilters} />
+            </div>
 
             {/* Mobile card view */}
             <div className="md:hidden space-y-3">

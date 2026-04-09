@@ -36,7 +36,8 @@ server/mcp.ts               # MCP server with 16 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
 server/services/settings.ts # DB-stored settings (override env vars)
-server/services/openai.ts   # GPT-4 calls: prompt generation, response analysis
+server/services/analysis.ts # Generic analysis utilities (brand detection, URL extraction, similarity)
+server/services/openai.ts   # OpenAI-specific LLM calls: prompt generation, competitor extraction
 server/services/chatgpt-browser.ts  # Browser actor client (local + Apify Cloud)
 server/config.ts            # Public API paths config
 server/database-storage.ts  # All DB queries (implements IStorage interface)
@@ -52,12 +53,12 @@ browser-actor/              # Apify actor for browser-based prompt execution (gi
 All tables defined in `shared/schema.ts`. Key tables:
 
 ```
-topics → prompts → responses (with provider, brand_mentioned, competitors_mentioned[])
+topics → prompts → responses (with model, brand_mentioned, competitors_mentioned[])
                  → competitor_mentions (junction: competitor × response × run)
 competitors (name, name_key UNIQUE, domain, category, merged_into)
-sources → source_urls (per-run, per-provider)
+sources → source_urls (per-run, per-model)
 analysis_runs (status, brand_name, total_prompts, completed_prompts)
-job_queue (prompt_text, provider, status, attempts, original_job_id for retry chains)
+job_queue (prompt_text, model, status, attempts, original_job_id for retry chains)
 users (email, full_name, hashed_password, salt, google_id, api_key)
 roles → user_roles (user × role mapping)
 app_settings (key-value store for all config)
@@ -67,11 +68,11 @@ api_usage (OpenAI token tracking)
 
 ## Critical Design Decisions
 
-### Multi-provider analysis
-- Prompts are sent to multiple LLM providers (Perplexity, ChatGPT, Gemini)
-- Provider config stored in DB (`app_settings` key `providersConfig`), manageable via Settings → Providers
-- Each (prompt, provider) pair is a separate job in the queue
-- Browser providers run via local container or Apify Cloud (configurable per-deployment)
+### Multi-model analysis
+- Prompts are sent to multiple LLM models (Perplexity, ChatGPT, Gemini)
+- Model config stored in DB (`app_settings` key `modelsConfig`), manageable via Settings → Models
+- Each (prompt, model) pair is a separate job in the queue
+- Browser models run via local container or Apify Cloud (configurable per-deployment)
 
 ### Job queue
 - PostgreSQL-based with `SELECT FOR UPDATE SKIP LOCKED` for dequeuing
@@ -82,9 +83,16 @@ api_usage (OpenAI token tracking)
 - Stall recovery runs every 2 minutes during analysis
 
 ### Brand detection
-- Brand name extracted from URL domain, stored in `app_settings`
-- GPT-4 told the brand name to distinguish "brand mentioned" from "competitor"
-- Metrics use unique prompt counting (not raw response count across providers/runs)
+- Brand name matched via regex (`isBrandMentioned` in `server/services/analysis.ts`) — no LLM needed
+- Metrics use unique prompt counting (not raw response count across models/runs)
+
+### Unique prompt counting — CRITICAL
+- Each prompt is sent to multiple models (Perplexity, ChatGPT, Gemini), producing multiple responses
+- ALL metrics, percentages, and counts MUST use unique prompts (deduplicated by `prompt.text.toLowerCase().trim()`)
+- NEVER show raw response counts to users — always deduplicate first
+- **"X of Y prompts"**: Y = total unique prompts. X = unique prompts where the condition is true in ANY response (across all models). A prompt "mentions brand" if at least one model's response mentioned it.
+- The server endpoints (`/api/metrics`, `/api/competitors/analysis`) already return unique prompt counts
+- Client pages should use the server's numbers, NOT count `responses.length` directly
 
 ### Prompts must be brand-neutral
 - Prompts must NEVER contain brand or competitor names
@@ -134,6 +142,7 @@ Integrated at `/mcp` inside the Express app (not a separate process). Uses `@mod
 - **Duplicate routes**: Express uses first match. Never register the same path twice.
 - **localStorage**: Fully removed. All state from DB. Don't reintroduce.
 - **sed on macOS**: `sed -i ''` can corrupt files silently. Prefer the Edit tool.
+- **Duplicated filter UI**: Response filter bars (search, run, topic, model dropdowns) appear on multiple pages. Use the shared `ResponseFilters` component from `client/src/components/response-filters.tsx` — don't clone filter code.
 
 ## Environment Variables
 

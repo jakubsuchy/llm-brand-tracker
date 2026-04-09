@@ -1,51 +1,46 @@
+/**
+ * OpenAI-specific LLM calls: competitor extraction, prompt generation,
+ * topic generation, brand analysis. All prompts live here.
+ *
+ * Generic analysis logic (brand detection, URL extraction, similarity)
+ * lives in ./analysis.ts.
+ */
 import { chatCompletion, chatCompletionJSON, extractArray } from "./llm";
 import { fetchWebsiteText } from "./scraper";
+import {
+  type PromptAnalysisResult,
+  analyzePromptResponse as runAnalysis,
+  deduplicateCompetitors,
+} from "./analysis";
 
-export interface PromptAnalysisResult {
-  response: string;
-  brandMentioned: boolean;
-  competitors: string[];
-  sources: string[];
-  model: string;
-}
+// Re-export the interface so existing imports still work
+export type { PromptAnalysisResult } from "./analysis";
 
-export async function analyzePromptResponse(
-  prompt: string,
+/**
+ * Extract competitor names from response text using OpenAI.
+ */
+export async function extractCompetitorsFromResponse(
+  responseText: string,
   brandName?: string,
   knownCompetitors?: string[],
-  model: string = 'chatgpt',
-  context?: { analysisRunId?: number; jobId?: number },
-): Promise<PromptAnalysisResult> {
-  const startTime = Date.now();
+): Promise<string[]> {
+  const brandContext = brandName
+    ? `\nOUR BRAND: "${brandName}" — do NOT include this brand or its variations as a competitor.`
+    : '';
+  const competitorContext = knownCompetitors && knownCompetitors.length > 0
+    ? `\nKNOWN COMPETITORS: ${knownCompetitors.join(', ')} — these are confirmed competitors.`
+    : '';
 
-  console.log(`[analyzePromptResponse] Model: ${model} | Prompt: "${prompt.substring(0, 80)}..."`);
-
-  const { responseText, sources } = await getResponseViaBrowser(prompt, model, context);
-
-  console.log(`[analyzePromptResponse] ${model} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
-
-  // Step 2a: Brand detection — regex match (no LLM needed)
-  const brandMentioned = brandName ? isBrandMentioned(responseText, brandName) : false;
-
-  // Step 2b: Competitor extraction via LLM
-  try {
-    const brandContext = brandName
-      ? `\nOUR BRAND: "${brandName}" — do NOT include this brand or its variations as a competitor.`
-      : '';
-    const competitorContext = knownCompetitors && knownCompetitors.length > 0
-      ? `\nKNOWN COMPETITORS: ${knownCompetitors.join(', ')} — these are confirmed competitors.`
-      : '';
-
-    const analysis = await chatCompletionJSON<{ competitors: string[] }>({
-      model: "gpt-5.4-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You extract competitor mentions from text. Respond only with valid JSON.",
-        },
-        {
-          role: "user",
-          content: `Extract competitor mentions from this AI response.
+  const analysis = await chatCompletionJSON<{ competitors: string[] }>({
+    model: "gpt-5.4-mini",
+    messages: [
+      {
+        role: "system",
+        content: "You extract competitor mentions from text. Respond only with valid JSON.",
+      },
+      {
+        role: "user",
+        content: `Extract competitor mentions from this AI response.
 
 Response to analyze: "${responseText}"
 ${brandContext}${competitorContext}
@@ -61,62 +56,25 @@ Rules:
 - For cloud providers, prefer their specific product name if mentioned (e.g. "AWS Elastic Load Balancing" over just "AWS"), but include the cloud provider name if no specific product is named
 - IMPORTANT: If a competitor matches one already in the known competitors list, use the EXACT full name from that list
 - Do NOT include URLs in this response`,
-        },
-      ],
-      max_completion_tokens: 512,
-    });
+      },
+    ],
+    max_completion_tokens: 512,
+  });
 
-    return {
-      response: responseText,
-      brandMentioned,
-      competitors: analysis.competitors || [],
-      sources,
-      model: model,
-    };
-  } catch (error) {
-    console.error("Error analyzing prompt response:", error);
-    throw new Error("Failed to analyze prompt response: " + (error as Error).message);
-  }
+  return analysis.competitors || [];
 }
 
 /**
- * Check if a brand name appears in text via regex.
- * Strips markdown formatting, then matches with word boundaries
- * and an optional trailing dot+TLD (e.g. "Acme.com", "Acme.io").
+ * Full analysis pipeline: get response → detect brand → extract competitors (via OpenAI).
  */
-function isBrandMentioned(text: string, brandName: string): boolean {
-  const clean = text.replace(/\*{1,2}|`/g, '');
-  const escaped = brandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`\\b${escaped}(?:\\.[a-z]{2,})?\\b`, 'i');
-  return pattern.test(clean);
-}
-
-// --- Browser method: send to browser actor (local or Apify Cloud) ---
-
-async function getResponseViaBrowser(prompt: string, model: string, context?: { analysisRunId?: number; jobId?: number }): Promise<{ responseText: string; sources: string[] }> {
-  const { askBrowser } = await import('./chatgpt-browser');
-
-  const result = await askBrowser(prompt, model as any, context);
-
-  // Extract URLs from markdown links in the response text
-  const urlSources: string[] = [];
-  const urlPattern = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
-  let match;
-  while ((match = urlPattern.exec(result.answer)) !== null) {
-    urlSources.push(match[2]);
-  }
-  // Footnote-style links: [1]: https://...
-  const footnotePattern = /^\[(\d+)\]:\s*(https?:\/\/\S+)/gm;
-  while ((match = footnotePattern.exec(result.answer)) !== null) {
-    urlSources.push(match[2]);
-  }
-  // Also include sources from the sidebar extraction
-  const sidebarSources = result.sources.map(s => s.href).filter(Boolean);
-
-  return {
-    responseText: result.answer,
-    sources: [...new Set([...sidebarSources, ...urlSources])],
-  };
+export async function analyzePromptResponse(
+  prompt: string,
+  brandName?: string,
+  knownCompetitors?: string[],
+  model: string = 'chatgpt',
+  context?: { analysisRunId?: number; jobId?: number },
+): Promise<PromptAnalysisResult> {
+  return runAnalysis(prompt, brandName, knownCompetitors, model, context, extractCompetitorsFromResponse);
 }
 
 export async function generatePromptsForTopic(topicName: string, topicDescription: string, count: number = 5, competitors: string[] = []): Promise<string[]> {
@@ -177,18 +135,6 @@ Return a JSON object with a "prompts" key containing an array of strings.`
       `${topicName} alternatives and pricing`,
     ].slice(0, count);
   }
-}
-
-function calculateCompetitorSimilarity(competitor1: string, competitor2: string): number {
-  const text1 = competitor1.toLowerCase();
-  const text2 = competitor2.toLowerCase();
-  if (text1 === text2) return 100;
-  if (text1.includes(text2) || text2.includes(text1)) return 90;
-  const words1 = text1.split(/\s+/).filter(word => word.length > 2);
-  const words2 = text2.split(/\s+/).filter(word => word.length > 2);
-  const intersection = words1.filter(word => words2.includes(word));
-  const union = new Set([...words1, ...words2]);
-  return union.size > 0 ? (intersection.length / union.size) * 100 : 0;
 }
 
 export async function extractSourcesFromText(text: string): Promise<Array<{title: string; url: string; domain: string; snippet?: string}>> {
@@ -254,18 +200,7 @@ export async function extractCompetitorsFromText(text: string, brandName?: strin
     });
 
     const competitors = extractArray<string>(parsed).filter(item => typeof item === 'string');
-
-    // Apply diversity check
-    const diverseCompetitors: string[] = [];
-    for (const competitor of competitors) {
-      if (diverseCompetitors.length >= 10) break;
-      const isDiverse = diverseCompetitors.every(existing =>
-        calculateCompetitorSimilarity(competitor, existing) < 70
-      );
-      if (isDiverse) diverseCompetitors.push(competitor);
-    }
-
-    return diverseCompetitors;
+    return deduplicateCompetitors(competitors);
   } catch (error) {
     console.error("Error extracting competitors from text:", error);
     return [];
