@@ -873,7 +873,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
+      const topicId = req.query.topicId ? parseInt(req.query.topicId as string) : undefined;
       const allSources = await storage.getSources();
+
+      // If topic filter is set, find which domains are cited in responses for that topic
+      let topicDomains: Set<string> | null = null;
+      if (topicId) {
+        let responses = await storage.getResponsesWithPrompts(runId);
+        if (model) responses = responses.filter(r => r.model === model);
+        responses = responses.filter(r => r.prompt?.topicId === topicId);
+        topicDomains = new Set<string>();
+        for (const r of responses) {
+          if (r.sources) {
+            for (const s of r.sources) {
+              try { topicDomains.add(new URL(s).hostname.replace(/^www\./, '')); } catch {}
+            }
+          }
+          // Also check text for domain mentions
+          for (const src of allSources) {
+            if (r.text.toLowerCase().includes(src.domain.toLowerCase())) {
+              topicDomains.add(src.domain.toLowerCase());
+            }
+          }
+        }
+      }
 
       // Derive source type dynamically from brand name and competitor list
       // Include merged competitors so their domains still match for classification
@@ -922,6 +945,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const results = await Promise.all(allSources.map(async source => {
+        // Skip sources not matching topic filter
+        if (topicDomains && !topicDomains.has(source.domain.toLowerCase())) return null;
         const urls = await storage.getSourceUrlsBySourceId(source.id, runId, model);
         if (urls.length === 0) return null;
 

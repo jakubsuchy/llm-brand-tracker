@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
-import type { SourceAnalysis } from "@shared/schema";
+import type { SourceAnalysis, Topic } from "@shared/schema";
 
 interface AnalysisRun {
   id: number;
@@ -39,6 +39,8 @@ export default function SourcesPage() {
   const [showNeutral, setShowNeutral] = useState(true);
   const [domainSearch, setDomainSearch] = useState('');
   const [selectedRun, setSelectedRun] = useState<string>('all');
+  const [selectedTopic, setSelectedTopic] = useState<string>('all');
+  const [selectedModel, setSelectedModel] = useState<string>('all');
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [expandedView, setExpandedView] = useState<'prompts' | 'pages' | null>(null);
   const queryClient = useQueryClient();
@@ -71,9 +73,22 @@ export default function SourcesPage() {
     queryKey: ['/api/analysis/runs'],
   });
 
-  const runParam = selectedRun !== 'all' ? `?runId=${selectedRun}` : '';
+  const { data: topics } = useQuery<Topic[]>({
+    queryKey: ['/api/topics'],
+  });
+
+  const { data: modelsConfig } = useQuery<Record<string, { enabled: boolean; label?: string }>>({
+    queryKey: ['/api/settings/models'],
+  });
+
+  const params = new URLSearchParams();
+  if (selectedRun !== 'all') params.set('runId', selectedRun);
+  if (selectedModel !== 'all') params.set('model', selectedModel);
+  if (selectedTopic !== 'all') params.set('topicId', selectedTopic);
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+
   const { data: sources, isLoading } = useQuery<SourceAnalysis[]>({
-    queryKey: [`/api/sources/analysis${runParam}`],
+    queryKey: [`/api/sources/analysis${queryStr}`],
   });
 
 
@@ -222,7 +237,7 @@ export default function SourcesPage() {
           </div>
 
           {/* Controls */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <div className="relative flex-1 sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
@@ -232,10 +247,28 @@ export default function SourcesPage() {
                 className="pl-10"
               />
             </div>
-            <Button variant="outline" className="flex items-center justify-center gap-2">
-              <Download className="w-4 h-4" />
-              Export Data
-            </Button>
+            <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="All Topics" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Topics</SelectItem>
+                {topics?.map(t => (
+                  <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="All Models" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Models</SelectItem>
+                {modelsConfig && Object.entries(modelsConfig).map(([key, cfg]) => (
+                  <SelectItem key={key} value={key}>{cfg.label || key}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -338,7 +371,7 @@ export default function SourcesPage() {
                         )}
                       </div>
                       {expandedView === 'prompts' && (
-                        <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} />
+                        <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} />
                       )}
                       {expandedView === 'pages' && (
                         <DomainPages urls={domain.urls} domain={domain.domain} />
@@ -476,7 +509,7 @@ export default function SourcesPage() {
                               </div>
                             </div>
                             {expandedView === 'prompts' && (
-                              <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} />
+                              <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} />
                             )}
                             {expandedView === 'pages' && (
                               <DomainPages urls={domain.urls} domain={domain.domain} />
@@ -496,11 +529,17 @@ export default function SourcesPage() {
   );
 }
 
-function DomainResponses({ domain, runId }: { domain: string; runId?: string }) {
-  const runParam = runId ? `?runId=${runId}` : '';
-  const { data: responses, isLoading } = useQuery<any[]>({
-    queryKey: [`/api/sources/${encodeURIComponent(domain)}/responses${runParam}`],
+function DomainResponses({ domain, runId, model, topicId }: { domain: string; runId?: string; model?: string; topicId?: string }) {
+  const params = new URLSearchParams();
+  if (runId) params.set('runId', runId);
+  if (model) params.set('model', model);
+  const paramStr = params.toString() ? `?${params.toString()}` : '';
+  const { data: rawResponses, isLoading } = useQuery<any[]>({
+    queryKey: [`/api/sources/${encodeURIComponent(domain)}/responses${paramStr}`],
   });
+  const responses = topicId
+    ? rawResponses?.filter((r: any) => r.prompt?.topicId?.toString() === topicId)
+    : rawResponses;
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   if (isLoading) {
@@ -519,7 +558,8 @@ function DomainResponses({ domain, runId }: { domain: string; runId?: string }) 
           <div className="font-medium text-gray-800 mb-1">
             {r.prompt?.text || `Prompt #${r.promptId}`}
           </div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            {r.model && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{r.model}</Badge>}
             {r.brandMentioned && <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700">Brand mentioned</Badge>}
             {r.competitorsMentioned?.length > 0 && (
               <span className="text-xs text-gray-500">
