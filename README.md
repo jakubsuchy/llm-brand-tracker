@@ -9,6 +9,12 @@ Currently supported models:
 
 Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't. All prompts run directly against the LLM model browser chat interfaces, so it models exactly what users ask.
 
+## Demo
+
+[![TraceAIO Demo](docs/demo-screenshot.png)](https://all-things-demo.navattic.com/lzr0zwm)
+
+[Try the interactive demo](https://all-things-demo.navattic.com/lzr0zwm)
+
 ## What it does
 
 1. **Analyze your brand** — enter your website URL, the system scrapes it and identifies competitors
