@@ -41,8 +41,8 @@ export default function PromptGeneratorPage() {
   const [brandUrl, setBrandUrl] = useState("");
   const [competitors, setCompetitors] = useState<CompetitorSuggestion[]>([]);
   const [settings, setSettings] = useState<GenerationSettings>({
-    promptsPerTopic: 10,
-    numberOfTopics: 5,
+    promptsPerTopic: 2,
+    numberOfTopics: 2,
     diversityThreshold: 50,
     customTopics: []
   });

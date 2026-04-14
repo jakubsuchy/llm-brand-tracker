@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TraceAIO — Track Your Brand Across LLMs</title>
+<meta name="description" content="Open-source LLM brand tracker. See where ChatGPT, Perplexity, and Gemini mention your brand — and where they don't.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-deep: #060a14;
+  --bg-surface: #0a1020;
+  --bg-elevated: #111a2e;
+  --text-primary: #e8ecf4;
+  --text-secondary: #8892a8;
+  --text-dim: #505a70;
+  --accent-blue: #2563eb;
+  --accent-sky: #0ea5e9;
+  --accent-blue-glow: rgba(37, 99, 235, 0.18);
+  --accent-sky-glow: rgba(14, 165, 233, 0.15);
+  --border: rgba(100, 130, 180, 0.1);
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Instrument Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Ambient background ─── */
+.bg-mesh {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.bg-mesh::before {
+  content: '';
+  position: absolute;
+  width: 900px;
+  height: 900px;
+  top: -300px;
+  right: -200px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.07) 0%, transparent 70%);
+  animation: drift 25s ease-in-out infinite alternate;
+}
+.bg-mesh::after {
+  content: '';
+  position: absolute;
+  width: 800px;
+  height: 800px;
+  bottom: -200px;
+  left: -200px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.05) 0%, transparent 70%);
+  animation: drift 30s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.1); }
+}
+
+/* ─── Grain overlay ─── */
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 200px;
+}
+
+/* ─── Layout ─── */
+.wrapper {
+  position: relative;
+  z-index: 2;
+}
+
+section {
+  padding: 0 24px;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ─── Nav ─── */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 16px 24px;
+  backdrop-filter: blur(20px) saturate(1.4);
+  background: rgba(6, 8, 13, 0.7);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.3s;
+}
+nav .nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+.nav-logo img {
+  height: 40px;
+  width: auto;
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  list-style: none;
+}
+.nav-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text-primary); }
+
+.btn-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.25s;
+  font-family: var(--font-body);
+}
+.btn-nav-github {
+  background: #f0f2f5;
+  color: #1a1a1a;
+}
+.btn-nav-github:hover {
+  background: #ffffff;
+  box-shadow: 0 0 20px rgba(255,255,255,0.1);
+  transform: translateY(-1px);
+}
+.btn-nav-github svg {
+  flex-shrink: 0;
+}
+
+/* ─── Hero ─── */
+.hero {
+  padding-top: 160px;
+  padding-bottom: 100px;
+  text-align: center;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 32px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.hero-badge .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-sky);
+  box-shadow: 0 0 8px var(--accent-sky);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 7vw, 5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 24px;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.hero h1 .gradient-text {
+  background: linear-gradient(135deg, var(--accent-sky) 0%, var(--accent-blue) 50%, #1e3a8a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  max-width: 560px;
+  margin: 0 auto 48px;
+  line-height: 1.7;
+}
+
+.hero-ctas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 28px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: none;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-blue), #3b82f6);
+  color: #fff;
+  box-shadow: 0 4px 24px var(--accent-blue-glow), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 40px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  background: #1a2030;
+  border-color: rgba(136, 146, 168, 0.25);
+  transform: translateY(-2px);
+}
+
+/* ─── Models strip ─── */
+.models-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  margin-top: 64px;
+  padding-top: 40px;
+  border-top: 1px solid var(--border);
+}
+.model-tag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+.model-tag .indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+.model-tag:nth-child(1) .indicator { background: #0ea5e9; }
+.model-tag:nth-child(2) .indicator { background: #2563eb; }
+.model-tag:nth-child(3) .indicator { background: #1e3a8a; }
+
+/* ─── Demo section ─── */
+.demo-section {
+  padding-top: 80px;
+  padding-bottom: 100px;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--accent-sky);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.demo-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+.demo-section p {
+  color: var(--text-secondary);
+  max-width: 500px;
+  margin-bottom: 48px;
+}
+.demo-frame {
+  position: relative;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  aspect-ratio: 16 / 9;
+}
+.demo-frame::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(14,165,233,0.25), transparent, rgba(37,99,235,0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+.demo-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+/* ─── Features ─── */
+.features-section {
+  padding-top: 80px;
+  padding-bottom: 100px;
+}
+.features-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 56px;
+  text-align: center;
+}
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.feature-card {
+  background: var(--bg-surface);
+  padding: 40px 32px;
+  transition: background 0.3s;
+}
+.feature-card:hover { background: var(--bg-elevated); }
+
+.feature-num {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  letter-spacing: 0.1em;
+}
+.feature-card h3 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.feature-card p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* ─── Get Started ─── */
+.getstarted-section {
+  padding-top: 80px;
+  padding-bottom: 120px;
+}
+.getstarted-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.getstarted-section > .container > p {
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 500px;
+  margin: 0 auto 56px;
+}
+
+.requirements {
+  max-width: 900px;
+  margin: 0 auto 48px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 36px;
+}
+.requirements h3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--text-primary);
+}
+.req-items {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.req-item {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.req-item a {
+  color: var(--accent-sky);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.req-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.browser-modes {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  padding-left: 36px;
+}
+.browser-mode {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.bm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.bm-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 3px 8px;
+  border-radius: 5px;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+.bm-free {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.bm-paid {
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--accent-sky);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+.bm-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.bm-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.bm-note {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.bm-note a {
+  color: var(--accent-sky);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.bm-or {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.start-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.start-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.start-card:hover { border-color: rgba(136, 146, 168, 0.25); }
+.start-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+.start-card:first-child::after {
+  background: linear-gradient(90deg, var(--accent-sky), transparent);
+}
+.start-card:last-child::after {
+  background: linear-gradient(90deg, var(--accent-blue), transparent);
+}
+.start-card-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.start-card:first-child .start-card-label { color: var(--accent-sky); }
+.start-card:last-child .start-card-label { color: var(--accent-blue); }
+
+.start-card h3 {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.start-card > p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.code-block {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  overflow-x: auto;
+  position: relative;
+}
+.code-block code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre;
+  display: block;
+}
+.code-block .comment { color: var(--text-dim); }
+.code-block .cmd { color: var(--accent-sky); }
+.code-block .str { color: #60a5fa; }
+.code-block .flag { color: #93c5fd; }
+
+.copy-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.copy-btn:hover {
+  color: var(--text-primary);
+  border-color: rgba(136, 146, 168, 0.3);
+}
+
+.start-card-note {
+  margin-top: 20px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.start-card-note a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ─── Footer ─── */
+footer {
+  padding: 40px 24px;
+  border-top: 1px solid var(--border);
+}
+footer .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+footer .footer-left {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-dim);
+}
+footer .footer-right {
+  display: flex;
+  gap: 24px;
+}
+footer .footer-right a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color 0.2s;
+}
+footer .footer-right a:hover { color: var(--text-secondary); }
+
+/* ─── Animations ─── */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.reveal-delay-1 { transition-delay: 0.05s; }
+.reveal-delay-2 { transition-delay: 0.1s; }
+.reveal-delay-3 { transition-delay: 0.15s; }
+.reveal-delay-4 { transition-delay: 0.2s; }
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+  .nav-links { gap: 16px; }
+  .nav-links li:not(:last-child) { display: none; }
+  .features-grid { grid-template-columns: 1fr; }
+  .start-options { grid-template-columns: 1fr; }
+  .models-strip { flex-wrap: wrap; gap: 24px; }
+  .browser-modes { flex-direction: column; padding-left: 0; }
+  .bm-or { margin: -8px 0; }
+  .hero { padding-top: 120px; padding-bottom: 60px; }
+  footer .container { flex-direction: column; gap: 16px; text-align: center; }
+}
+</style>
+</head>
+<body>
+
+<div class="bg-mesh"></div>
+<div class="grain"></div>
+
+<div class="wrapper">
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo"><img src="logo.png" alt="TraceAIO"></a>
+    <ul class="nav-links">
+      <li><a href="#demo">Demo</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#get-started">Get Started</a></li>
+      <li><a href="https://github.com/jakubsuchy/traceaio" class="btn-nav btn-nav-github" target="_blank"><svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge reveal">
+      <span class="dot"></span>
+      Open Source
+    </div>
+    <h1 class="reveal reveal-delay-1">
+      Track your brand<br>across <span class="gradient-text">every LLM</span>
+    </h1>
+    <p class="hero-sub reveal reveal-delay-2">
+      See where ChatGPT, Perplexity, and Gemini mention your brand. Find the gaps. Run real prompts against real models.
+    </p>
+    <div class="hero-ctas reveal reveal-delay-3">
+      <a href="#get-started" class="btn btn-primary">Get Started</a>
+      <a href="#demo" class="btn btn-secondary">See it in action</a>
+    </div>
+    <div class="models-strip reveal reveal-delay-4">
+      <div class="model-tag"><span class="indicator"></span> ChatGPT</div>
+      <div class="model-tag"><span class="indicator"></span> Perplexity</div>
+      <div class="model-tag"><span class="indicator"></span> Google Gemini</div>
+    </div>
+  </div>
+</section>
+
+<!-- Demo -->
+<section class="demo-section" id="demo">
+  <div class="container">
+    <div class="section-label reveal">// live demo</div>
+    <h2 class="reveal reveal-delay-1">See it working</h2>
+    <p class="reveal reveal-delay-2">Interactive walkthrough of the dashboard, prompt generator, and analysis pipeline.</p>
+    <div class="demo-frame reveal reveal-delay-3">
+      <iframe
+        src="https://capture.navattic.com/cmntoj7ai000a04jz18ms5xlu"
+        data-navattic-demo-id="cmntoj7ai000a04jz18ms5xlu"
+        allow="fullscreen"
+        loading="lazy"
+      ></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features-section" id="features">
+  <div class="container">
+    <div class="section-label reveal" style="text-align:center">// capabilities</div>
+    <h2 class="reveal reveal-delay-1">Everything you need to<br>monitor LLM visibility</h2>
+    <div class="features-grid reveal reveal-delay-2">
+      <div class="feature-card">
+        <div class="feature-num">01</div>
+        <h3>Prompt Generation</h3>
+        <p>AI creates brand-neutral prompts across topics relevant to your industry. Add your own. Reuse across runs.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-num">02</div>
+        <h3>Multi-Model Testing</h3>
+        <p>Runs against ChatGPT, Perplexity, and Google Gemini via real browser sessions. Not APIs &mdash; exactly what your users see.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-num">03</div>
+        <p class="feature-num" style="margin-bottom:0"></p>
+        <h3>Competitor Tracking</h3>
+        <p>Auto-detects competitors from responses. Merge duplicates, block noise, compare head-to-head.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-num">04</div>
+        <h3>Source Analysis</h3>
+        <p>Track which domains LLMs cite. See brand, competitor, and neutral sources. Find citation gaps.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-num">05</div>
+        <h3>Scheduled Runs</h3>
+        <p>Set it and forget it. Run analysis hourly, daily, weekly, or monthly. Auto-expire stuck runs after 24 hours.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-num">06</div>
+        <h3>MCP Integration</h3>
+        <p>Query your brand data directly from Claude Code or Claude Desktop. 16 built-in tools for deep analysis.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Get Started -->
+<section class="getstarted-section" id="get-started">
+  <div class="container">
+    <div class="section-label reveal" style="text-align:center">// get started</div>
+    <h2 class="reveal reveal-delay-1">Up and running in 60 seconds</h2>
+    <p class="reveal reveal-delay-2">Two ways to deploy. Pick whichever fits your workflow.</p>
+
+    <div class="requirements reveal reveal-delay-2">
+      <h3>Requirements</h3>
+      <div class="req-items">
+        <div class="req-item">
+          <span class="req-num">1</span>
+          <div><strong>Docker</strong> &mdash; that's it for infrastructure</div>
+        </div>
+        <div class="req-item">
+          <span class="req-num">2</span>
+          <div><strong>OpenAI or Anthropic API key</strong> &mdash; powers prompt generation and response analysis</div>
+        </div>
+        <div class="req-item">
+          <span class="req-num">3</span>
+          <div><strong>Browser runtime</strong> &mdash; Perplexity, ChatGPT, and Gemini responses are fetched via real browser sessions. Pick one:</div>
+        </div>
+      </div>
+      <div class="browser-modes">
+        <div class="browser-mode">
+          <div class="bm-header">
+            <strong>Local Container</strong>
+            <span class="bm-badge bm-free">Free</span>
+          </div>
+          <div class="bm-stats">
+            <span>~1 prompt/min</span>
+            <span class="bm-sep"></span>
+            <span>Included with Docker Compose</span>
+          </div>
+          <div class="bm-note">Running locally not recommended. May get blocked by anti-bot protections</div>
+        </div>
+        <div class="bm-or">or</div>
+        <div class="browser-mode">
+          <div class="bm-header">
+            <strong>3rd Party Proxy</strong>
+            <span class="bm-badge bm-paid">~$0.05/prompt</span>
+          </div>
+          <div class="bm-stats">
+            <span>~15 prompts/min</span>
+            <span class="bm-sep"></span>
+            <span>Residential proxies, no anti-bot issues</span>
+          </div>
+          <div class="bm-note">Supported: <a href="https://apify.com/?fpr=1lkb9a">Apify</a> &mdash; free credits included on sign up</div>
+        </div>
+      </div>
+      </div>
+    </div>
+
+    <div class="start-options">
+      <div class="start-card reveal reveal-delay-2">
+        <div class="start-card-label">Option A</div>
+        <h3>Docker Compose</h3>
+        <p>Pull the image and start. Everything runs locally, including the browser automation container.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<code><span class="comment"># Download and start</span>
+<span class="cmd">curl</span> <span class="flag">-O</span> <span class="str">https://raw.githubusercontent.com/jakubsuchy/traceaio/main/docker-compose.yml</span>
+<span class="cmd">docker compose</span> up <span class="flag">-d</span>
+
+<span class="comment"># Open http://localhost:3000</span></code>
+        </div>
+        <p class="start-card-note">
+          Create an admin account, add your API key, and configure your brand in the setup wizard. Switch to Apify in Settings &rarr; Credentials if you want faster parallel runs.
+        </p>
+      </div>
+
+      <div class="start-card reveal reveal-delay-3">
+        <div class="start-card-label">Option B</div>
+        <h3>Claude Code</h3>
+        <p>Let Claude set it up for you. Paste this into Claude Code and it handles the rest.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<code><span class="comment"># Tell Claude:</span>
+Download docker-compose.yml from
+<span class="str">https://raw.githubusercontent.com/jakubsuchy/traceaio/main/docker-compose.yml</span>
+and run <span class="cmd">docker compose</span> up <span class="flag">-d</span>
+Then open <span class="str">http://localhost:3000</span></code>
+        </div>
+        <p class="start-card-note">
+          After setup, connect Claude to your data via MCP:<br><br>
+          <code style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary)">claude mcp add --transport http brand-tracker http://localhost:3000/mcp</code>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-left">TraceAIO</div>
+    <div class="footer-right">
+      <a href="https://github.com/jakubsuchy/traceaio" target="_blank">GitHub</a>
+      <a href="https://github.com/jakubsuchy/traceaio/blob/main/LICENSE" target="_blank">Apache 2.0</a>
+      <a href="https://all-things-demo.navattic.com/lzr0zwm" target="_blank">Interactive Demo</a>
+    </div>
+  </div>
+</footer>
+
+</div><!-- .wrapper -->
+
+<script>
+// Scroll reveal
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+reveals.forEach(el => observer.observe(el));
+
+// Copy button
+function copyCode(btn) {
+  const code = btn.parentElement.querySelector('code').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = 'Copied';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
+
+</body>
+</html>
