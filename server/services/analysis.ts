@@ -24,6 +24,23 @@ export function isBrandMentioned(text: string, brandName: string): boolean {
 }
 
 /**
+ * Find known competitors mentioned in text using the same regex approach as brand detection.
+ * Returns the canonical names of any known competitors found.
+ */
+export function findKnownCompetitors(text: string, knownCompetitors: string[]): string[] {
+  const clean = text.replace(/\*{1,2}|`/g, '');
+  const found: string[] = [];
+  for (const name of knownCompetitors) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`\\b${escaped}(?:\\.[a-z]{2,})?\\b`, 'i');
+    if (pattern.test(clean)) {
+      found.push(name);
+    }
+  }
+  return found;
+}
+
+/**
  * Extract URLs from markdown-formatted text.
  * Handles [text](url) links and [1]: url footnote-style references.
  */
@@ -117,7 +134,23 @@ export async function analyzePromptResponse(
   console.log(`[analyzePromptResponse] ${model} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
   const brandMentioned = brandName ? isBrandMentioned(responseText, brandName) : false;
-  const competitors = await extractCompetitors(responseText, brandName, knownCompetitors);
+
+  // Phase 1: regex-match known competitors in the response text
+  const regexMatched = findKnownCompetitors(responseText, knownCompetitors || []);
+
+  // Phase 2: LLM extracts any NEW competitors (still receives known list for naming consistency)
+  const llmFound = await extractCompetitors(responseText, brandName, knownCompetitors);
+
+  // Merge: regex matches + LLM finds, deduplicated case-insensitively
+  const seen = new Set<string>();
+  const competitors: string[] = [];
+  for (const name of [...regexMatched, ...llmFound]) {
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      competitors.push(name);
+    }
+  }
 
   return {
     response: responseText,

@@ -15,8 +15,8 @@ import {
 
 export type { PromptAnalysisResult } from "./analysis";
 
-const FAST_MODEL = 'claude-sonnet-4-6';
-const FULL_MODEL = 'claude-sonnet-4-6';
+const FAST_MODEL = 'claude-haiku-4-5';
+const FULL_MODEL = 'claude-haiku-4-5';
 
 // Reusable schemas
 const competitorsSchema: JSONSchema = {
