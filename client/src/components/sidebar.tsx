@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
+import logoUrl from "@/logo.png";
 import { useState } from "react";
 import {
-  ChartLine,
   Home,
   MessageSquare,
   Users,
@@ -52,17 +52,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
-      {/* Logo & Title */}
-      <div className="p-6 border-b border-slate-200">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            <ChartLine className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-slate-900">Brand Tracker</h1>
-            <p className="text-xs text-slate-500">Brand Analytics</p>
-          </div>
-        </div>
+      {/* Logo */}
+      <div className="px-4 py-4 border-b border-slate-200">
+        <img src={logoUrl} alt="TraceAIO" className="h-10" />
       </div>
 
       {/* Navigation */}

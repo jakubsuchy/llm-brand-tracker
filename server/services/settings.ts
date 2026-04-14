@@ -8,6 +8,7 @@ const cache = new Map<string, string | null>();
 // Keys that can be stored in DB and override env vars
 const SETTING_KEYS = [
   'openaiApiKey',
+  'anthropicApiKey',
   'apifyToken',
   'chatgptEmail',
   'chatgptPassword',
@@ -17,6 +18,7 @@ const SETTING_KEYS = [
 // Map setting keys to their env var equivalents
 const ENV_MAP: Record<string, string> = {
   openaiApiKey: 'OPENAI_API_KEY',
+  anthropicApiKey: 'ANTHROPIC_API_KEY',
   apifyToken: 'APIFY_TOKEN',
   chatgptEmail: 'CHATGPT_EMAIL',
   chatgptPassword: 'CHATGPT_PASSWORD',

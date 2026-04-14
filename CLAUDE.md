@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-LLM Brand Tracker — a web app that analyzes how your brand and competitors are mentioned across LLM providers (Perplexity, ChatGPT, Google Gemini). Generates brand-neutral prompts, runs them against multiple providers via browser automation (local or Apify Cloud), and tracks which brands get mentioned organically.
+TraceAIO — a web app that analyzes how your brand and competitors are mentioned across LLM providers (Perplexity, ChatGPT, Google Gemini). Generates brand-neutral prompts, runs them against multiple providers via browser automation (local or Apify Cloud), and tracks which brands get mentioned organically.
 
 ## Tech Stack
 

@@ -34,7 +34,7 @@ services:
       start_period: 15s
 
   app:
-    image: ghcr.io/jakubsuchy/llm-brand-tracker/app:latest
+    image: ghcr.io/jakubsuchy/traceaio/app:latest
     restart: unless-stopped
     ports:
       - "3000:3000"

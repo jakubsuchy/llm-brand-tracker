@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { ChartLine, LogIn, Shield } from "lucide-react";
+import { LogIn, Shield } from "lucide-react";
+import logoUrl from "@/logo.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -72,11 +73,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <ChartLine className="w-6 h-6 text-white" />
-            </div>
+            <img src={logoUrl} alt="TraceAIO" className="h-12" />
           </div>
-          <CardTitle className="text-2xl">Sign in to Brand Tracker</CardTitle>
+          <CardTitle className="text-2xl">Sign in to TraceAIO</CardTitle>
           <p className="text-sm text-gray-600 mt-1">Enter your credentials to continue</p>
         </CardHeader>
         <CardContent className="space-y-4">

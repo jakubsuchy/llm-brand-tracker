@@ -1,7 +1,15 @@
 import { storage } from "../storage";
-import { analyzePromptResponse, generatePromptsForTopic, categorizeCompetitor } from "./openai";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
 import { setCurrentRunId } from "./llm";
+
+// Dynamic LLM module resolver — reads analysisLlm setting to pick openai or anthropic
+async function getLlmModule() {
+  const { getSetting } = await import('./settings');
+  const provider = await getSetting('analysisLlm') || 'openai';
+  return provider === 'anthropic'
+    ? await import('./anthropic')
+    : await import('./openai');
+}
 import type {
   Analytics,
   TopicAnalysis,
@@ -163,7 +171,8 @@ export class BrandAnalyzer {
           }
 
           const promptsPerTopic = settings?.promptsPerTopic || 20;
-          const promptTexts = await generatePromptsForTopic(topic.name, topic.description, promptsPerTopic);
+          const llm = await getLlmModule();
+          const promptTexts = await llm.generatePromptsForTopic(topic.name, topic.description, promptsPerTopic);
 
           for (const promptText of promptTexts) {
             allPrompts.push({
@@ -368,7 +377,8 @@ export class BrandAnalyzer {
 
     // Get response from LLM
     const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
-    const analysis = await analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id });
+    const llm = await getLlmModule();
+    const analysis = await llm.analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id });
 
     // Process competitors
     const brandLower = (this.brandName || '').toLowerCase();
@@ -411,7 +421,7 @@ export class BrandAnalyzer {
         if (!competitor) {
           competitor = await storage.createCompetitor({
             name: competitorName,
-            category: await categorizeCompetitor(competitorName, this.brandName),
+            category: await (await getLlmModule()).categorizeCompetitor(competitorName, this.brandName),
             mentionCount: 0
           });
         }

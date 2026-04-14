@@ -1,4 +1,4 @@
-# LLM Brand Tracker
+# TraceAIO
 
 Track how your brand is mentioned across LLMs.
 
@@ -29,21 +29,21 @@ Generate prompts, run them against multiple providers, and analyze where your br
 ## Quick start
 
 ```bash
-curl -O https://raw.githubusercontent.com/jakubsuchy/llm-brand-tracker/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/jakubsuchy/traceaio/main/docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://localhost:3000`. Create an admin account, then configure your OpenAI API key and brand details in the setup wizard. Everything is configurable in the web UI — no `.env` file needed.
+Open `http://localhost:3000`. Create an admin account, then configure your API key (OpenAI or Anthropic) and brand details in the setup wizard. Everything is configurable in the web UI — no `.env` file needed.
 
 The local browser container starts automatically alongside the app.
 
 ## Launch with Claude Code
 
-You can set up LLM Brand Tracker directly from Claude Code:
+You can set up TraceAIO directly from Claude Code:
 
 ```
 Download docker-compose.yml from
-https://raw.githubusercontent.com/jakubsuchy/llm-brand-tracker/main/docker-compose.yml
+https://raw.githubusercontent.com/jakubsuchy/traceaio/main/docker-compose.yml
 and run docker compose up -d. Then open http://localhost:3000
 ```
 
@@ -89,6 +89,8 @@ Switch between modes in Settings → Credentials → Browser Analysis Mode.
 ### Analysis
 - PostgreSQL job queue with retry logic
 - Concurrent workers (30 for cloud, 1 for local browser)
+- Scheduled runs — manual, hourly, daily, weekly, or monthly (runs at 3 AM)
+- 24-hour timeout — stuck runs are automatically cancelled
 - Real-time progress with job-level detail
 - Failed job tracking with full error messages
 - Crash recovery — resumes interrupted runs on restart
@@ -109,7 +111,8 @@ Switch between modes in Settings → Credentials → Browser Analysis Mode.
 
 ### Settings
 - Brand configuration
-- API keys (OpenAI, Apify) — all configurable in the UI
+- Analysis schedule (manual, hourly, daily, weekly, monthly)
+- API keys (OpenAI or Anthropic, Apify) — all configurable in the UI
 - Provider enable/disable (Perplexity, ChatGPT, Gemini)
 - Competitor source recognition rules
 - Danger zone (delete results or everything)
@@ -152,7 +155,7 @@ Your API key is in the sidebar (click the key icon next to your name).
 - **Backend**: Node.js, Express, TypeScript
 - **Frontend**: React 18, Vite, Tailwind CSS, Radix UI, wouter
 - **Database**: PostgreSQL with Drizzle ORM
-- **AI**: OpenAI API (GPT-4o) for prompt generation and response analysis
+- **AI**: OpenAI API (GPT-4o) or Anthropic API (Claude) for prompt generation and response analysis
 - **Browser automation**: Apify actors with Camoufox (anti-detect Firefox)
 - **Auth**: PassportJS (local, Google OAuth, SAML)
 - **MCP**: Model Context Protocol server for LLM tool integration

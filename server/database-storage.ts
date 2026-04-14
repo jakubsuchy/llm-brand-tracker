@@ -133,7 +133,9 @@ export class DatabaseStorage implements IStorage {
 
     const results = runId
       ? await query.where(eq(responses.analysisRunId, runId))
-      : await query;
+      : await query
+          .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
+          .where(eq(analysisRuns.status, 'complete'));
 
     return results.map(result => ({
       ...result.responses,
@@ -152,9 +154,16 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(topics, eq(prompts.topicId, topics.id))
       .orderBy(desc(responses.createdAt));
 
-    const results = runId
-      ? await (limit > 1000 ? query.where(eq(responses.analysisRunId, runId)) : query.where(eq(responses.analysisRunId, runId)).limit(limit))
-      : await (limit > 1000 ? query : query.limit(limit));
+    let filtered;
+    if (runId) {
+      filtered = limit > 1000 ? query.where(eq(responses.analysisRunId, runId)) : query.where(eq(responses.analysisRunId, runId)).limit(limit);
+    } else {
+      const joined = query
+        .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
+        .where(eq(analysisRuns.status, 'complete'));
+      filtered = limit > 1000 ? joined : joined.limit(limit);
+    }
+    const results = await filtered;
 
     return results.map(result => ({
       ...result.responses,
@@ -289,6 +298,8 @@ export class DatabaseStorage implements IStorage {
       FROM competitor_mentions cm
       JOIN competitors c ON cm.competitor_id = c.id
       JOIN competitors primary_c ON primary_c.id = COALESCE(c.merged_into, cm.competitor_id)
+      JOIN analysis_runs ar ON cm.analysis_run_id = ar.id
+      WHERE ar.status = 'complete'
       GROUP BY COALESCE(c.merged_into, cm.competitor_id), primary_c.name, primary_c.category
     `);
 

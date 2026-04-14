@@ -10,7 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Settings, Key, Save, CheckCircle, XCircle, Globe, X, Plus, ShieldX, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Settings, Save, CheckCircle, XCircle, Globe, X, Plus, ShieldX, Trash2, Clock } from "lucide-react";
 
 const SETTINGS_TABS = ['brand', 'credentials', 'models', 'sources', 'danger'] as const;
 const WIZARD_TABS = ['brand', 'credentials', 'models'] as const;
@@ -36,75 +37,15 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
   };
 
   const apifyRef = useRef<ApifyTokenCardRef>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [isChecking, setIsChecking] = useState(false);
-  const [keyStatus, setKeyStatus] = useState<'none' | 'valid' | 'invalid'>('none');
-
-  const { data: openaiStatus, refetch: refetchOpenai } = useQuery<{ hasKey: boolean }>({
-    queryKey: ['/api/settings/openai-key'],
-  });
   const { toast } = useToast();
 
-  const handleSaveApiKey = async (): Promise<boolean> => {
-    if (!apiKey.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter an OpenAI API key",
-        variant: "destructive",
-      });
-      return false;
-    }
-
-    setIsChecking(true);
-    try {
-      const response = await fetch('/api/settings/openai-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
-      });
-
-      if (response.ok) {
-        setKeyStatus('valid');
-        refetchOpenai();
-        toast({
-          title: "Success",
-          description: "OpenAI API key saved and validated successfully",
-        });
-        setApiKey(""); // Clear the input for security
-        return true;
-      } else {
-        setKeyStatus('invalid');
-        toast({
-          title: "Error",
-          description: "Invalid OpenAI API key or connection failed",
-          variant: "destructive",
-        });
-        return false;
-      }
-    } catch (error) {
-      setKeyStatus('invalid');
-      toast({
-        title: "Error",
-        description: "Failed to save API key. Please try again.",
-        variant: "destructive",
-      });
-      return false;
-    } finally {
-      setIsChecking(false);
-    }
-  };
-
-  const getKeyStatusDisplay = () => {
-    if (keyStatus === 'invalid') {
-      return (
-        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-          <XCircle className="h-3 w-3 mr-1" />
-          Invalid Key
-        </Badge>
-      );
-    }
-    return null;
-  };
+  const { data: openaiStatus } = useQuery<{ hasKey: boolean }>({
+    queryKey: ['/api/settings/openai-key'],
+  });
+  const { data: anthropicStatus } = useQuery<{ hasKey: boolean }>({
+    queryKey: ['/api/settings/anthropic-key'],
+  });
+  const hasAnyLlmKey = openaiStatus?.hasKey || anthropicStatus?.hasKey || false;
 
   return (
     <div className="space-y-6">
@@ -136,66 +77,17 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
 
         <TabsContent value="brand" className="space-y-6">
           <BrandDetailsCard wizardMode={wizardMode} onContinue={() => handleTabChange('credentials')} />
+          {!wizardMode && <AnalysisScheduleCard />}
         </TabsContent>
 
         <TabsContent value="credentials" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Key className="h-5 w-5" />
-                OpenAI API Key
-                {openaiStatus?.hasKey && (
-                  <Badge className="bg-green-100 text-green-800 border-green-200">
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    Configured
-                  </Badge>
-                )}
-              </CardTitle>
-              <p className="text-sm text-gray-600">
-                Required for prompt analysis. Used for generating responses and analyzing results.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="apiKey">OpenAI API Key</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="apiKey"
-                    type="password"
-                    placeholder={openaiStatus?.hasKey ? "••••••••••• (saved)" : "sk-..."}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button
-                    onClick={handleSaveApiKey}
-                    disabled={isChecking || !apiKey.trim()}
-                  >
-                    <Save className="h-4 w-4 mr-2" />
-                    {isChecking ? 'Checking...' : 'Save'}
-                  </Button>
-                </div>
-                {getKeyStatusDisplay()}
-              </div>
-              <p className="text-xs text-gray-500">
-                Get your key at{' '}
-                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                  platform.openai.com/api-keys
-                </a>
-              </p>
-            </CardContent>
-          </Card>
-
+          <AnalysisLlmCard />
           <ApifyTokenCard ref={apifyRef} />
           {wizardMode && (
             <Button onClick={async () => {
-              if (!openaiStatus?.hasKey && !apiKey.trim()) {
-                toast({ title: "OpenAI API Key required", description: "Please enter your OpenAI API key before continuing", variant: "destructive" });
+              if (!hasAnyLlmKey) {
+                toast({ title: "API Key required", description: "Please configure at least one analysis LLM key (OpenAI or Anthropic)", variant: "destructive" });
                 return;
-              }
-              if (apiKey.trim()) {
-                const saved = await handleSaveApiKey();
-                if (!saved) return;
               }
               await apifyRef.current?.savePending();
               handleTabChange('models');
@@ -256,6 +148,192 @@ const MODEL_INFO: Record<string, { label: string; description: string; icon: str
     icon: '✨',
   },
 };
+
+function AnalysisLlmCard() {
+  const { toast } = useToast();
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const { data: llmSetting, refetch: refetchLlm } = useQuery<{ llm: string }>({
+    queryKey: ['/api/settings/analysis-llm'],
+  });
+  const { data: openaiStatus, refetch: refetchOpenai } = useQuery<{ hasKey: boolean }>({
+    queryKey: ['/api/settings/openai-key'],
+  });
+  const { data: anthropicStatus, refetch: refetchAnthropic } = useQuery<{ hasKey: boolean }>({
+    queryKey: ['/api/settings/anthropic-key'],
+  });
+
+  const currentLlm = llmSetting?.llm || 'openai';
+
+  const switchLlm = async (llm: string) => {
+    // Allow switching even without key — they'll enter it after
+    try {
+      const res = await fetch('/api/settings/analysis-llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ llm }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error);
+      }
+      refetchLlm();
+      toast({ title: "Switched", description: `Analysis LLM set to ${llm === 'openai' ? 'OpenAI' : 'Anthropic'}` });
+    } catch (error) {
+      toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+    }
+  };
+
+  const saveOpenaiKey = async () => {
+    if (!openaiKey.trim()) return;
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings/openai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: openaiKey.trim() }),
+      });
+      if (res.ok) {
+        toast({ title: "Success", description: "OpenAI API key saved and validated" });
+        setOpenaiKey("");
+        refetchOpenai();
+      } else {
+        toast({ title: "Error", description: "Invalid OpenAI API key", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to save key", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveAnthropicKey = async () => {
+    if (!anthropicKey.trim()) return;
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings/anthropic-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: anthropicKey.trim() }),
+      });
+      if (res.ok) {
+        toast({ title: "Success", description: "Anthropic API key saved and validated" });
+        setAnthropicKey("");
+        refetchAnthropic();
+      } else {
+        toast({ title: "Error", description: "Invalid Anthropic API key", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to save key", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Analysis LLM</CardTitle>
+        <p className="text-sm text-gray-600">
+          Choose which LLM processes your analysis (competitor extraction, prompt generation, categorization).
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* OpenAI option */}
+          <div
+            onClick={() => switchLlm('openai')}
+            className={`p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+              currentLlm === 'openai'
+                ? 'border-indigo-500 bg-indigo-50'
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium">OpenAI</div>
+                <div className="text-xs text-gray-500 mt-0.5">GPT-4o</div>
+              </div>
+              {openaiStatus?.hasKey && (
+                <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
+                  <CheckCircle className="h-3 w-3 mr-1" /> Connected
+                </Badge>
+              )}
+            </div>
+            {currentLlm === 'openai' && !openaiStatus?.hasKey && (
+              <div className="mt-3 pt-3 border-t" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    placeholder="sk-..."
+                    value={openaiKey}
+                    onChange={e => setOpenaiKey(e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
+                  <Button size="sm" onClick={saveOpenaiKey} disabled={isSaving || !openaiKey.trim()}>
+                    {isSaving ? 'Checking...' : 'Connect'}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  Get your key at{' '}
+                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    platform.openai.com/api-keys
+                  </a>
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Anthropic option */}
+          <div
+            onClick={() => switchLlm('anthropic')}
+            className={`p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+              currentLlm === 'anthropic'
+                ? 'border-indigo-500 bg-indigo-50'
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium">Anthropic</div>
+                <div className="text-xs text-gray-500 mt-0.5">Claude Sonnet 4.6</div>
+              </div>
+              {anthropicStatus?.hasKey && (
+                <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
+                  <CheckCircle className="h-3 w-3 mr-1" /> Connected
+                </Badge>
+              )}
+            </div>
+            {currentLlm === 'anthropic' && !anthropicStatus?.hasKey && (
+              <div className="mt-3 pt-3 border-t" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    placeholder="sk-ant-..."
+                    value={anthropicKey}
+                    onChange={e => setAnthropicKey(e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
+                  <Button size="sm" onClick={saveAnthropicKey} disabled={isSaving || !anthropicKey.trim()}>
+                    {isSaving ? 'Checking...' : 'Connect'}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  Get your key at{' '}
+                  <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    console.anthropic.com
+                  </a>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function ModelsCard() {
   const { toast } = useToast();
@@ -403,6 +481,80 @@ function BrandDetailsCard({ wizardMode, onContinue }: { wizardMode?: boolean; on
           <Save className="h-4 w-4 mr-2" />
           {isSaving ? 'Saving...' : wizardMode ? 'Save and continue to Credentials →' : 'Save Brand Details'}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AnalysisScheduleCard() {
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
+
+  const { data, refetch } = useQuery<{ frequency: string; nextRun: string | null }>({
+    queryKey: ['/api/settings/analysis-schedule'],
+  });
+
+  const handleChange = async (frequency: string) => {
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings/analysis-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frequency }),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+      refetch();
+      toast({ title: "Saved", description: `Analysis schedule set to ${frequency}` });
+    } catch {
+      toast({ title: "Error", description: "Failed to save schedule", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const nextRun = data?.nextRun ? new Date(data.nextRun) : null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clock className="h-5 w-5" />
+          Analysis Schedule
+        </CardTitle>
+        <p className="text-sm text-gray-600">
+          How often to automatically run brand analysis. Runs at 3:00 AM local time.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Frequency</Label>
+          <Select
+            value={data?.frequency || 'manual'}
+            onValueChange={handleChange}
+            disabled={isSaving}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="manual">Manual</SelectItem>
+              <SelectItem value="hourly">Hourly</SelectItem>
+              <SelectItem value="daily">Daily</SelectItem>
+              <SelectItem value="weekly">Weekly</SelectItem>
+              <SelectItem value="monthly">Monthly</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {nextRun && data?.frequency !== 'manual' && (
+          <p className="text-sm text-gray-600">
+            Next run: {nextRun.toLocaleDateString()} {nextRun.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </p>
+        )}
+        {data?.frequency === 'manual' && (
+          <p className="text-sm text-gray-500">
+            Analysis will only run when started manually from the Analysis page.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

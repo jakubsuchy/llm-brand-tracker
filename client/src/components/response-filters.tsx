@@ -119,12 +119,14 @@ export function RunSelector({ value, onChange }: { value: string; onChange: (v: 
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all">All Runs</SelectItem>
-        {analysisRuns?.map(run => (
-          <SelectItem key={run.id} value={run.id.toString()}>
-            {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            {run.brandName ? ` — ${run.brandName}` : ''}
-          </SelectItem>
-        ))}
+        {analysisRuns
+          ?.filter(r => r.status === 'complete')
+          .map(run => (
+            <SelectItem key={run.id} value={run.id.toString()}>
+              {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {run.brandName ? ` — ${run.brandName}` : ''}
+            </SelectItem>
+          ))}
       </SelectContent>
     </Select>
   );

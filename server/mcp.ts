@@ -83,7 +83,7 @@ function filterByModel(responses: ResponseWithPrompt[], model?: string) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer({
-    name: 'llm-brand-tracker',
+    name: 'traceaio',
     version: '1.0.0',
   });
 

@@ -143,8 +143,8 @@ export function extractUrlsFromText(text: string): string[] {
       if (!cleanUrl.startsWith('http')) {
         cleanUrl = 'https://' + cleanUrl;
       }
-      // Remove trailing punctuation, parentheses, and whitespace
-      cleanUrl = cleanUrl.replace(/[.,;!?)]+$/, '').trim();
+      // Remove trailing markdown artifacts, punctuation, and parentheses
+      cleanUrl = cleanUrl.replace(/[\s.,;:!?)\]*>#~_]+$/, '').trim();
       return cleanUrl;
     })
     .filter(url => {

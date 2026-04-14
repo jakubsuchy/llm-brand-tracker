@@ -3,8 +3,16 @@ import { createServer, type Server } from "http";
 import passport from 'passport';
 import { storage } from "./storage";
 import { analyzer, BrandAnalyzer, cancelAnalysisRun, getAnalysisProgressFromDB, isAnalysisRunningInDB } from "./services/analyzer";
-import { generatePromptsForTopic } from "./services/openai";
 import { insertPromptSchema, insertResponseSchema } from "@shared/schema";
+
+// Dynamic LLM module resolver
+async function getLlmModule() {
+  const { getSetting } = await import('./services/settings');
+  const provider = await getSetting('analysisLlm') || 'openai';
+  return provider === 'anthropic'
+    ? await import('./services/anthropic')
+    : await import('./services/openai');
+}
 
 // Role-based route middleware. Admin always passes.
 function requireRole(...requiredRoles: string[]) {
@@ -34,7 +42,7 @@ async function saveBrandName(name: string) {
 }
 
 // Shared analysis launcher — single source of truth
-async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
+export async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   // Extract brand name from URL, or keep existing, or recover from DB
   if (brandUrl) {
     const { extractDomainFromUrl } = await import("./services/scraper");
@@ -380,6 +388,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error('[RECOVERY] Crash recovery failed:', error);
   }
 
+  // --- Scheduler init ---
+  try {
+    const { initScheduler, setLauncher } = await import('./services/scheduler');
+    setLauncher(() => launchAnalysis());
+    await initScheduler();
+  } catch (error) {
+    console.error('[STARTUP] Scheduler init failed:', error);
+  }
+
   // --- Browser actor health check ---
   try {
     const { isBrowserAvailable } = await import('./services/chatgpt-browser');
@@ -408,7 +425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[${new Date().toISOString()}] Testing analysis with prompt: ${prompt}`);
       
-      const { analyzePromptResponse } = await import('./services/openai');
+      const { analyzePromptResponse } = await getLlmModule();
       const result = await analyzePromptResponse(prompt);
       
       console.log(`[${new Date().toISOString()}] Test analysis completed successfully`);
@@ -447,25 +464,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Per-model brand mention rates
-  // Brand Visibility Score — average per-model mention rate across runs from last 2 weeks
+  // Brand Visibility Score — single-run score when runId given, otherwise average across recent runs
   app.get("/api/metrics/visibility-score", async (req, res) => {
     try {
-      const runs = await storage.getAnalysisRuns();
-      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-      const recentRuns = runs.filter(r =>
-        r.status === 'complete' && r.startedAt && new Date(r.startedAt) >= twoWeeksAgo
-      );
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
 
-      if (recentRuns.length === 0) {
-        return res.json({ score: 0, runCount: 0, modelCount: 0 });
-      }
-
-      // For each run, compute per-model rates, then average them
-      const runScores: number[] = [];
-      const allModels = new Set<string>();
-      for (const run of recentRuns) {
-        const responses = await storage.getResponsesWithPrompts(run.id);
+      // Helper: compute per-model mention rates for a set of responses, return average
+      function computeScore(responses: { model?: string | null; prompt?: { text?: string | null } | null; brandMentioned?: boolean | null }[]) {
         const modelMap = new Map<string, Map<string, boolean>>();
+        const allModels = new Set<string>();
         for (const r of responses) {
           const mdl = r.model || 'unknown';
           allModels.add(mdl);
@@ -480,9 +487,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const mentioned = [...pm.values()].filter(Boolean).length;
           return total > 0 ? (mentioned / total) * 100 : 0;
         });
-        if (rates.length > 0) {
-          runScores.push(rates.reduce((a, b) => a + b, 0) / rates.length);
-        }
+        const score = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+        return { score, modelCount: allModels.size };
+      }
+
+      if (runId) {
+        // Single run score
+        const responses = await storage.getResponsesWithPrompts(runId);
+        const { score, modelCount } = computeScore(responses);
+        return res.json({
+          score: Math.round(score * 10) / 10,
+          runCount: 1,
+          modelCount,
+        });
+      }
+
+      // Aggregate: average across recent completed runs
+      const runs = await storage.getAnalysisRuns();
+      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+      const recentRuns = runs.filter(r =>
+        r.status === 'complete' && r.startedAt && new Date(r.startedAt) >= twoWeeksAgo
+      );
+
+      if (recentRuns.length === 0) {
+        return res.json({ score: 0, runCount: 0, modelCount: 0 });
+      }
+
+      const runScores: number[] = [];
+      const allModels = new Set<string>();
+      for (const run of recentRuns) {
+        const responses = await storage.getResponsesWithPrompts(run.id);
+        if (responses.length === 0) continue;
+        const { score } = computeScore(responses);
+        runScores.push(score);
+        for (const r of responses) allModels.add(r.model || 'unknown');
       }
 
       const score = runScores.length > 0
@@ -491,7 +529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         score: Math.round(score * 10) / 10,
-        runCount: recentRuns.length,
+        runCount: runScores.length,
         modelCount: allModels.size,
       });
     } catch (error) {
@@ -1189,7 +1227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[${new Date().toISOString()}] Brand name set to: ${currentBrandName}`);
 
       // Use OpenAI to analyze the brand and find competitors
-      const { analyzeBrandAndFindCompetitors } = await import("./services/openai");
+      const { analyzeBrandAndFindCompetitors } = await getLlmModule();
       const competitors = await analyzeBrandAndFindCompetitors(url);
       
       console.log(`[${new Date().toISOString()}] Found ${competitors.length} competitors for ${url}`);
@@ -1210,7 +1248,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Generate diverse topics and prompts using OpenAI
-      const { generatePromptsForTopic } = await import("./services/openai");
+      const { generatePromptsForTopic } = await getLlmModule();
 
       const customTopics: string[] = settings.customTopics || [];
 
@@ -1240,7 +1278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           topics = [...topics, ...existingMapped];
           const stillNeeded = remaining - existingMapped.length;
           if (stillNeeded > 0) {
-            const { generateDynamicTopics } = await import("./services/openai");
+            const { generateDynamicTopics } = await getLlmModule();
             const newTopics = await generateDynamicTopics(
               brandUrl,
               stillNeeded,
@@ -1389,12 +1427,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/analysis/runs", async (req, res) => {
     try {
       const runs = await storage.getAnalysisRuns();
-      // Include response count per run, filter out empty runs
+      // Include response count per run, filter to completed runs with responses
       const runsWithCounts = await Promise.all(
-        runs.map(async (run) => {
-          const responses = await storage.getResponsesWithPrompts(run.id);
-          return { ...run, responseCount: responses.length };
-        })
+        runs
+          .filter(r => r.status === 'complete')
+          .map(async (run) => {
+            const responses = await storage.getResponsesWithPrompts(run.id);
+            return { ...run, responseCount: responses.length };
+          })
       );
       res.json(runsWithCounts.filter(r => r.responseCount > 0));
     } catch (error) {
@@ -1863,6 +1903,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Settings - Save Anthropic API Key
+  app.post("/api/settings/anthropic-key", requireRole("admin"), async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+
+      if (!apiKey || typeof apiKey !== 'string') {
+        return res.status(400).json({ error: "Invalid API key format" });
+      }
+
+      // Test the API key
+      const testResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      });
+
+      if (!testResponse.ok && testResponse.status === 401) {
+        return res.status(400).json({ error: "Invalid Anthropic API key" });
+      }
+
+      const { setSetting } = await import('./services/settings');
+      await setSetting('anthropicApiKey', apiKey);
+
+      res.json({ success: true, message: "Anthropic API key saved and validated" });
+    } catch (error) {
+      console.error("Error saving Anthropic API key:", error);
+      res.status(500).json({ error: "Failed to save Anthropic API key" });
+    }
+  });
+
+  app.get("/api/settings/anthropic-key", requireRole("admin"), async (req, res) => {
+    try {
+      const { getSetting } = await import('./services/settings');
+      const key = await getSetting('anthropicApiKey');
+      res.json({ hasKey: !!key });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check Anthropic key" });
+    }
+  });
+
+  // Settings - Analysis LLM (openai or anthropic)
+  app.get("/api/settings/analysis-llm", requireRole("admin"), async (req, res) => {
+    try {
+      const llm = await storage.getSetting('analysisLlm') || 'openai';
+      res.json({ llm });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get analysis LLM setting" });
+    }
+  });
+
+  app.post("/api/settings/analysis-llm", requireRole("admin"), async (req, res) => {
+    try {
+      const { llm } = req.body;
+      if (llm !== 'openai' && llm !== 'anthropic') {
+        return res.status(400).json({ error: "llm must be 'openai' or 'anthropic'" });
+      }
+
+      const { setSetting } = await import('./services/settings');
+      await setSetting('analysisLlm', llm);
+      res.json({ success: true, llm });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to set analysis LLM" });
+    }
+  });
+
   // Settings - Save ChatGPT credentials
   app.post("/api/settings/chatgpt-credentials", requireRole("admin"), async (req, res) => {
     try {
@@ -1916,6 +2029,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error saving analysis config:", error);
       res.status(500).json({ error: "Failed to save analysis configuration" });
+    }
+  });
+
+  // Settings - Analysis Schedule
+  app.get("/api/settings/analysis-schedule", async (req, res) => {
+    try {
+      const { getSetting } = await import('./services/settings');
+      const { getNextRunTime } = await import('./services/scheduler');
+      const frequency = (await getSetting('analysisSchedule')) || 'manual';
+      const nextRun = getNextRunTime();
+      res.json({ frequency, nextRun: nextRun?.toISOString() ?? null });
+    } catch (error) {
+      console.error("Error fetching analysis schedule:", error);
+      res.status(500).json({ error: "Failed to fetch analysis schedule" });
+    }
+  });
+
+  app.post("/api/settings/analysis-schedule", requireRole("admin"), async (req, res) => {
+    try {
+      const { frequency } = req.body;
+      const valid = ['manual', 'hourly', 'daily', 'weekly', 'monthly'];
+      if (!frequency || !valid.includes(frequency)) {
+        return res.status(400).json({ error: "Invalid frequency. Must be one of: " + valid.join(', ') });
+      }
+      const { setSetting } = await import('./services/settings');
+      const { updateSchedule, getNextRunTime } = await import('./services/scheduler');
+      await setSetting('analysisSchedule', frequency);
+      updateSchedule(frequency);
+      const nextRun = getNextRunTime();
+      res.json({ success: true, frequency, nextRun: nextRun?.toISOString() ?? null });
+    } catch (error) {
+      console.error("Error saving analysis schedule:", error);
+      res.status(500).json({ error: "Failed to save analysis schedule" });
     }
   });
 
@@ -1984,6 +2130,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const competitorNames = competitors?.map((c: any) => c.name) || [];
+      const { generatePromptsForTopic } = await getLlmModule();
       const prompts = await generatePromptsForTopic(
         topicName,
         topicDescription,

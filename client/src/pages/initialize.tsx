@@ -95,7 +95,7 @@ export default function InitializePage() {
               <ChartLine className="w-6 h-6 text-white" />
             </div>
           </div>
-          <CardTitle className="text-2xl">Set Up Brand Tracker</CardTitle>
+          <CardTitle className="text-2xl">Set Up TraceAIO</CardTitle>
           <p className="text-sm text-gray-600 mt-1">
             Create your admin account to get started
           </p>

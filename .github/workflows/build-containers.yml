@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/llm-brand-tracker
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/traceaio
 
 jobs:
   build-app:

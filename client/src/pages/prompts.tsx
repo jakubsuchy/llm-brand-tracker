@@ -23,6 +23,10 @@ export default function PromptResultsPage() {
   const [page, setPage] = useState(0);
   const [didAutoScroll, setDidAutoScroll] = useState(false);
 
+  const { data: analysisRuns } = useQuery<{ id: number; startedAt: string }[]>({
+    queryKey: ['/api/analysis/runs'],
+  });
+
   const runParam = filters.run !== 'all' ? `&runId=${filters.run}` : '';
   const { data: responses, isLoading } = useQuery<ResponseWithPrompt[]>({
     queryKey: [`/api/responses?limit=1000&full=true${runParam}`],
@@ -66,6 +70,10 @@ export default function PromptResultsPage() {
 
   const updateFilter = (f: FilterType) => { setFilter(f); setPage(0); };
   const updateFilters = (f: ResponseFilterValues) => { setFilters(f); setPage(0); };
+
+  const { data: topics } = useQuery<{ id: number; name: string }[]>({
+    queryKey: ['/api/topics'],
+  });
 
   const getTopicName = (topicId: number | null) => {
     if (!topicId) return 'General';
@@ -171,7 +179,7 @@ export default function PromptResultsPage() {
                   {getTopicName(prompt.prompt.topicId)}
                 </Badge>
               </div>
-              {selectedRun === 'all' && getRunLabel(prompt.analysisRunId) && (
+              {filters.run === 'all' && getRunLabel(prompt.analysisRunId) && (
                 <div className="text-xs text-gray-500 mt-2">
                   {getRunLabel(prompt.analysisRunId)}
                 </div>
@@ -220,13 +228,13 @@ export default function PromptResultsPage() {
               <TableHead className="w-28">MODEL</TableHead>
               <TableHead className="w-48">IS BRAND MENTIONED?</TableHead>
               <TableHead className="w-32">TOPIC</TableHead>
-              {selectedRun === 'all' && <TableHead className="w-36">RUN</TableHead>}
+              {filters.run === 'all' && <TableHead className="w-36">RUN</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {paginatedPrompts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={selectedRun === 'all' ? 5 : 4} className="text-center py-8 text-gray-500">
+                <TableCell colSpan={filters.run === 'all' ? 5 : 4} className="text-center py-8 text-gray-500">
                   No queries found matching your filters
                 </TableCell>
               </TableRow>
@@ -267,7 +275,7 @@ export default function PromptResultsPage() {
                         {getTopicName(prompt.prompt.topicId)}
                       </Badge>
                     </TableCell>
-                    {selectedRun === 'all' && (
+                    {filters.run === 'all' && (
                       <TableCell>
                         <span className="text-xs text-gray-500">
                           {getRunLabel(prompt.analysisRunId) || '—'}
@@ -277,7 +285,7 @@ export default function PromptResultsPage() {
                   </TableRow>
                   {expandedPrompt === prompt.id && (
                     <TableRow key={`${prompt.id}-detail`}>
-                      <TableCell colSpan={selectedRun === 'all' ? 5 : 4} className="bg-gray-50 p-0">
+                      <TableCell colSpan={filters.run === 'all' ? 5 : 4} className="bg-gray-50 p-0">
                         <div className="p-4 space-y-3">
                           <div>
                             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.model || 'API'} Response</h4>

@@ -60,7 +60,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
   });
 
   const { data: visibilityData } = useQuery<{ score: number; runCount: number; modelCount: number }>({
-    queryKey: ['/api/metrics/visibility-score'],
+    queryKey: [`/api/metrics/visibility-score${runOnlyParamStr}`],
   });
 
   // Fetch all runs to find the previous one
@@ -179,7 +179,9 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
           </div>
           <div className="flex items-center justify-between mt-4">
             <span className="text-sm font-medium text-slate-600">
-              avg across {visibilityData?.runCount || 1} run{(visibilityData?.runCount || 1) !== 1 ? 's' : ''}, {visibilityData?.modelCount || 1} model{(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}
+              {runId
+                ? `this run, ${visibilityData?.modelCount || 1} model${(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}`
+                : `avg across ${visibilityData?.runCount || 1} run${(visibilityData?.runCount || 1) !== 1 ? 's' : ''}, ${visibilityData?.modelCount || 1} model${(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}`}
             </span>
           </div>
         </CardContent>
