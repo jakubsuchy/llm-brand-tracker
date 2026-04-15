@@ -52,8 +52,8 @@ export interface IStorage {
   getResponses(): Promise<Response[]>;
   createResponse(response: InsertResponse): Promise<Response>;
   getResponseById(id: number): Promise<Response | undefined>;
-  getResponsesWithPrompts(runId?: number): Promise<ResponseWithPrompt[]>;
-  getRecentResponses(limit?: number, runId?: number): Promise<ResponseWithPrompt[]>;
+  getResponsesWithPrompts(runId?: number, from?: Date, to?: Date): Promise<ResponseWithPrompt[]>;
+  getRecentResponses(limit?: number, runId?: number, from?: Date, to?: Date): Promise<ResponseWithPrompt[]>;
 
   // Competitors
   getCompetitors(): Promise<Competitor[]>;
@@ -72,12 +72,12 @@ export interface IStorage {
   // Competitor mentions
   createCompetitorMention(mention: InsertCompetitorMention): Promise<void>;
   getCompetitorAnalysisByRun(runId: number): Promise<{ competitorId: number; name: string; category: string | null; mentionCount: number }[]>;
-  getCompetitorAnalysisAllRuns(): Promise<{ competitorId: number; name: string; category: string | null; mentionCount: number }[]>;
+  getCompetitorAnalysisAllRuns(from?: Date, to?: Date): Promise<{ competitorId: number; name: string; category: string | null; mentionCount: number }[]>;
 
   // Analysis runs
   createAnalysisRun(run: InsertAnalysisRun): Promise<AnalysisRun>;
   completeAnalysisRun(id: number, status: string): Promise<void>;
-  getAnalysisRuns(): Promise<AnalysisRun[]>;
+  getAnalysisRuns(from?: Date, to?: Date): Promise<AnalysisRun[]>;
   getLatestAnalysisRun(): Promise<AnalysisRun | undefined>;
   updateAnalysisRunProgress(id: number, completedPrompts: number): Promise<void>;
 

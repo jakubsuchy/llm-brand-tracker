@@ -131,28 +131,9 @@ interface ModelConfig {
   };
 }
 
-const MODEL_INFO: Record<string, { label: string; description: string; icon: string }> = {
-  perplexity: {
-    label: 'Perplexity',
-    description: 'Browser-based. Uses residential proxy. Returns responses with source citations.',
-    icon: '🔍',
-  },
-  chatgpt: {
-    label: 'ChatGPT',
-    description: 'Browser-based. Supports anonymous and authenticated mode. Returns responses with sources.',
-    icon: '💬',
-  },
-  gemini: {
-    label: 'Google Gemini',
-    description: 'Browser-based. Google AI responses with grounding sources.',
-    icon: '✨',
-  },
-  'google-aimode': {
-    label: 'Google AI Mode',
-    description: 'Browser-based. Google Search AI Mode with web-grounded responses.',
-    icon: '🌐',
-  },
-};
+import { MODEL_META } from "@shared/models";
+
+const MODEL_INFO = MODEL_META;
 
 function AnalysisLlmCard() {
   const { toast } = useToast();

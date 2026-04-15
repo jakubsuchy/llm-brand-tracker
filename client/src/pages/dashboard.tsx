@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import MetricsOverview from "@/components/metrics-overview";
+import VisibilityTrendChart from "@/components/visibility-trend-chart";
+import ModelComparisonChart from "@/components/model-comparison-chart";
+import CompetitorLandscapeChart from "@/components/competitor-landscape-chart";
 import TopicAnalysis from "@/components/topic-analysis";
-import CompetitorAnalysis from "@/components/competitor-analysis";
 import RecentResults from "@/components/recent-results";
 import TopSources from "@/components/top-sources";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearch, useLocation } from "wouter";
 
 interface AnalysisRun {
@@ -18,13 +20,52 @@ interface AnalysisRun {
   completedPrompts: number;
 }
 
+// Build URL search string from params, omitting defaults
+function buildSearch(params: Record<string, string | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v && v !== 'all') p.set(k, v);
+  }
+  const s = p.toString();
+  return s ? `/?${s}` : '/';
+}
+
 export default function Dashboard() {
   const [brandName, setBrandName] = useState('');
-  const [selectedModel, setSelectedModel] = useState<string>('all');
   const searchString = useSearch();
   const [, setLocation] = useLocation();
 
-  const urlRunId = new URLSearchParams(searchString).get('runId');
+  // Read all filter state from URL (validate dates)
+  const urlParams = new URLSearchParams(searchString);
+  const selectedRunId = urlParams.get('runId') || 'all';
+  const selectedModel = urlParams.get('model') || 'all';
+  const rawFrom = urlParams.get('trendFrom');
+  const rawTo = urlParams.get('trendTo');
+  const trendFrom = rawFrom && !isNaN(new Date(rawFrom).getTime()) ? rawFrom : undefined;
+  const trendTo = rawTo && !isNaN(new Date(rawTo).getTime()) ? rawTo : undefined;
+
+  // Helpers to update URL preserving other params
+  const setParam = useCallback((key: string, value: string) => {
+    const p = new URLSearchParams(searchString);
+    if (value && value !== 'all') {
+      p.set(key, value);
+    } else {
+      p.delete(key);
+    }
+    const s = p.toString();
+    setLocation(s ? `/?${s}` : '/');
+  }, [searchString, setLocation]);
+
+  const setSelectedRunId = useCallback((id: string) => setParam('runId', id), [setParam]);
+  const setSelectedModel = useCallback((m: string) => setParam('model', m), [setParam]);
+
+  const setTrendRange = useCallback((from?: Date, to?: Date) => {
+    const p = new URLSearchParams(searchString);
+    if (from) p.set('trendFrom', from.toISOString()); else p.delete('trendFrom');
+    if (to) p.set('trendTo', to.toISOString()); else p.delete('trendTo');
+    const s = p.toString();
+    setLocation(s ? `/?${s}` : '/');
+  }, [searchString, setLocation]);
 
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
@@ -37,15 +78,19 @@ export default function Dashboard() {
     ? Object.entries(modelsConfig).filter(([, v]) => v.enabled)
     : [];
 
-  const selectedRunId = urlRunId || 'all';
-
-  const setSelectedRunId = (id: string) => {
-    setLocation(`/?runId=${id}`);
-  };
-
   const modelValue = selectedModel !== 'all' ? selectedModel : undefined;
+  const runIdValue = selectedRunId !== 'all' ? selectedRunId : undefined;
 
-  // Load brand name from DB
+  // Fetch brand mention rate for reference lines on charts
+  const metricsParams = new URLSearchParams();
+  if (runIdValue) metricsParams.set('runId', runIdValue);
+  if (modelValue) metricsParams.set('model', modelValue);
+  const metricsParamStr = metricsParams.toString() ? `?${metricsParams.toString()}` : '';
+
+  const { data: metrics } = useQuery<{ brandMentionRate: number }>({
+    queryKey: [`/api/metrics${metricsParamStr}`],
+  });
+
   useEffect(() => {
     fetch('/api/settings/brand').then(r => r.ok ? r.json() : null).then(data => {
       if (data?.brandName) setBrandName(data.brandName);
@@ -54,6 +99,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Header + Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
@@ -96,17 +142,33 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <MetricsOverview runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
+      {/* KPI Cards (3) */}
+      <MetricsOverview runId={runIdValue} model={modelValue} />
 
+      {/* Hero Chart: Visibility Trend (only for All Runs) */}
+      <VisibilityTrendChart
+        model={modelValue}
+        selectedRunId={runIdValue}
+        onSelectRun={setSelectedRunId}
+        trendFrom={trendFrom}
+        trendTo={trendTo}
+        onTrendRangeChange={setTrendRange}
+      />
+
+      {/* Charts Row: Model Comparison + Competitor Landscape */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TopicAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
-        <CompetitorAnalysis runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
+        <ModelComparisonChart runId={runIdValue} brandMentionRate={metrics?.brandMentionRate} />
+        <CompetitorLandscapeChart runId={runIdValue} model={modelValue} brandMentionRate={metrics?.brandMentionRate} />
       </div>
 
+      {/* Detail Tables: Topic Analysis + Recent Results */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RecentResults runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
-        <TopSources runId={selectedRunId !== 'all' ? selectedRunId : undefined} model={modelValue} />
+        <TopicAnalysis runId={runIdValue} model={modelValue} />
+        <RecentResults runId={runIdValue} model={modelValue} />
       </div>
+
+      {/* Sources */}
+      <TopSources runId={runIdValue} model={modelValue} />
     </div>
   );
 }

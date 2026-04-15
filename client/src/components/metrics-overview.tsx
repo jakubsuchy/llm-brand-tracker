@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
-import { Megaphone, Trophy, Globe, TrendingUp, TrendingDown, Minus, BarChart3 } from "lucide-react";
+import { Megaphone, Trophy, Globe, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface CompetitorAnalysis {
   competitorId: number;
@@ -41,29 +40,18 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     queryKey: [`/api/metrics${paramStr}`],
   });
 
-  const { data: counts } = useQuery<any>({
-    queryKey: [`/api/counts${paramStr}`],
-  });
-
   const { data: competitorAnalysis } = useQuery<CompetitorAnalysis[]>({
     queryKey: [`/api/competitors/analysis${paramStr}`],
   });
 
-  // Per-model breakdown (only for "all models" view)
   const runOnlyParams = new URLSearchParams();
   if (runId) runOnlyParams.set('runId', runId);
   const runOnlyParamStr = runOnlyParams.toString() ? `?${runOnlyParams.toString()}` : '';
-
-  const { data: modelMetrics } = useQuery<{ model: string; label: string; total: number; mentioned: number; rate: number }[]>({
-    queryKey: [`/api/metrics/by-model${runOnlyParamStr}`],
-    enabled: !model, // only fetch when viewing all models
-  });
 
   const { data: visibilityData } = useQuery<{ score: number; runCount: number; modelCount: number }>({
     queryKey: [`/api/metrics/visibility-score${runOnlyParamStr}`],
   });
 
-  // Fetch all runs to find the previous one
   const { data: analysisRuns } = useQuery<AnalysisRun[]>({
     queryKey: ['/api/analysis/runs'],
   });
@@ -72,15 +60,12 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
   const completedRuns = (analysisRuns || []).filter(r => r.status === 'complete');
   let prevRunId: string | undefined;
   if (runId) {
-    // Viewing a specific run — previous is the one before it
     const idx = completedRuns.findIndex(r => r.id.toString() === runId);
     if (idx >= 0 && idx + 1 < completedRuns.length) {
-      prevRunId = completedRuns[idx + 1].id.toString(); // runs are sorted desc
+      prevRunId = completedRuns[idx + 1].id.toString();
     }
   }
-  // No comparison when viewing "All Runs" — aggregate vs single run doesn't make sense
 
-  // Fetch previous run metrics (only if we have a previous run)
   const prevParams = new URLSearchParams();
   if (prevRunId) prevParams.set('runId', prevRunId);
   if (model) prevParams.set('model', model);
@@ -96,15 +81,12 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     enabled: !!prevRunId,
   });
 
-
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {[...Array(4)].map((_, i) => (
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[...Array(3)].map((_, i) => (
           <Card key={i} className="border-slate-200">
-            <CardContent className="p-6">
-              <Skeleton className="h-16 w-full" />
-            </CardContent>
+            <CardContent className="p-6"><Skeleton className="h-16 w-full" /></CardContent>
           </Card>
         ))}
       </div>
@@ -113,33 +95,21 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
 
   if (error) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-6">
-            <p className="text-red-600">Failed to load metrics</p>
-          </CardContent>
+          <CardContent className="p-6"><p className="text-red-600">Failed to load metrics</p></CardContent>
         </Card>
       </div>
     );
   }
 
-  const totalResponses = metrics?.totalPrompts || 0;
-  const brandMentions = counts?.brandMentions || Math.round((metrics?.brandMentionRate || 0) / 100 * totalResponses);
-
-  // Brand Visibility Score from server (avg per-model rate across last 2 weeks of runs)
   const visibilityScore = visibilityData?.score ?? (metrics?.brandMentionRate || 0);
-
   const topCompetitorData = competitorAnalysis?.find((comp: CompetitorAnalysis) => comp.name === metrics?.topCompetitor);
   const competitorMentionRate = topCompetitorData?.mentionRate || 0;
 
-  // Compute deltas vs previous run
   const canCompare = prevMetrics && (prevMetrics.totalPrompts || 0) >= MIN_PROMPTS && (metrics?.totalPrompts || 0) >= MIN_PROMPTS;
-
-  const brandDelta = canCompare ? (metrics?.brandMentionRate || 0) - (prevMetrics?.brandMentionRate || 0) : null;
-
   const prevTopCompData = prevCompetitorAnalysis?.find((c: CompetitorAnalysis) => c.name === metrics?.topCompetitor);
   const competitorDelta = canCompare && prevTopCompData ? competitorMentionRate - (prevTopCompData.mentionRate || 0) : null;
-
   const sourceDelta = canCompare ? (metrics?.totalSources || 0) - (prevMetrics?.totalSources || 0) : null;
 
   function TrendIndicator({ delta, suffix = "%" }: { delta: number | null; suffix?: string }) {
@@ -149,8 +119,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
     if (abs < 0.1 && suffix === "%") {
       return (
         <span className="flex items-center text-xs text-slate-400">
-          <Minus className="w-3 h-3 mr-0.5" />
-          unchanged
+          <Minus className="w-3 h-3 mr-0.5" />unchanged
         </span>
       );
     }
@@ -164,7 +133,7 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       {/* Brand Visibility Score */}
       <Card className="bg-white border-slate-200">
         <CardContent className="p-6">
@@ -177,43 +146,13 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
               <Megaphone className="w-5 h-5 text-indigo-600" />
             </div>
           </div>
-          <div className="flex items-center justify-between mt-4">
-            <span className="text-sm font-medium text-slate-600">
+          <div className="mt-3">
+            <span className="text-xs text-slate-500">
               {runId
                 ? `this run, ${visibilityData?.modelCount || 1} model${(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}`
                 : `avg across ${visibilityData?.runCount || 1} run${(visibilityData?.runCount || 1) !== 1 ? 's' : ''}, ${visibilityData?.modelCount || 1} model${(visibilityData?.modelCount || 1) !== 1 ? 's' : ''}`}
             </span>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Model Performance */}
-      <Card className="bg-white border-slate-200">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium text-slate-600">Model Performance</p>
-            <div className="w-10 h-10 bg-violet-100 rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-violet-600" />
-            </div>
-          </div>
-          {modelMetrics && modelMetrics.length > 0 ? (
-            <div className="space-y-2">
-              {modelMetrics.map(p => (
-                <div key={p.model} className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600 w-20 truncate" title={p.label}>{p.label}</span>
-                  <Progress value={p.rate} className="h-2 flex-1" />
-                  <span className="text-xs font-semibold text-slate-900 w-10 text-right">{p.rate}%</span>
-                </div>
-              ))}
-            </div>
-          ) : model ? (
-            <div className="text-sm text-slate-500">
-              <p className="text-2xl font-semibold text-slate-900">{(metrics?.brandMentionRate || 0).toFixed(1)}%</p>
-              <p className="text-xs mt-1">{model} mention rate</p>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">No data yet</p>
-          )}
         </CardContent>
       </Card>
 
@@ -229,8 +168,8 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
               <Trophy className="w-5 h-5 text-amber-600" />
             </div>
           </div>
-          <div className="flex items-center justify-between mt-4">
-            <span className="text-sm font-medium text-amber-600">
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-amber-600 font-medium">
               {competitorMentionRate.toFixed(1)}% mention rate
             </span>
             <TrendIndicator delta={competitorDelta} />
@@ -250,8 +189,8 @@ export default function MetricsOverview({ runId, model }: { runId?: string; mode
               <Globe className="w-5 h-5 text-emerald-600" />
             </div>
           </div>
-          <div className="flex items-center justify-between mt-4">
-            <span className="text-sm text-slate-500">
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-slate-500">
               Across {metrics?.totalDomains || 0} domains
             </span>
             <TrendIndicator delta={sourceDelta} suffix="" />

@@ -13,7 +13,7 @@ import {
   topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, count, sql, isNull } from "drizzle-orm";
+import { eq, desc, count, sql, isNull, and, gte, lte } from "drizzle-orm";
 import { IStorage } from "./storage";
 
 export class DatabaseStorage implements IStorage {
@@ -124,29 +124,37 @@ export class DatabaseStorage implements IStorage {
     return response || undefined;
   }
 
-  async getResponsesWithPrompts(runId?: number): Promise<ResponseWithPrompt[]> {
+  async getResponsesWithPrompts(runId?: number, from?: Date, to?: Date): Promise<ResponseWithPrompt[]> {
     let query = db
       .select()
       .from(responses)
       .leftJoin(prompts, eq(responses.promptId, prompts.id))
       .leftJoin(topics, eq(prompts.topicId, topics.id));
 
-    const results = runId
-      ? await query.where(eq(responses.analysisRunId, runId))
-      : await query
-          .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
-          .where(eq(analysisRuns.status, 'complete'));
+    if (runId) {
+      const results = await query.where(eq(responses.analysisRunId, runId));
+      return results.map(result => ({
+        ...result.responses,
+        prompt: { ...result.prompts!, topic: result.topics }
+      }));
+    }
+
+    // All completed runs, optionally filtered by date range
+    const conditions = [eq(analysisRuns.status, 'complete')];
+    if (from) conditions.push(gte(analysisRuns.completedAt, from));
+    if (to) conditions.push(lte(analysisRuns.completedAt, to));
+
+    const results = await query
+      .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
+      .where(and(...conditions));
 
     return results.map(result => ({
       ...result.responses,
-      prompt: {
-        ...result.prompts!,
-        topic: result.topics
-      }
+      prompt: { ...result.prompts!, topic: result.topics }
     }));
   }
 
-  async getRecentResponses(limit = 10, runId?: number): Promise<ResponseWithPrompt[]> {
+  async getRecentResponses(limit = 10, runId?: number, from?: Date, to?: Date): Promise<ResponseWithPrompt[]> {
     let query = db
       .select()
       .from(responses)
@@ -158,19 +166,19 @@ export class DatabaseStorage implements IStorage {
     if (runId) {
       filtered = limit > 1000 ? query.where(eq(responses.analysisRunId, runId)) : query.where(eq(responses.analysisRunId, runId)).limit(limit);
     } else {
+      const conditions = [eq(analysisRuns.status, 'complete')];
+      if (from) conditions.push(gte(analysisRuns.completedAt, from));
+      if (to) conditions.push(lte(analysisRuns.completedAt, to));
       const joined = query
         .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
-        .where(eq(analysisRuns.status, 'complete'));
+        .where(and(...conditions));
       filtered = limit > 1000 ? joined : joined.limit(limit);
     }
     const results = await filtered;
 
     return results.map(result => ({
       ...result.responses,
-      prompt: {
-        ...result.prompts!,
-        topic: result.topics
-      }
+      prompt: { ...result.prompts!, topic: result.topics }
     }));
   }
 
@@ -288,7 +296,15 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async getCompetitorAnalysisAllRuns() {
+  async getCompetitorAnalysisAllRuns(from?: Date, to?: Date) {
+    const dateFilter = from && to
+      ? sql`AND ar.completed_at >= ${from} AND ar.completed_at <= ${to}`
+      : from
+        ? sql`AND ar.completed_at >= ${from}`
+        : to
+          ? sql`AND ar.completed_at <= ${to}`
+          : sql``;
+
     const result = await db.execute(sql`
       SELECT
         COALESCE(c.merged_into, cm.competitor_id) as competitor_id,
@@ -299,7 +315,7 @@ export class DatabaseStorage implements IStorage {
       JOIN competitors c ON cm.competitor_id = c.id
       JOIN competitors primary_c ON primary_c.id = COALESCE(c.merged_into, cm.competitor_id)
       JOIN analysis_runs ar ON cm.analysis_run_id = ar.id
-      WHERE ar.status = 'complete'
+      WHERE ar.status = 'complete' ${dateFilter}
       GROUP BY COALESCE(c.merged_into, cm.competitor_id), primary_c.name, primary_c.category
     `);
 
@@ -322,7 +338,13 @@ export class DatabaseStorage implements IStorage {
     await db.update(analysisRuns).set({ status, completedAt: new Date() }).where(eq(analysisRuns.id, id));
   }
 
-  async getAnalysisRuns(): Promise<AnalysisRun[]> {
+  async getAnalysisRuns(from?: Date, to?: Date): Promise<AnalysisRun[]> {
+    if (from || to) {
+      const conditions = [];
+      if (from) conditions.push(gte(analysisRuns.completedAt, from));
+      if (to) conditions.push(lte(analysisRuns.completedAt, to));
+      return await db.select().from(analysisRuns).where(and(...conditions)).orderBy(desc(analysisRuns.startedAt));
+    }
     return await db.select().from(analysisRuns).orderBy(desc(analysisRuns.startedAt));
   }
 

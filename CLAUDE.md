@@ -40,6 +40,7 @@ server/services/analysis.ts # Generic analysis utilities (brand detection, URL e
 server/services/openai.ts   # OpenAI-specific LLM calls: prompt generation, competitor extraction
 server/services/chatgpt-browser.ts  # Browser actor client (local + Apify Cloud)
 server/config.ts            # Public API paths config
+shared/models.ts            # Canonical model metadata (labels, brand colors, icons, descriptions)
 server/database-storage.ts  # All DB queries (implements IStorage interface)
 server/storage.ts           # IStorage interface + in-memory implementation
 client/src/pages/           # Page components (dashboard, competitors, sources, etc.)
@@ -69,10 +70,11 @@ api_usage (OpenAI token tracking)
 ## Critical Design Decisions
 
 ### Multi-model analysis
-- Prompts are sent to multiple LLM models (Perplexity, ChatGPT, Gemini)
+- Prompts are sent to multiple LLM models (Perplexity, ChatGPT, Gemini, Google AI Mode)
 - Model config stored in DB (`app_settings` key `modelsConfig`), manageable via Settings → Models
 - Each (prompt, model) pair is a separate job in the queue
 - Browser models run via local container or Apify Cloud (configurable per-deployment)
+- **Model metadata** (labels, brand colors, icons, descriptions) lives in `shared/models.ts` (`MODEL_META`). Used by both server (labels) and client (chart colors, settings UI). When adding a new model provider, add it here.
 
 ### Job queue
 - PostgreSQL-based with `SELECT FOR UPDATE SKIP LOCKED` for dequeuing
@@ -132,6 +134,11 @@ Integrated at `/mcp` inside the Express app (not a separate process). Uses `@mod
 ### Drizzle migrations
 - `drizzle.config.ts` has `tablesFilter: ["!session"]` to ignore the `connect-pg-simple` session table
 - Without this, `drizzle-kit push` tries to delete the session table
+
+### URL-driven UI state
+- **All filter/selection interactions MUST reflect in the URL** (query params). Users must be able to share/bookmark a dashboard view.
+- Dashboard uses `?runId=`, `?model=`, `?trendFrom=`, `?trendTo=` — all read from and written to the URL via `useSearch()`/`setLocation()`.
+- When adding new filters or interactive state, persist to URL params, not React state alone.
 
 ## Common Pitfalls
 

@@ -25,6 +25,16 @@ function requireRole(...requiredRoles: string[]) {
     next();
   };
 }
+// Parse optional from/to date range from query params
+function parseDateRange(req: any): { from?: Date; to?: Date } {
+  const from = req.query.from ? new Date(req.query.from as string) : undefined;
+  const to = req.query.to ? new Date(req.query.to as string) : undefined;
+  return {
+    from: from && !isNaN(from.getTime()) ? from : undefined,
+    to: to && !isNaN(to.getTime()) ? to : undefined,
+  };
+}
+
 // Brand name for filtering — loaded from DB on startup, persisted on change
 let currentBrandName: string = '';
 
@@ -478,49 +488,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Per-model brand mention rates
   // Brand Visibility Score — single-run score when runId given, otherwise average across recent runs
+  // Helper: compute per-model mention rates for a set of responses, return average
+  function computeVisibilityScore(responses: { model?: string | null; prompt?: { text?: string | null } | null; brandMentioned?: boolean | null }[]) {
+    const modelMap = new Map<string, Map<string, boolean>>();
+    const allModels = new Set<string>();
+    for (const r of responses) {
+      const mdl = r.model || 'unknown';
+      allModels.add(mdl);
+      if (!modelMap.has(mdl)) modelMap.set(mdl, new Map());
+      const promptMap = modelMap.get(mdl)!;
+      const key = r.prompt?.text?.toLowerCase().trim() || '';
+      if (!promptMap.has(key)) promptMap.set(key, false);
+      if (r.brandMentioned) promptMap.set(key, true);
+    }
+    const rates = [...modelMap.values()].map(pm => {
+      const total = pm.size;
+      const mentioned = [...pm.values()].filter(Boolean).length;
+      return total > 0 ? (mentioned / total) * 100 : 0;
+    });
+    const score = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+    return { score, modelCount: allModels.size, modelMap };
+  }
+
   app.get("/api/metrics/visibility-score", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-
-      // Helper: compute per-model mention rates for a set of responses, return average
-      function computeScore(responses: { model?: string | null; prompt?: { text?: string | null } | null; brandMentioned?: boolean | null }[]) {
-        const modelMap = new Map<string, Map<string, boolean>>();
-        const allModels = new Set<string>();
-        for (const r of responses) {
-          const mdl = r.model || 'unknown';
-          allModels.add(mdl);
-          if (!modelMap.has(mdl)) modelMap.set(mdl, new Map());
-          const promptMap = modelMap.get(mdl)!;
-          const key = r.prompt?.text?.toLowerCase().trim() || '';
-          if (!promptMap.has(key)) promptMap.set(key, false);
-          if (r.brandMentioned) promptMap.set(key, true);
-        }
-        const rates = [...modelMap.values()].map(pm => {
-          const total = pm.size;
-          const mentioned = [...pm.values()].filter(Boolean).length;
-          return total > 0 ? (mentioned / total) * 100 : 0;
-        });
-        const score = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
-        return { score, modelCount: allModels.size };
-      }
+      const { from, to } = parseDateRange(req);
 
       if (runId) {
-        // Single run score
         const responses = await storage.getResponsesWithPrompts(runId);
-        const { score, modelCount } = computeScore(responses);
-        return res.json({
-          score: Math.round(score * 10) / 10,
-          runCount: 1,
-          modelCount,
-        });
+        const { score, modelCount } = computeVisibilityScore(responses);
+        return res.json({ score: Math.round(score * 10) / 10, runCount: 1, modelCount });
       }
 
-      // Aggregate: average across recent completed runs
-      const runs = await storage.getAnalysisRuns();
-      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-      const recentRuns = runs.filter(r =>
-        r.status === 'complete' && r.startedAt && new Date(r.startedAt) >= twoWeeksAgo
-      );
+      // Aggregate: average across completed runs in date range (default: last 2 weeks)
+      const effectiveFrom = from || new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+      const runs = await storage.getAnalysisRuns(effectiveFrom, to);
+      const recentRuns = runs.filter(r => r.status === 'complete');
 
       if (recentRuns.length === 0) {
         return res.json({ score: 0, runCount: 0, modelCount: 0 });
@@ -531,30 +535,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const run of recentRuns) {
         const responses = await storage.getResponsesWithPrompts(run.id);
         if (responses.length === 0) continue;
-        const { score } = computeScore(responses);
+        const { score } = computeVisibilityScore(responses);
         runScores.push(score);
         for (const r of responses) allModels.add(r.model || 'unknown');
       }
 
-      const score = runScores.length > 0
-        ? runScores.reduce((a, b) => a + b, 0) / runScores.length
-        : 0;
-
-      res.json({
-        score: Math.round(score * 10) / 10,
-        runCount: runScores.length,
-        modelCount: allModels.size,
-      });
+      const score = runScores.length > 0 ? runScores.reduce((a, b) => a + b, 0) / runScores.length : 0;
+      res.json({ score: Math.round(score * 10) / 10, runCount: runScores.length, modelCount: allModels.size });
     } catch (error) {
       console.error("Error computing visibility score:", error);
       res.status(500).json({ error: "Failed to compute visibility score" });
     }
   });
 
+  // Trend data: per-run visibility scores for charting
+  app.get("/api/metrics/trends", async (req, res) => {
+    try {
+      const { from, to } = parseDateRange(req);
+      const model = req.query.model as string | undefined;
+      const allRuns = await storage.getAnalysisRuns(from, to);
+      const completedRuns = allRuns.filter(r => r.status === 'complete');
+
+      // Get display labels
+      const { MODEL_META } = await import('@shared/models');
+      const defaultLabels: Record<string, string> = Object.fromEntries(Object.entries(MODEL_META).map(([k, v]) => [k, v.label]));
+      const modelsConfigRaw = await storage.getSetting('modelsConfig');
+      const modelsConfig = modelsConfigRaw ? JSON.parse(modelsConfigRaw) : {};
+
+      const runs = [];
+      for (const run of completedRuns) {
+        const responses = await storage.getResponsesWithPrompts(run.id);
+        if (responses.length === 0) continue;
+
+        const { score, modelMap } = computeVisibilityScore(responses);
+        const modelRates: Record<string, number> = {};
+        for (const [mdl, promptMap] of modelMap.entries()) {
+          if (model && mdl !== model) continue;
+          const total = promptMap.size;
+          const mentioned = [...promptMap.values()].filter(Boolean).length;
+          modelRates[mdl] = total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0;
+        }
+
+        runs.push({
+          runId: run.id,
+          date: run.completedAt || run.startedAt,
+          overallRate: Math.round(score * 10) / 10,
+          modelRates,
+        });
+      }
+
+      // Return oldest first for charting
+      runs.reverse();
+
+      // Collect all model keys for label lookup
+      const modelLabels: Record<string, string> = {};
+      for (const r of runs) {
+        for (const m of Object.keys(r.modelRates)) {
+          if (!modelLabels[m]) {
+            modelLabels[m] = modelsConfig[m]?.label || defaultLabels[m] || m;
+          }
+        }
+      }
+
+      res.json({ runs, modelLabels });
+    } catch (error) {
+      console.error("Error fetching trends:", error);
+      res.status(500).json({ error: "Failed to fetch trends" });
+    }
+  });
+
   app.get("/api/metrics/by-model", async (req, res) => {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const allResponses = await storage.getResponsesWithPrompts(runId);
+      const { from, to } = parseDateRange(req);
+      const allResponses = await storage.getResponsesWithPrompts(runId, from, to);
 
       // Group by model, then by unique prompt text
       const modelMap = new Map<string, Map<string, boolean>>();
@@ -568,7 +622,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get display labels from model config
-      const defaultLabels: Record<string, string> = { perplexity: 'Perplexity', chatgpt: 'ChatGPT', gemini: 'Google Gemini', 'google-aimode': 'Google AI Mode' };
+      const { MODEL_META } = await import('@shared/models');
+      const defaultLabels: Record<string, string> = Object.fromEntries(Object.entries(MODEL_META).map(([k, v]) => [k, v.label]));
       const modelsConfigRaw = await storage.getSetting('modelsConfig');
       const modelsConfig = modelsConfigRaw ? JSON.parse(modelsConfigRaw) : {};
 
@@ -596,7 +651,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
-      let allResponses = await storage.getResponsesWithPrompts(runId);
+      const { from, to } = parseDateRange(req);
+      let allResponses = await storage.getResponsesWithPrompts(runId, from, to);
       if (model) allResponses = allResponses.filter(r => r.model === model);
 
       // Group by unique prompt text — a prompt "mentions brand" if ANY response for it did
@@ -667,7 +723,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
-      let allResponses = await storage.getResponsesWithPrompts(runId);
+      const { from, to } = parseDateRange(req);
+      let allResponses = await storage.getResponsesWithPrompts(runId, from, to);
       if (model) allResponses = allResponses.filter(r => r.model === model);
       const allPrompts = await storage.getPrompts();
       const allTopics = await storage.getTopics();
@@ -758,8 +815,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
-      // Derive topic analysis from responses
-      let allResponses = await storage.getResponsesWithPrompts(runId);
+      const { from, to } = parseDateRange(req);
+      let allResponses = await storage.getResponsesWithPrompts(runId, from, to);
       if (model) allResponses = allResponses.filter(r => r.model === model);
       const topicMap = new Map<number, { name: string; total: number; brandMentions: number }>();
       for (const r of allResponses) {
@@ -848,9 +905,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
+      const { from, to } = parseDateRange(req);
 
       // Unified approach: count unique prompts where each competitor was mentioned
-      let allResponses = await storage.getResponsesWithPrompts(runId);
+      let allResponses = await storage.getResponsesWithPrompts(runId, from, to);
       if (model) allResponses = allResponses.filter(r => r.model === model);
 
       // Count unique prompts total
@@ -890,6 +948,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return {
           competitorId: comp.id,
           name: comp.name,
+          domain: comp.domain || null,
           category: comp.category || null,
           mentionCount,
           mentionRate: totalUniquePrompts > 0 ? (mentionCount / totalUniquePrompts) * 100 : 0,
@@ -978,12 +1037,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       const topicId = req.query.topicId ? parseInt(req.query.topicId as string) : undefined;
+      const { from, to } = parseDateRange(req);
       const allSources = await storage.getSources();
 
       // If topic filter is set, find which domains are cited in responses for that topic
       let topicDomains: Set<string> | null = null;
       if (topicId) {
-        let responses = await storage.getResponsesWithPrompts(runId);
+        let responses = await storage.getResponsesWithPrompts(runId, from, to);
         if (model) responses = responses.filter(r => r.model === model);
         responses = responses.filter(r => r.prompt?.topicId === topicId);
         topicDomains = new Set<string>();
@@ -1129,13 +1189,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
+      const { from, to } = parseDateRange(req);
       const useFullDataset = req.query.full === 'true' || limit > 100;
 
       let responses;
       if (useFullDataset) {
-        responses = await storage.getResponsesWithPrompts(runId);
+        responses = await storage.getResponsesWithPrompts(runId, from, to);
       } else {
-        responses = await storage.getRecentResponses(limit, runId);
+        responses = await storage.getRecentResponses(limit, runId, from, to);
       }
       if (model) responses = responses.filter(r => r.model === model);
 
@@ -1439,7 +1500,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List all analysis runs
   app.get("/api/analysis/runs", async (req, res) => {
     try {
-      const runs = await storage.getAnalysisRuns();
+      const { from, to } = parseDateRange(req);
+      const runs = await storage.getAnalysisRuns(from, to);
       // Include response count per run, filter to completed runs with responses
       const runsWithCounts = await Promise.all(
         runs
