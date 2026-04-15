@@ -354,6 +354,98 @@ nav .nav-inner {
   display: block;
 }
 
+/* ─── How It Works ─── */
+.howitworks-section {
+  padding-top: 80px;
+  padding-bottom: 100px;
+}
+.howitworks-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 56px;
+  text-align: center;
+}
+.steps {
+  max-width: 700px;
+  margin: 0 auto;
+}
+.step {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.step-num {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--accent-sky);
+}
+.step-content h3 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+.step-content > p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+.step-connector {
+  width: 1px;
+  height: 32px;
+  background: var(--border);
+  margin: 8px 0 8px 19px;
+}
+.step-detail {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+.step-detail-card {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+.step-detail-card strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+.step-detail-card p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+.step-detail-card a {
+  color: var(--accent-sky);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.step-detail-warn {
+  border-color: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.03);
+}
+.step-detail-warn strong {
+  color: #f87171;
+}
+
 /* ─── Features ─── */
 .features-section {
   padding-top: 80px;
@@ -700,6 +792,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
   .features-grid { grid-template-columns: 1fr; }
   .start-options { grid-template-columns: 1fr; }
   .models-strip { flex-wrap: wrap; gap: 24px; }
+  .step-detail { flex-direction: column; }
   .browser-modes { flex-direction: column; padding-left: 0; }
   .bm-or { margin: -8px 0; }
   .hero { padding-top: 120px; padding-bottom: 60px; }
@@ -720,6 +813,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
     <a href="#" class="nav-logo"><img src="logo.png" alt="TraceAIO"></a>
     <ul class="nav-links">
       <li><a href="#demo">Demo</a></li>
+      <li><a href="#how-it-works">How It Works</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#get-started">Get Started</a></li>
       <li><a href="https://github.com/jakubsuchy/traceaio" class="btn-nav btn-nav-github" target="_blank"><svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a></li>
@@ -766,6 +860,64 @@ footer .footer-right a:hover { color: var(--text-secondary); }
         allow="fullscreen"
         loading="lazy"
       ></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- How It Works -->
+<section class="howitworks-section" id="how-it-works">
+  <div class="container">
+    <div class="section-label reveal" style="text-align:center">// how it works</div>
+    <h2 class="reveal reveal-delay-1">Three steps. Real browser. Real results.</h2>
+
+    <div class="steps reveal reveal-delay-2">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h3>Generate prompts</h3>
+          <p>AI creates brand-neutral prompts across topics relevant to your industry &mdash; the kind of questions your potential customers actually ask. Add your own custom prompts too. Prompts are saved and reusable across runs.</p>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h3>Ask LLMs via real browser</h3>
+          <p>Each prompt is sent to ChatGPT, Perplexity, Gemini, and Google AI Mode through an actual browser session &mdash; not an API. This is exactly what your users see when they type a question. No shortcuts, no API-only responses that differ from the real thing.</p>
+          <div class="step-detail">
+            <div class="step-detail-card">
+              <strong>3rd Party Proxy (recommended)</strong>
+              <p>Uses residential proxies via <a href="https://apify.com/?fpr=1lkb9a">Apify</a> to run ~15 prompts/min in parallel. Different IP per request, no anti-bot issues, no risk to your infrastructure.</p>
+            </div>
+            <div class="step-detail-card step-detail-warn">
+              <strong>Local Container</strong>
+              <p>Free but risky. Runs a real browser on your machine &mdash; one prompt at a time. Your IP address is exposed directly to each LLM provider. Anti-bot protections will likely flag and block your IP after repeated requests, potentially affecting your normal access to these services. Not recommended for production use.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h3>Analyze &amp; record</h3>
+          <p>Every response is analyzed: was your brand mentioned? Which competitors showed up? What sources were cited? Results are stored per-run so you can track changes over time, compare models, and find exactly where you're missing.</p>
+        </div>
+      </div>
+
+      <div class="step-connector"></div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h3>Ask questions about your data</h3>
+          <p>Connect Claude via MCP and query your brand data conversationally. "Which prompts mention our competitor but not us?" "What sources does Perplexity cite that Gemini doesn't?" "How did our mention rate change after the last product launch?" Correlate across models, runs, topics, and competitors without writing queries.</p>
+        </div>
+      </div>
     </div>
   </div>
 </section>
