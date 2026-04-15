@@ -555,7 +555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get display labels from model config
-      const defaultLabels: Record<string, string> = { perplexity: 'Perplexity', chatgpt: 'ChatGPT', gemini: 'Google Gemini' };
+      const defaultLabels: Record<string, string> = { perplexity: 'Perplexity', chatgpt: 'ChatGPT', gemini: 'Google Gemini', 'google-aimode': 'Google AI Mode' };
       const modelsConfigRaw = await storage.getSetting('modelsConfig');
       const modelsConfig = modelsConfigRaw ? JSON.parse(modelsConfigRaw) : {};
 
@@ -1698,12 +1698,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     perplexity: { enabled: true, type: 'browser', label: 'Perplexity' },
     chatgpt: { enabled: true, type: 'browser', label: 'ChatGPT' },
     gemini: { enabled: true, type: 'browser', label: 'Google Gemini' },
+    'google-aimode': { enabled: true, type: 'browser', label: 'Google AI Mode' },
   };
 
   app.get("/api/settings/models", async (req, res) => {
     try {
       const raw = await storage.getSetting('modelsConfig');
-      const config = raw ? JSON.parse(raw) : DEFAULT_MODELS_CONFIG;
+      const saved = raw ? JSON.parse(raw) : {};
+      // Merge defaults with saved config so new models appear automatically
+      const config = { ...DEFAULT_MODELS_CONFIG, ...saved };
       res.json(config);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch models config" });

@@ -6,6 +6,7 @@ Currently supported models:
 - ChatGPT
 - Perplexity
 - Google Gemini
+- Google AI Mode
 
 Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't. All prompts run directly against the LLM model browser chat interfaces, so it models exactly what users ask.
 

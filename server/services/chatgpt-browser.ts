@@ -13,7 +13,7 @@ export interface BrowserScraperResult {
   model: string;
 }
 
-export type BrowserModel = 'chatgpt' | 'perplexity';
+export type BrowserModel = 'chatgpt' | 'perplexity' | 'google-aimode';
 
 const APIFY_ACTOR_ID = 'jakubsuchy~llm-prompt-response';
 const APIFY_API_BASE = 'https://api.apify.com/v2';

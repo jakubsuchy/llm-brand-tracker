@@ -192,6 +192,7 @@ export class BrandAnalyzer {
           perplexity: { enabled: true, type: 'browser' },
           chatgpt: { enabled: true, type: 'browser' },
           gemini: { enabled: true, type: 'browser' },
+          'google-aimode': { enabled: true, type: 'browser' },
         };
 
         const { isBrowserAvailable } = await import('./chatgpt-browser');
