@@ -125,7 +125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       email: user.email,
       fullName: user.fullName,
       roles: user.roles,
-      apiKey: user.apiKey,
+      hasApiKey: !!user.apiKey,
       createdAt: user.createdAt,
     };
   }
@@ -215,12 +215,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // --- Auth guard: protect all subsequent API routes ---
-  // Only checks authentication. Role checks are done per-route via requireRole().
+  // Supports session cookies (browser UI) and Bearer token (API keys).
+  // Role checks are done per-route via requireRole().
   const { PUBLIC_API_PATHS } = await import('./config');
-  app.use("/api", (req, res, next) => {
+  const { findUserByApiKey } = await import('./services/auth');
+  app.use("/api", async (req, res, next) => {
     if (PUBLIC_API_PATHS.has(req.path)) return next();
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Not authenticated" });
-    next();
+    if (req.isAuthenticated()) return next();
+
+    // Bearer token fallback — use the same API keys as MCP
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const user = await findUserByApiKey(authHeader.slice(7));
+      if (user) {
+        (req as any).user = user;
+        return next();
+      }
+    }
+
+    return res.status(401).json({ message: "Not authenticated" });
   });
 
   // --- User management routes (admin only) ---

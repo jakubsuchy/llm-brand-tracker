@@ -32,8 +32,23 @@ const McpIcon = () => (
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
   const { user, logout, hasRole } = useAuth();
-  const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const handleRegenerateKey = async () => {
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/api/users/${user?.id}/api-key`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      setGeneratedKey(data.apiKey);
+    } catch {
+      // silent
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   const isAdminOrAnalyst = hasRole('admin') || hasRole('analyst');
   const isAdmin = hasRole('admin');
@@ -112,42 +127,54 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               </p>
 
               <div className="space-y-2">
-                <p className="text-xs font-medium text-gray-700">Install command (Claude Code):</p>
-                <div className="relative">
-                  <pre className="bg-gray-50 border rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-{`claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${user?.apiKey || 'YOUR_API_KEY'}"`}
-                  </pre>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="absolute top-1 right-1 h-7 w-7 p-0"
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        `claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${user?.apiKey || ''}"`
-                      );
-                    }}
-                  >
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
+                <Button size="sm" variant="outline" className="w-full text-xs" onClick={handleRegenerateKey} disabled={regenerating}>
+                  <Key className="h-3 w-3 mr-1.5" />
+                  {regenerating ? 'Generating...' : user?.hasApiKey || generatedKey ? 'Regenerate API Key' : 'Generate API Key'}
+                </Button>
+                {generatedKey && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                      <code className="text-xs text-gray-800 truncate flex-1 select-all">{generatedKey}</code>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 shrink-0"
+                        onClick={() => { navigator.clipboard.writeText(generatedKey); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                      >
+                        {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-amber-700">Copy this key now. It won't be shown again.</p>
+                  </div>
+                )}
               </div>
 
-              {user?.apiKey && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-gray-700">Your API Key:</p>
-                  <div className="flex items-center gap-2 bg-gray-50 border rounded-lg p-2">
-                    <code className="text-xs text-gray-600 truncate flex-1">{user.apiKey}</code>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-700">Install command (Claude Code):</p>
+                {generatedKey ? (
+                  <div className="relative">
+                    <pre className="bg-gray-50 border rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+{`claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`}
+                    </pre>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 w-7 p-0 shrink-0"
-                      onClick={() => navigator.clipboard.writeText(user.apiKey || '')}
+                      className="absolute top-1 right-1 h-7 w-7 p-0"
+                      onClick={() => {
+                        navigator.clipboard.writeText(
+                          `claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`
+                        );
+                      }}
                     >
                       <Copy className="h-3 w-3" />
                     </Button>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <pre className="bg-gray-50 border rounded-lg p-3 text-xs text-gray-400">
+                    Click {user?.hasApiKey ? 'Regenerate' : 'Generate'} API Key to see the full command
+                  </pre>
+                )}
+              </div>
 
               <div className="space-y-2">
                 <p className="text-xs font-medium text-gray-700">Example questions you can ask:</p>
@@ -179,13 +206,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <p className="text-xs text-slate-500 truncate">{user?.roles?.join(', ') || ''}</p>
           </div>
           <button
-            onClick={() => setShowApiKey(!showApiKey)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-            title="API Key"
-          >
-            <Key className="w-4 h-4" />
-          </button>
-          <button
             onClick={() => logout()}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
             title="Sign out"
@@ -193,22 +213,6 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <LogOut className="w-4 h-4" />
           </button>
         </div>
-        {showApiKey && user?.apiKey && (
-          <div className="flex items-center gap-1 bg-slate-50 rounded p-1.5">
-            <code className="text-[10px] text-slate-600 truncate flex-1">{user?.apiKey || ''}</code>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(user?.apiKey || '');
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-              className="p-1 rounded text-slate-400 hover:text-slate-600 shrink-0"
-              title="Copy API key"
-            >
-              {copied ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

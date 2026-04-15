@@ -38,6 +38,10 @@ export function generateApiKey(): string {
   return key.toString('base64url');
 }
 
+export function hashApiKey(key: string): string {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
 // --- User queries ---
 
 export async function findUserByEmail(email: string) {
@@ -98,7 +102,7 @@ export async function createUser(email: string, fullName: string, password: stri
 
   const result = await db
     .insert(users)
-    .values({ email, fullName, hashedPassword, salt, apiKey: generateApiKey() })
+    .values({ email, fullName, hashedPassword, salt, apiKey: hashApiKey(generateApiKey()) })
     .returning();
 
   return result[0];
@@ -115,15 +119,16 @@ export async function removeUserRoles(userId: number) {
 }
 
 export async function findUserByApiKey(key: string): Promise<UserWithRoles | null> {
-  const result = await db.select().from(users).where(eq(users.apiKey, key));
+  const hashed = hashApiKey(key);
+  const result = await db.select().from(users).where(eq(users.apiKey, hashed));
   if (result.length === 0) return null;
   return findUserById(result[0].id);
 }
 
 export async function regenerateApiKey(userId: number): Promise<string> {
   const newKey = generateApiKey();
-  await db.update(users).set({ apiKey: newKey }).where(eq(users.id, userId));
-  return newKey;
+  await db.update(users).set({ apiKey: hashApiKey(newKey) }).where(eq(users.id, userId));
+  return newKey; // plaintext returned once, only hash stored
 }
 
 export async function getAllUsersWithRoles(): Promise<UserWithRoles[]> {
@@ -182,7 +187,7 @@ export async function backfillApiKeys() {
   const usersWithoutKey = await db.select({ id: users.id }).from(users).where(sql`${users.apiKey} IS NULL`);
   if (usersWithoutKey.length === 0) return;
   for (const u of usersWithoutKey) {
-    await db.update(users).set({ apiKey: generateApiKey() }).where(eq(users.id, u.id));
+    await db.update(users).set({ apiKey: hashApiKey(generateApiKey()) }).where(eq(users.id, u.id));
   }
   console.log(`[Auth] Backfilled API keys for ${usersWithoutKey.length} user(s)`);
 }
@@ -275,7 +280,7 @@ export async function findOrCreateSamlUser(
   // Create new user
   const result = await db
     .insert(users)
-    .values({ email, fullName, apiKey: generateApiKey() })
+    .values({ email, fullName, apiKey: hashApiKey(generateApiKey()) })
     .returning();
 
   await assignRole(result[0].id, 'user');
@@ -394,7 +399,7 @@ export async function findOrCreateGoogleUser(
   if (!email) throw new Error('Google profile has no email');
   const result = await db
     .insert(users)
-    .values({ email, fullName, googleId, apiKey: generateApiKey() })
+    .values({ email, fullName, googleId, apiKey: hashApiKey(generateApiKey()) })
     .returning();
 
   await assignRole(result[0].id, 'user');
