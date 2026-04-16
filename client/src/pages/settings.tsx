@@ -157,7 +157,7 @@ function AnalysisLlmCard() {
     // Allow switching even without key — they'll enter it after
     try {
       const res = await fetch('/api/settings/analysis-llm', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ llm }),
       });
@@ -177,7 +177,7 @@ function AnalysisLlmCard() {
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings/openai-key', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: openaiKey.trim() }),
       });
@@ -200,7 +200,7 @@ function AnalysisLlmCard() {
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings/anthropic-key', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: anthropicKey.trim() }),
       });
@@ -332,7 +332,7 @@ function ModelsCard() {
     const updated = { ...config, [name]: { ...config[name], enabled: !config[name].enabled } };
     try {
       const res = await fetch('/api/settings/models', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       });
@@ -407,7 +407,7 @@ function BrandDetailsCard({ wizardMode, onContinue }: { wizardMode?: boolean; on
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings/brand', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brandUrl: brandUrl || data?.brandUrl || '',
@@ -484,7 +484,7 @@ function AnalysisScheduleCard() {
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings/analysis-schedule', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ frequency }),
       });
@@ -574,7 +574,7 @@ const ApifyTokenCard = forwardRef<ApifyTokenCardRef>(function ApifyTokenCard(_pr
     setIsSaving(true);
     try {
       const res = await fetch('/api/settings/apify-token', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: token.trim() }),
       });
@@ -596,7 +596,7 @@ const ApifyTokenCard = forwardRef<ApifyTokenCardRef>(function ApifyTokenCard(_pr
     setIsSaving(true);
     try {
       await fetch('/api/settings/apify-token', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: '' }),
       });
@@ -616,7 +616,7 @@ const ApifyTokenCard = forwardRef<ApifyTokenCardRef>(function ApifyTokenCard(_pr
   const switchMode = async (newMode: 'local' | 'cloud') => {
     try {
       await fetch('/api/settings/browser-mode', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: newMode }),
       });
@@ -764,7 +764,7 @@ function CompetitorSubdomainsCard() {
     setSaving(true);
     try {
       const res = await fetch('/api/settings/competitor-subdomains', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prefixes: updated }),
       });
@@ -854,7 +854,7 @@ function CompetitorExclusionsCard() {
     setSaving(true);
     try {
       const res = await fetch('/api/settings/competitor-blocklist', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries: updated }),
       });

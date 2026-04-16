@@ -31,7 +31,17 @@ docker compose down -v               # Wipe DB and stop
 
 ```
 shared/schema.ts            # Drizzle schema — single source of truth for all tables
-server/routes.ts            # All API endpoints + launchAnalysis() helper
+server/routes.ts            # Route orchestrator — imports all modules, startup logic
+server/routes/helpers.ts    # Shared route helpers (requireRole, parseDateRange, launchAnalysis, etc.)
+server/routes/auth.ts       # Auth routes (login, session, OAuth, SAML, guard)
+server/routes/users.ts      # User CRUD + API key regeneration
+server/routes/metrics.ts    # Dashboard metrics (visibility, trends, by-model, counts)
+server/routes/topics.ts     # Topics + prompts + topic analysis
+server/routes/competitors.ts # Competitor CRUD, merge, analysis, blocking
+server/routes/sources.ts    # Source analysis + reclassification
+server/routes/responses.ts  # Responses, prompts list, data clear
+server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
+server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
 server/mcp.ts               # MCP server with 16 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
@@ -103,7 +113,7 @@ api_usage (OpenAI token tracking)
 
 ### Authentication & Route Protection
 
-All API routes protected by PassportJS session auth. The guard in `server/routes.ts` checks authentication on all `/api/*` routes.
+All API routes protected by PassportJS session auth. The guard in `server/routes/auth.ts` (`registerAuthGuard`) checks authentication on all `/api/*` routes.
 
 - **Auth routes** (`/api/auth/*`, `/api/initialize`) registered BEFORE the guard — automatically exempt
 - **Public API paths** in `server/config.ts` → `PUBLIC_API_PATHS`
@@ -112,7 +122,7 @@ All API routes protected by PassportJS session auth. The guard in `server/routes
 - Routes without `requireRole` are accessible to any authenticated user
 - Admin always passes any role check
 
-**IMPORTANT: When adding new API routes, ALWAYS add `requireRole('admin')` by default.** Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
+**IMPORTANT: When adding new API routes, add them to the appropriate route module in `server/routes/`, not in `server/routes.ts` directly. ALWAYS add `requireRole('admin')` by default.** Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
 
 ### MCP Server
 
@@ -130,6 +140,7 @@ Integrated at `/mcp` inside the Express app (not a separate process). Uses `@mod
 - DB values (in `app_settings`) override environment variables
 - `loadSettingsIntoEnv()` runs at startup, copies DB values to `process.env`
 - `setSetting()` updates both DB and `process.env` immediately
+- **API**: Unified `GET /api/settings/:key` and `PUT /api/settings/:key` with key-specific validation. When adding a new setting, add a case to the switch in `server/routes/settings.ts`. Frontend uses `PUT` (not POST) for writes.
 
 ### Drizzle migrations
 - `drizzle.config.ts` has `tablesFilter: ["!session"]` to ignore the `connect-pg-simple` session table
