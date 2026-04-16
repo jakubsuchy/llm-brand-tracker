@@ -4,6 +4,7 @@ import { storage } from "../storage";
 
 export function registerSourceRoutes(app: Express) {
   app.get("/api/sources", async (req, res) => {
+    // #swagger.tags = ['Sources']
     try {
       const sources = await storage.getSources();
       res.json(sources);
@@ -15,6 +16,7 @@ export function registerSourceRoutes(app: Express) {
 
   // Reclassify a source domain as competitor or neutral
   app.post("/api/sources/reclassify", async (req, res) => {
+    // #swagger.tags = ['Sources']
     try {
       const { domain, sourceType } = req.body;
       if (!domain || !sourceType) {
@@ -72,6 +74,7 @@ export function registerSourceRoutes(app: Express) {
   });
 
   app.get("/api/sources/analysis", async (req, res) => {
+    // #swagger.tags = ['Sources']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
@@ -186,6 +189,7 @@ export function registerSourceRoutes(app: Express) {
 
   // Get responses that cite a specific domain
   app.get("/api/sources/:domain/responses", async (req, res) => {
+    // #swagger.tags = ['Sources']
     try {
       const domain = req.params.domain;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;

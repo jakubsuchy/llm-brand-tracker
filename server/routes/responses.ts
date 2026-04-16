@@ -7,6 +7,7 @@ import { BrandAnalyzer } from "../services/analyzer";
 export function registerResponseRoutes(app: Express) {
   // Prompts endpoint - shows only latest analysis prompts
   app.get("/api/prompts", async (req, res) => {
+    // #swagger.tags = ['Responses']
     try {
       const latestPrompts = await storage.getLatestPrompts();
       // Add topic information to each prompt
@@ -25,6 +26,7 @@ export function registerResponseRoutes(app: Express) {
 
   // Prompt results endpoints - supports full dataset access
   app.get("/api/responses", async (req, res) => {
+    // #swagger.tags = ['Responses']
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
@@ -48,6 +50,7 @@ export function registerResponseRoutes(app: Express) {
   });
 
   app.get("/api/responses/:id", async (req, res) => {
+    // #swagger.tags = ['Responses']
     try {
       const id = parseInt(req.params.id);
       const response = await storage.getResponseById(id);
@@ -63,6 +66,7 @@ export function registerResponseRoutes(app: Express) {
 
   // Manual prompt testing
   app.post("/api/prompts/test", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Responses']
     try {
       const { text, topicId } = insertPromptSchema.parse(req.body);
 
@@ -87,6 +91,7 @@ export function registerResponseRoutes(app: Express) {
 
   // Data management endpoints
   app.post("/api/data/clear", requireRole("admin"), async (req, res) => {
+    // #swagger.tags = ['Responses']
     try {
       const { type } = req.body;
 

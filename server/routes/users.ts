@@ -4,12 +4,14 @@ import { requireRole } from "./helpers";
 export function registerUserRoutes(app: Express) {
   // --- User management routes (admin only) ---
   app.get("/api/users", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     const { getAllUsersWithRoles } = await import('../services/auth');
     const users = await getAllUsersWithRoles();
     res.json(users.map(u => ({ id: u.id, email: u.email, fullName: u.fullName, roles: u.roles, createdAt: u.createdAt, googleId: !!u.googleId })));
   });
 
   app.post("/api/users", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     try {
       const { createUser, assignRole } = await import('../services/auth');
       const { email, fullName, password, roles } = req.body;
@@ -24,6 +26,7 @@ export function registerUserRoutes(app: Express) {
   });
 
   app.put("/api/users/:id", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     try {
       const { db } = await import('../db');
       const { users } = await import('@shared/schema');
@@ -41,6 +44,7 @@ export function registerUserRoutes(app: Express) {
   });
 
   app.put("/api/users/:id/password", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     try {
       const { hashPassword } = await import('../services/auth');
       const { db } = await import('../db');
@@ -59,6 +63,7 @@ export function registerUserRoutes(app: Express) {
   });
 
   app.post("/api/users/:id/roles", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     try {
       const { removeUserRoles, assignRole } = await import('../services/auth');
       const userId = parseInt(req.params.id);
@@ -77,6 +82,7 @@ export function registerUserRoutes(app: Express) {
   });
 
   app.delete("/api/users/:id", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Users']
     try {
       const { removeUserRoles } = await import('../services/auth');
       const { db } = await import('../db');
@@ -97,6 +103,7 @@ export function registerUserRoutes(app: Express) {
 
   // --- API key regeneration (admin or self — intentionally no requireRole, uses manual check) ---
   app.post("/api/users/:id/api-key", async (req, res) => {
+    // #swagger.tags = ['Users']
     const userId = parseInt(req.params.id);
     const isAdmin = req.user!.roles?.includes('admin');
     const isSelf = req.user!.id === userId;

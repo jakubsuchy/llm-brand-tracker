@@ -11,6 +11,7 @@ import { registerSourceRoutes } from "./routes/sources";
 import { registerResponseRoutes } from "./routes/responses";
 import { registerAnalysisRoutes } from "./routes/analysis";
 import { registerSettingsRoutes } from "./routes/settings";
+import { registerDocsRoutes } from "./routes/docs";
 
 // Re-export for scheduler
 export { launchAnalysis } from "./routes/helpers";
@@ -34,6 +35,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await registerAuthGuard(app);
 
   // --- Protected routes ---
+  await registerDocsRoutes(app);
   registerUserRoutes(app);
   registerAuthProviderRoutes(app);
   registerMetricsRoutes(app);

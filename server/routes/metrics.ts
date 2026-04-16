@@ -5,6 +5,7 @@ import { storage } from "../storage";
 export function registerMetricsRoutes(app: Express) {
   // Brand Visibility Score — single-run score when runId given, otherwise average across recent runs
   app.get("/api/metrics/visibility-score", async (req, res) => {
+    // #swagger.tags = ['Metrics']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const { from, to } = parseDateRange(req);
@@ -44,6 +45,7 @@ export function registerMetricsRoutes(app: Express) {
 
   // Trend data: per-run visibility scores for charting
   app.get("/api/metrics/trends", async (req, res) => {
+    // #swagger.tags = ['Metrics']
     try {
       const { from, to } = parseDateRange(req);
       const model = req.query.model as string | undefined;
@@ -99,6 +101,7 @@ export function registerMetricsRoutes(app: Express) {
   });
 
   app.get("/api/metrics/by-model", async (req, res) => {
+    // #swagger.tags = ['Metrics']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const { from, to } = parseDateRange(req);
@@ -142,6 +145,7 @@ export function registerMetricsRoutes(app: Express) {
 
   // Overview metrics endpoint
   app.get("/api/metrics", async (req, res) => {
+    // #swagger.tags = ['Metrics']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
@@ -214,6 +218,7 @@ export function registerMetricsRoutes(app: Express) {
 
   // Total counts endpoint for accurate statistics
   app.get("/api/counts", async (req, res) => {
+    // #swagger.tags = ['Metrics']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;

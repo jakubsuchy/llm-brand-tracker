@@ -17,6 +17,7 @@ function safeUser(user: any) {
 export function registerAuthRoutes(app: Express) {
   // --- Public auth routes (no auth required) ---
   app.get("/api/auth/needs-setup", async (req, res) => {
+    // #swagger.tags = ['Auth']
     const { getUserCount, getAuthProviderConfig } = await import('../services/auth');
     const count = await getUserCount();
     const config = await getAuthProviderConfig();
@@ -28,6 +29,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   app.get("/api/auth/session", async (req, res) => {
+    // #swagger.tags = ['Auth']
     if (req.isAuthenticated()) {
       const { getAuthProviderConfig } = await import('../services/auth');
       const config = await getAuthProviderConfig();
@@ -42,6 +44,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   app.post("/api/auth/login", (req, res, next) => {
+    // #swagger.tags = ['Auth']
     passport.authenticate('local', (err: any, user: any, info: any) => {
       if (err) return next(err);
       if (!user) return res.status(401).json({ message: info?.message || 'Invalid credentials' });
@@ -54,12 +57,14 @@ export function registerAuthRoutes(app: Express) {
 
   // Google OAuth routes (dynamic — check if strategy is registered)
   app.get("/api/auth/google", (req, res, next) => {
+    // #swagger.tags = ['Auth']
     if (!(passport as any)._strategy('google')) return res.status(404).json({ message: "Google auth not configured" });
     passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
   });
 
   app.get("/api/auth/google/callback",
     (req, res, next) => {
+    // #swagger.tags = ['Auth']
       if (!(passport as any)._strategy('google')) return res.redirect('/login?error=google');
       passport.authenticate('google', { failureRedirect: '/login?error=google' })(req, res, next);
     },
@@ -68,12 +73,14 @@ export function registerAuthRoutes(app: Express) {
 
   // SAML routes (dynamic — check if strategy is registered)
   app.get("/api/auth/saml", (req, res, next) => {
+    // #swagger.tags = ['Auth']
     if (!(passport as any)._strategy('saml')) return res.status(404).json({ message: "SAML auth not configured" });
     passport.authenticate('saml')(req, res, next);
   });
 
   app.post("/api/auth/saml/callback",
     (req, res, next) => {
+    // #swagger.tags = ['Auth']
       if (!(passport as any)._strategy('saml')) return res.redirect('/login?error=saml');
       passport.authenticate('saml', { failureRedirect: '/login?error=saml' })(req, res, next);
     },
@@ -82,12 +89,14 @@ export function registerAuthRoutes(app: Express) {
 
   // SAML metadata endpoint
   app.get("/api/auth/saml/metadata", (req, res) => {
+    // #swagger.tags = ['Auth']
     const strategy = (passport as any)._strategy('saml') as any;
     if (!strategy) return res.status(404).json({ message: "SAML not configured" });
     res.type('application/xml').send(strategy.generateServiceProviderMetadata());
   });
 
   app.post("/api/auth/logout", (req, res) => {
+    // #swagger.tags = ['Auth']
     req.logout((err) => {
       if (err) return res.status(500).json({ message: "Logout failed" });
       res.json({ success: true });
@@ -95,6 +104,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   app.post("/api/initialize", async (req, res) => {
+    // #swagger.tags = ['Auth']
     try {
       const { getUserCount, createUser, assignRole } = await import('../services/auth');
       if (await getUserCount() > 0) return res.status(403).json({ message: "Already initialized" });
@@ -139,6 +149,7 @@ export async function registerAuthGuard(app: Express) {
 // --- Auth provider configuration (admin only) ---
 export function registerAuthProviderRoutes(app: Express) {
   app.get("/api/auth/providers", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Auth']
     const { getAuthProviderConfig } = await import('../services/auth');
     const config = await getAuthProviderConfig();
     // Mask secrets: show only whether they're set
@@ -153,6 +164,7 @@ export function registerAuthProviderRoutes(app: Express) {
   });
 
   app.post("/api/auth/providers", requireRole('admin'), async (req, res) => {
+    // #swagger.tags = ['Auth']
     const { saveAuthProviderConfig, configureAuthProviders } = await import('../services/auth');
     await saveAuthProviderConfig(req.body);
     await configureAuthProviders();

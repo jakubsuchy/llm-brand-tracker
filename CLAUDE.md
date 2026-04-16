@@ -22,6 +22,7 @@ npm run dev                          # Start dev server (tsx, port 3000)
 npm run build                        # Vite build + esbuild server bundle
 npm run start                        # Production server (node dist/index.js)
 npm run db:push                      # Push schema to DB (drizzle-kit push)
+npm run swagger                      # Regenerate OpenAPI spec → server/swagger-output.json
 docker compose up --build            # Build and run with postgres
 docker compose up                    # Includes local browser container
 docker compose down -v               # Wipe DB and stop
@@ -42,6 +43,7 @@ server/routes/sources.ts    # Source analysis + reclassification
 server/routes/responses.ts  # Responses, prompts list, data clear
 server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
 server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
+server/routes/docs.ts       # Swagger UI at /api-docs (authenticated)
 server/mcp.ts               # MCP server with 16 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
@@ -176,7 +178,8 @@ All API routes protected by PassportJS session auth. The guard in `server/routes
 - ALWAYS add `requireRole('admin')` by default on new routes.
 - **Update the API Routes table in this file** whenever you add, remove, or rename a route.
 - **Update the Project Structure section** whenever you add new component directories or significant files.
-- Large page components should be split: extract card/section components into `client/src/components/<page>/` (e.g. `components/settings/`). Keep page files as thin orchestrators. Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
+- Large page components should be split: extract card/section components into `client/src/components/<page>/` (e.g. `components/settings/`). Keep page files as thin orchestrators.
+- **Every route handler must include `// #swagger.tags = ['TagName']`** as its first line inside the handler body. This ensures the OpenAPI spec groups routes correctly. Run `npm run swagger` after adding routes. Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
 
 ### MCP Server
 

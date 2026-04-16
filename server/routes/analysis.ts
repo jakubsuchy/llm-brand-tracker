@@ -6,6 +6,7 @@ import { cancelAnalysisRun, getAnalysisProgressFromDB, isAnalysisRunningInDB } f
 export function registerAnalysisRoutes(app: Express) {
   // Test analysis endpoint - process just one prompt
   app.post("/api/test-analysis", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { prompt } = req.body;
 
@@ -37,6 +38,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Test endpoint for debugging
   app.get("/api/test", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       res.json({
         success: true,
@@ -55,6 +57,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // New prompt generator endpoints
   app.post("/api/analyze-brand", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { url } = req.body;
 
@@ -85,6 +88,7 @@ export function registerAnalysisRoutes(app: Express) {
   });
 
   app.post("/api/generate-prompts", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { brandUrl, competitors, settings } = req.body;
 
@@ -163,6 +167,7 @@ export function registerAnalysisRoutes(app: Express) {
   });
 
   app.post("/api/save-and-analyze", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { topics, brandUrl } = req.body;
 
@@ -246,6 +251,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Re-run analysis on existing prompts
   app.post("/api/analysis/start", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { brandUrl } = req.body || {};
 
@@ -270,6 +276,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // List all analysis runs
   app.get("/api/analysis/runs", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { from, to } = parseDateRange(req);
       const runs = await storage.getAnalysisRuns(from, to);
@@ -291,6 +298,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Get failed jobs for the latest (or specific) analysis run
   app.get("/api/analysis/failures", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       let targetRunId = runId;
@@ -318,6 +326,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Get all jobs for the latest (or specific) analysis run — compact view
   app.get("/api/analysis/jobs", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       let targetRunId = runId;
@@ -356,6 +365,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Get analysis progress for a specific session (reads from job_queue)
   app.get("/api/analysis/:sessionId/progress", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       // sessionId format: "analysis_<runId>"
       const progress = await getAnalysisProgressFromDB();
@@ -368,6 +378,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Analysis Progress - Get current progress (reads from job_queue table)
   app.get("/api/analysis/progress", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const progress = await getAnalysisProgressFromDB();
       res.json(progress);
@@ -379,6 +390,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Cancel analysis (DB-based)
   app.post("/api/analysis/cancel", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       await cancelAnalysisRun();
       res.json({
@@ -393,6 +405,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Apify usage statistics
   app.get("/api/apify-usage", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { apifyUsage } = await import("@shared/schema");
       const { db } = await import("../db");
@@ -437,6 +450,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // API usage statistics
   app.get("/api/usage", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { apiUsage, analysisRuns } = await import("@shared/schema");
       const { db } = await import("../db");
@@ -504,6 +518,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Export data
   app.get("/api/export", async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const topics = await storage.getTopics();
       const prompts = await storage.getPrompts();
@@ -528,6 +543,7 @@ export function registerAnalysisRoutes(app: Express) {
 
   // Generate prompts for a single custom topic
   app.post('/api/generate-topic-prompts', async (req, res) => {
+    // #swagger.tags = ['Analysis']
     try {
       const { topicName, topicDescription, competitors, promptCount } = req.body;
       if (!topicName || !topicDescription) {

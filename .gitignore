@@ -6,3 +6,4 @@ npm-debug.log
 .claude
 browser-actor/
 k8s/
+server/swagger-output.json

@@ -20,6 +20,7 @@ declare global {
 }
 
 const app = express();
+app.disable('x-powered-by');
 // Trust proxy headers (X-Forwarded-Proto, X-Forwarded-Host) when behind ingress/load balancer
 app.set('trust proxy', 1);
 // Skip body parsing for /mcp — the MCP transport reads the raw stream itself

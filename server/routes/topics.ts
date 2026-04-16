@@ -4,6 +4,7 @@ import { storage } from "../storage";
 
 export function registerTopicRoutes(app: Express) {
   app.get("/api/topics", async (req, res) => {
+    // #swagger.tags = ['Topics']
     try {
       const topics = await storage.getTopics();
       res.json(topics);
@@ -15,6 +16,7 @@ export function registerTopicRoutes(app: Express) {
 
   // Get topics with their prompts (for prompt generator review)
   app.get("/api/topics/with-prompts", async (req, res) => {
+    // #swagger.tags = ['Topics']
     try {
       const allTopics = await storage.getTopics();
       const allPrompts = await storage.getPrompts();
@@ -37,6 +39,7 @@ export function registerTopicRoutes(app: Express) {
 
   // Soft-delete a topic and its prompts
   app.delete("/api/topics/:id", async (req, res) => {
+    // #swagger.tags = ['Topics']
     try {
       const topicId = parseInt(req.params.id);
       await storage.softDeleteTopic(topicId);
@@ -49,6 +52,7 @@ export function registerTopicRoutes(app: Express) {
 
   // Soft-delete a prompt
   app.delete("/api/prompts/:id", async (req, res) => {
+    // #swagger.tags = ['Topics']
     try {
       const promptId = parseInt(req.params.id);
       await storage.softDeletePrompt(promptId);
@@ -60,6 +64,7 @@ export function registerTopicRoutes(app: Express) {
   });
 
   app.get("/api/topics/analysis", async (req, res) => {
+    // #swagger.tags = ['Topics']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;

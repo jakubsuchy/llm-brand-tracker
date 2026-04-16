@@ -5,6 +5,7 @@ import { storage } from "../storage";
 export function registerSettingsRoutes(app: Express) {
   // browser-status is a computed probe, kept as special GET
   app.get("/api/settings/browser-status", requireRole("admin"), async (req, res) => {
+    // #swagger.tags = ['Settings']
     try {
       const hasApifyToken = !!process.env.APIFY_TOKEN;
       let localUp = false;
@@ -30,6 +31,7 @@ export function registerSettingsRoutes(app: Express) {
   const PUBLIC_SETTINGS_KEYS = new Set(['brand', 'models', 'analysis-schedule']);
 
   app.get("/api/settings/:key", async (req, res) => {
+    // #swagger.tags = ['Settings']
     const key = req.params.key;
     const { getSetting } = await import('../services/settings');
 
@@ -94,6 +96,7 @@ export function registerSettingsRoutes(app: Express) {
 
   // Unified PUT — all writes require admin
   app.put("/api/settings/:key", requireRole("admin"), async (req, res) => {
+    // #swagger.tags = ['Settings']
     const key = req.params.key;
     const { setSetting } = await import('../services/settings');
 

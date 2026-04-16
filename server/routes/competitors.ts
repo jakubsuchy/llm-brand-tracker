@@ -5,6 +5,7 @@ import { storage } from "../storage";
 export function registerCompetitorRoutes(app: Express) {
   // Competitor merge endpoints — registered BEFORE /api/competitors
   app.get("/api/competitors/merge-suggestions", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const suggestions = await storage.getMergeSuggestions();
       res.json(suggestions);
@@ -15,6 +16,7 @@ export function registerCompetitorRoutes(app: Express) {
   });
 
   app.post("/api/competitors/merge", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const { primaryId, absorbedIds } = req.body;
       if (!primaryId || !Array.isArray(absorbedIds) || absorbedIds.length === 0) {
@@ -29,6 +31,7 @@ export function registerCompetitorRoutes(app: Express) {
   });
 
   app.post("/api/competitors/unmerge", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const { competitorId } = req.body;
       if (!competitorId) {
@@ -43,6 +46,7 @@ export function registerCompetitorRoutes(app: Express) {
   });
 
   app.get("/api/competitors/merge-history", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const history = await storage.getMergeHistory();
       res.json(history);
@@ -54,6 +58,7 @@ export function registerCompetitorRoutes(app: Express) {
 
   // Competitor analysis endpoint
   app.get("/api/competitors", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const competitors = await storage.getCompetitors();
       res.json(competitors);
@@ -64,6 +69,7 @@ export function registerCompetitorRoutes(app: Express) {
   });
 
   app.get("/api/competitors/analysis", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
@@ -127,6 +133,7 @@ export function registerCompetitorRoutes(app: Express) {
 
   // Block a competitor: add to blocklist + soft-remove from competitor data
   app.post("/api/competitors/block", async (req, res) => {
+    // #swagger.tags = ['Competitors']
     try {
       const { competitorId } = req.body;
       if (!competitorId) {
