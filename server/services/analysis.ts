@@ -7,6 +7,7 @@ export interface PromptAnalysisResult {
   response: string;
   brandMentioned: boolean;
   competitors: string[];
+  competitorSources: Map<string, 'regex' | 'llm'>;
   sources: string[];
   model: string;
 }
@@ -144,11 +145,14 @@ export async function analyzePromptResponse(
   // Merge: regex matches + LLM finds, deduplicated case-insensitively
   const seen = new Set<string>();
   const competitors: string[] = [];
+  const competitorSources = new Map<string, 'regex' | 'llm'>();
+  const regexSet = new Set(regexMatched.map(n => n.toLowerCase()));
   for (const name of [...regexMatched, ...llmFound]) {
     const key = name.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
       competitors.push(name);
+      competitorSources.set(key, regexSet.has(key) ? 'regex' : 'llm');
     }
   }
 
@@ -156,6 +160,7 @@ export async function analyzePromptResponse(
     response: responseText,
     brandMentioned,
     competitors,
+    competitorSources,
     sources,
     model,
   };

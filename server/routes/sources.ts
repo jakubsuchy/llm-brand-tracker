@@ -52,6 +52,17 @@ export function registerSourceRoutes(app: Express) {
           const { eq: eqOp } = await import("drizzle-orm");
           await database.update(competitorsTable).set({ domain: domain.toLowerCase() }).where(eqOp(competitorsTable.id, competitor.id));
         }
+        // Remove from blocklist and brand domains if present
+        for (const settingKey of ['competitorBlocklist', 'brandDomains']) {
+          const raw = await storage.getSetting(settingKey);
+          if (raw) {
+            const list = raw.split(',').map((s: string) => s.trim()).filter(Boolean);
+            const updated = list.filter((e: string) => e !== domain.toLowerCase());
+            if (updated.length !== list.length) {
+              await storage.setSetting(settingKey, updated.join(','));
+            }
+          }
+        }
         res.json({ success: true, message: `${domain} classified as competitor` });
       } else if (sourceType === 'neutral') {
         // Remove from subdomain recognition if present
@@ -63,9 +74,52 @@ export function registerSourceRoutes(app: Express) {
             await storage.setSetting('competitorSubdomains', updated.join(','));
           }
         }
+        // Add to "Not Competitors" blocklist so it stays neutral
+        const blockRaw = await storage.getSetting('competitorBlocklist');
+        const blockList = blockRaw ? blockRaw.split(',').map((s: string) => s.trim()).filter(Boolean) : ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
+        if (!blockList.includes(domain.toLowerCase())) {
+          blockList.push(domain.toLowerCase());
+          await storage.setSetting('competitorBlocklist', blockList.join(','));
+        }
+        // Remove from brand domains if present
+        const brandRaw = await storage.getSetting('brandDomains');
+        if (brandRaw) {
+          const brandList = brandRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
+          const updated = brandList.filter((e: string) => e !== domain.toLowerCase());
+          if (updated.length !== brandList.length) {
+            await storage.setSetting('brandDomains', updated.join(','));
+          }
+        }
         res.json({ success: true, message: `${domain} classified as neutral` });
+      } else if (sourceType === 'brand') {
+        const domainLower = domain.toLowerCase();
+        // Add to brand domains
+        const brandRaw = await storage.getSetting('brandDomains');
+        const brandList = brandRaw ? brandRaw.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+        if (!brandList.includes(domainLower)) {
+          brandList.push(domainLower);
+          await storage.setSetting('brandDomains', brandList.join(','));
+        }
+        // Remove from blocklist and competitor subdomains if present
+        const blockRaw = await storage.getSetting('competitorBlocklist');
+        if (blockRaw) {
+          const blockList = blockRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
+          const updated = blockList.filter((e: string) => e !== domainLower);
+          if (updated.length !== blockList.length) {
+            await storage.setSetting('competitorBlocklist', updated.join(','));
+          }
+        }
+        const subRaw = await storage.getSetting('competitorSubdomains');
+        if (subRaw) {
+          const subList = subRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
+          const updated = subList.filter((e: string) => e !== domainLower);
+          if (updated.length !== subList.length) {
+            await storage.setSetting('competitorSubdomains', updated.join(','));
+          }
+        }
+        res.json({ success: true, message: `${domain} classified as brand` });
       } else {
-        res.status(400).json({ error: "sourceType must be 'competitor' or 'neutral'" });
+        res.status(400).json({ error: "sourceType must be 'competitor', 'neutral', or 'brand'" });
       }
     } catch (error) {
       console.error("Error reclassifying source:", error);
@@ -129,6 +183,20 @@ export function registerSourceRoutes(app: Express) {
         }
       }
 
+      // Load blocklist (used for both competitor extraction AND source classification)
+      const blocklistRaw = await storage.getSetting('competitorBlocklist');
+      const blocklist = new Set(
+        blocklistRaw
+          ? blocklistRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+          : ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com']
+      );
+
+      // Load additional brand domains
+      const brandDomainsRaw = await storage.getSetting('brandDomains');
+      const brandDomains = new Set(
+        brandDomainsRaw ? brandDomainsRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean) : []
+      );
+
       // Build lookup: competitor domains (if set) + name-based matching
       const competitorDomains = new Set<string>();
       const competitorNameWords: string[][] = [];
@@ -162,7 +230,12 @@ export function registerSourceRoutes(app: Express) {
         const strippedDomain = stripSubdomain(domainLower);
         const strippedBase = strippedDomain.split('.')[0];
         let sourceType = 'neutral';
-        if (brandName && (domainLower.includes(brandName) || brandName.includes(domainBase) || strippedDomain.includes(brandName) || brandName.includes(strippedBase))) {
+        if (brandDomains.has(domainLower) || brandDomains.has(strippedDomain)) {
+          // Explicitly marked as brand domain
+          sourceType = 'brand';
+        } else if (blocklist.has(domainLower) || blocklist.has(strippedDomain) || blocklist.has(domainBase)) {
+          // In the "Not Competitors" list — force neutral
+        } else if (brandName && (domainLower.includes(brandName) || brandName.includes(domainBase) || strippedDomain.includes(brandName) || brandName.includes(strippedBase))) {
           sourceType = 'brand';
         } else if (
           competitorDomains.has(domainLower) ||

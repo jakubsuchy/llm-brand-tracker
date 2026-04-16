@@ -23,6 +23,7 @@ npm run build                        # Vite build + esbuild server bundle
 npm run start                        # Production server (node dist/index.js)
 npm run db:push                      # Push schema to DB (drizzle-kit push)
 npm run swagger                      # Regenerate OpenAPI spec → server/swagger-output.json
+npm run docs                         # Build docs/ markdown → public/docs/ static HTML
 docker compose up --build            # Build and run with postgres
 docker compose up                    # Includes local browser container
 docker compose down -v               # Wipe DB and stop
@@ -59,6 +60,8 @@ client/src/pages/           # Page components (dashboard, competitors, sources, 
 client/src/components/      # Shared UI components (metrics, charts, topic analysis, etc.)
 client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
+docs/                       # Documentation markdown source files
+scripts/build-docs.ts       # Builds docs/ → public/docs/ static HTML (markdown-it)
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 

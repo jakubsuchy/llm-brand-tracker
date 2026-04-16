@@ -11,6 +11,7 @@ import { ModelsCard } from "@/components/settings/models-card";
 import { BrandDetailsCard } from "@/components/settings/brand-details-card";
 import { AnalysisScheduleCard } from "@/components/settings/analysis-schedule-card";
 import { ApifyTokenCard, type ApifyTokenCardRef } from "@/components/settings/apify-token-card";
+import { BrandDomainsCard } from "@/components/settings/brand-domains-card";
 import { CompetitorSubdomainsCard } from "@/components/settings/competitor-subdomains-card";
 import { CompetitorExclusionsCard } from "@/components/settings/competitor-exclusions-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
@@ -110,6 +111,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
 
         {!wizardMode && (
           <TabsContent value="sources" className="space-y-6">
+            <BrandDomainsCard />
             <CompetitorSubdomainsCard />
             <CompetitorExclusionsCard />
           </TabsContent>

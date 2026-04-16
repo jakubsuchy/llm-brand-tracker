@@ -80,7 +80,7 @@ export default function CompetitorLandscapeChart({ runId, model, brandMentionRat
               <button
                 key={c.competitorId}
                 className="w-full text-left group"
-                onClick={() => setLocation(`/compare?competitor=${encodeURIComponent(c.name)}`)}
+                onClick={() => setLocation(`/compare?competitor=${c.competitorId}`)}
               >
                 <div className="flex items-center gap-2 mb-1">
                   {c.domain ? (

@@ -46,7 +46,7 @@ export default function SourcesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const reclassifySource = async (domain: string, sourceType: 'competitor' | 'neutral') => {
+  const reclassifySource = async (domain: string, sourceType: 'competitor' | 'neutral' | 'brand') => {
     try {
       const res = await fetch('/api/sources/reclassify', {
         method: 'POST',
@@ -56,14 +56,10 @@ export default function SourcesPage() {
       if (!res.ok) throw new Error('Failed to reclassify');
       queryClient.invalidateQueries({ predicate: (q) => {
         const key = q.queryKey[0] as string;
-        return typeof key === 'string' && (key.startsWith('/api/sources') || key.startsWith('/api/competitors'));
+        return typeof key === 'string' && (key.startsWith('/api/sources') || key.startsWith('/api/competitors') || key.startsWith('/api/settings'));
       }});
-      toast({
-        title: "Reclassified",
-        description: sourceType === 'competitor'
-          ? `${domain} is now a competitor source.`
-          : `${domain} is now a neutral source.`,
-      });
+      const labels = { competitor: 'competitor', neutral: 'neutral', brand: 'brand' };
+      toast({ title: "Reclassified", description: `${domain} is now a ${labels[sourceType]} source.` });
     } catch {
       toast({ title: "Error", description: "Failed to reclassify domain", variant: "destructive" });
     }
@@ -352,23 +348,36 @@ export default function SourcesPage() {
                           <FileText className="h-3 w-3 inline mr-1 -mt-0.5" />
                           Pages ({domain.urls.length})
                         </button>
-                        {domain.sourceType !== 'competitor' ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'competitor'); }}
-                            className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1 ml-auto"
-                          >
-                            <ArrowRightLeft className="h-3 w-3" />
-                            Mark as competitor
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'neutral'); }}
-                            className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1 ml-auto"
-                          >
-                            <ArrowRightLeft className="h-3 w-3" />
-                            Mark as neutral
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2 ml-auto">
+                          <span className="text-xs text-gray-400">Mark as:</span>
+                          {domain.sourceType !== 'brand' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'brand'); }}
+                              className="text-xs text-gray-400 hover:text-green-600 flex items-center gap-1"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              Brand
+                            </button>
+                          )}
+                          {domain.sourceType !== 'competitor' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'competitor'); }}
+                              className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              Competitor
+                            </button>
+                          )}
+                          {domain.sourceType !== 'neutral' && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'neutral'); }}
+                              className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
+                            >
+                              <ArrowRightLeft className="h-3 w-3" />
+                              Neutral
+                            </button>
+                          )}
+                        </div>
                       </div>
                       {expandedView === 'prompts' && (
                         <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} />
@@ -487,22 +496,33 @@ export default function SourcesPage() {
                                   <FileText className="h-3 w-3 inline mr-1.5 -mt-0.5" />
                                   Pages ({domain.urls.length})
                                 </button>
-                                <div className="ml-auto pr-3">
-                                  {domain.sourceType !== 'competitor' ? (
+                                <div className="ml-auto pr-3 flex items-center gap-2">
+                                  <span className="text-xs text-gray-400">Mark as:</span>
+                                  {domain.sourceType !== 'brand' && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'brand'); }}
+                                      className="text-xs text-gray-400 hover:text-green-600 flex items-center gap-1"
+                                    >
+                                      <ArrowRightLeft className="h-3 w-3" />
+                                      Brand
+                                    </button>
+                                  )}
+                                  {domain.sourceType !== 'competitor' && (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'competitor'); }}
                                       className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1"
                                     >
                                       <ArrowRightLeft className="h-3 w-3" />
-                                      Reclassify as competitor
+                                      Competitor
                                     </button>
-                                  ) : (
+                                  )}
+                                  {domain.sourceType !== 'neutral' && (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); reclassifySource(domain.domain, 'neutral'); }}
                                       className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
                                     >
                                       <ArrowRightLeft className="h-3 w-3" />
-                                      Reclassify as neutral
+                                      Neutral
                                     </button>
                                   )}
                                 </div>

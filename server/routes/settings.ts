@@ -79,6 +79,10 @@ export function registerSettingsRoutes(app: Express) {
           const value = await storage.getSetting('competitorBlocklist');
           return res.json({ entries: value ? value.split(',').map((s: string) => s.trim()).filter(Boolean) : DEFAULT_BLOCKLIST });
         }
+        case 'brand-domains': {
+          const value = await storage.getSetting('brandDomains');
+          return res.json({ domains: value ? value.split(',').map((s: string) => s.trim()).filter(Boolean) : [] });
+        }
         case 'chatgpt-credentials': {
           const email = await getSetting('chatgptEmail');
           const password = await getSetting('chatgptPassword');
@@ -182,6 +186,13 @@ export function registerSettingsRoutes(app: Express) {
           const cleaned = entries.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
           await storage.setSetting('competitorBlocklist', cleaned.join(','));
           return res.json({ success: true, entries: cleaned });
+        }
+        case 'brand-domains': {
+          const { domains } = req.body;
+          if (!Array.isArray(domains)) return res.status(400).json({ error: "domains must be an array" });
+          const cleaned = domains.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+          await storage.setSetting('brandDomains', cleaned.join(','));
+          return res.json({ success: true, domains: cleaned });
         }
         case 'chatgpt-credentials': {
           const { email, password, totpSecret } = req.body;

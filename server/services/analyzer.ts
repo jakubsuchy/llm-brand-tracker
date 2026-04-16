@@ -489,7 +489,7 @@ export class BrandAnalyzer {
       sources: analysis.sources
     });
 
-    // Create competitor mention records
+    // Create competitor mention records + log identification source
     for (const comp of resolvedCompetitors) {
       try {
         await storage.createCompetitorMention({
@@ -497,6 +497,8 @@ export class BrandAnalyzer {
           analysisRunId,
           responseId: responseRecord.id,
         });
+        const source = analysis.competitorSources?.get(comp.name.toLowerCase()) || 'unknown';
+        console.log(`[Competitor] "${comp.name}" (id=${comp.id}) found by ${source} in response #${responseRecord.id} [${model}]`);
       } catch {}
     }
 
