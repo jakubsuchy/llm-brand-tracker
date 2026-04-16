@@ -171,7 +171,12 @@ All API routes protected by PassportJS session auth. The guard in `server/routes
 - Routes without `requireRole` are accessible to any authenticated user
 - Admin always passes any role check
 
-**IMPORTANT: When adding new API routes, add them to the appropriate route module in `server/routes/`, not in `server/routes.ts` directly. ALWAYS add `requireRole('admin')` by default.** Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
+**IMPORTANT when adding routes or components:**
+- Add new API routes to the appropriate module in `server/routes/`, NOT in `server/routes.ts` (which is just the orchestrator). If no existing module fits, create a new `server/routes/<name>.ts` and register it in `server/routes.ts`.
+- ALWAYS add `requireRole('admin')` by default on new routes.
+- **Update the API Routes table in this file** whenever you add, remove, or rename a route.
+- **Update the Project Structure section** whenever you add new component directories or significant files.
+- Large page components should be split: extract card/section components into `client/src/components/<page>/` (e.g. `components/settings/`). Keep page files as thin orchestrators. Then ask the user which role should actually have access. Roles: `admin` (full access), `analyst` (analysis/prompts), `user` (read-only dashboards).
 
 ### MCP Server
 
