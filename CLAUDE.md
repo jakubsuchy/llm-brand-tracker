@@ -54,9 +54,58 @@ shared/models.ts            # Canonical model metadata (labels, brand colors, ic
 server/database-storage.ts  # All DB queries (implements IStorage interface)
 server/storage.ts           # IStorage interface + in-memory implementation
 client/src/pages/           # Page components (dashboard, competitors, sources, etc.)
-client/src/components/      # Shared UI components (metrics, topic analysis, etc.)
+client/src/components/      # Shared UI components (metrics, charts, topic analysis, etc.)
+client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
+```
+
+## API Routes (63 total)
+
+```
+AUTH (12)        server/routes/auth.ts
+  GET/POST  /api/auth/session, /login, /logout, /needs-setup
+  GET       /api/auth/google, /google/callback, /saml, /saml/callback, /saml/metadata
+  POST      /api/initialize, /api/auth/providers (GET+POST)
+
+USERS (7)       server/routes/users.ts
+  GET/POST  /api/users
+  PUT       /api/users/:id, /api/users/:id/password
+  POST      /api/users/:id/roles, /api/users/:id/api-key
+  DELETE    /api/users/:id
+
+METRICS (5)     server/routes/metrics.ts
+  GET       /api/metrics, /api/counts, /api/metrics/visibility-score,
+            /api/metrics/trends, /api/metrics/by-model
+
+TOPICS (5)      server/routes/topics.ts
+  GET       /api/topics, /api/topics/with-prompts, /api/topics/analysis
+  DELETE    /api/topics/:id, /api/prompts/:id
+
+COMPETITORS (7) server/routes/competitors.ts
+  GET       /api/competitors, /api/competitors/analysis,
+            /api/competitors/merge-suggestions, /api/competitors/merge-history
+  POST      /api/competitors/merge, /api/competitors/unmerge, /api/competitors/block
+
+SOURCES (4)     server/routes/sources.ts
+  GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses
+  POST      /api/sources/reclassify
+
+RESPONSES (5)   server/routes/responses.ts
+  GET       /api/prompts, /api/responses, /api/responses/:id
+  POST      /api/prompts/test, /api/data/clear
+
+ANALYSIS (15)   server/routes/analysis.ts
+  POST      /api/analyze-brand, /api/generate-prompts, /api/save-and-analyze,
+            /api/analysis/start, /api/analysis/cancel, /api/test-analysis
+  GET       /api/test, /api/analysis/runs, /api/analysis/failures,
+            /api/analysis/jobs, /api/analysis/progress,
+            /api/analysis/:sessionId/progress, /api/apify-usage, /api/usage,
+            /api/export, /api/generate-topic-prompts
+
+SETTINGS (3)    server/routes/settings.ts
+  GET       /api/settings/browser-status, /api/settings/:key
+  PUT       /api/settings/:key
 ```
 
 ## Database Schema
