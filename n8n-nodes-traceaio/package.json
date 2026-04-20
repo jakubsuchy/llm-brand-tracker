@@ -1,0 +1,35 @@
+{
+  "name": "n8n-nodes-traceaio",
+  "version": "0.1.0",
+  "description": "n8n community node for TraceAIO brand tracking",
+  "keywords": ["n8n-community-node-package"],
+  "license": "Apache-2.0",
+  "author": "Jakub Suchy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jakubsuchy/traceaio.git"
+  },
+  "main": "dist/nodes/TraceAio/TraceAio.node.js",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc && cp traceaio-favicon.png dist/nodes/TraceAioTrigger/ && cp traceaio-favicon.png dist/nodes/TraceAio/",
+    "prepublishOnly": "npm run build"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "nodes": [
+      "dist/nodes/TraceAioTrigger/TraceAioTrigger.node.js",
+      "dist/nodes/TraceAio/TraceAio.node.js"
+    ],
+    "credentials": [
+      "dist/credentials/TraceAioApi.credentials.js"
+    ]
+  },
+  "devDependencies": {
+    "n8n-workflow": "*",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}

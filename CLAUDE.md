@@ -62,6 +62,7 @@ client/src/components/settings/ # Settings page card components (extracted from 
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
 docs/                       # Documentation markdown source files
 scripts/build-docs.ts       # Builds docs/ → public/docs/ static HTML (markdown-it)
+n8n-nodes-traceaio/         # n8n community node package (standalone npm package)
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
@@ -194,6 +195,21 @@ Integrated at `/mcp` inside the Express app (not a separate process). Uses `@mod
 - Legacy users get keys backfilled at startup (`backfillApiKeys()`)
 - Tools return structured JSON — the calling model analyzes the data
 - Express `json()` middleware is skipped for `/mcp` (transport reads raw stream)
+
+### n8n Community Node
+Standalone npm package at `n8n-nodes-traceaio/` — published independently, NOT part of the main app build.
+
+- **TraceAIO Trigger** (`nodes/TraceAioTrigger/`) — polling trigger that fires when analysis runs complete. Fetches `GET /api/analysis/runs?from=` and includes metrics in output.
+- **TraceAIO Action** (`nodes/TraceAio/`) — single node with resource/operation pattern:
+  - Metrics: Get, Get Visibility Score, Get By Model
+  - Competitors: Get All
+  - Sources: Get All
+  - Analysis: Start
+- **Credentials** (`credentials/TraceAioApi.credentials.ts`) — Instance URL + API Key (Bearer token)
+- Build: `cd n8n-nodes-traceaio && npm install && npm run build`
+- Test: `docker compose -f docker-compose.test.yml up --build -d` → n8n at `http://localhost:5678`
+- Icon: `traceaio-favicon.png` copied next to each node's compiled output during build
+- n8n auto-generates trigger labels as "On new {displayName} event" — cannot override
 
 ### Settings system
 - `server/services/settings.ts` provides centralized access to config

@@ -1,0 +1,4 @@
+FROM n8nio/n8n:latest
+COPY dist /custom/node_modules/n8n-nodes-traceaio/dist
+COPY package.json /custom/node_modules/n8n-nodes-traceaio/package.json
+ENV N8N_CUSTOM_EXTENSIONS=/custom
