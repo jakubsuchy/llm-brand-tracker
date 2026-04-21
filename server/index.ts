@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from "path";
 import express, { type Request, Response, NextFunction } from "express";
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
@@ -99,6 +100,10 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
     throw err;
   });
+
+  // Serve shared static assets (e.g. /images/) from project-root public/ in all modes
+  const publicRoot = path.resolve(import.meta.dirname, '..', 'public');
+  app.use(express.static(publicRoot));
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

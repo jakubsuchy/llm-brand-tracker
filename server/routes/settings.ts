@@ -27,6 +27,58 @@ export function registerSettingsRoutes(app: Express) {
     }
   });
 
+  // Webhook test endpoint — fires a test payload using saved config
+  app.post("/api/settings/webhook/test", requireRole("admin"), async (req, res) => {
+    // #swagger.tags = ['Settings']
+    try {
+      const { url, authType, token } = req.body;
+      if (!url) return res.status(400).json({ error: "No webhook URL provided" });
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authType === 'bearer' && token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      let payload;
+      const latestRun = await storage.getLatestAnalysisRun();
+      if (latestRun && latestRun.status === 'complete') {
+        const responses = await storage.getResponsesWithPrompts(latestRun.id);
+        const responseCount = responses.length;
+        const brandMentions = responses.filter(r => r.brandMentioned).length;
+        payload = {
+          event: 'analysis.completed' as const,
+          runId: latestRun.id,
+          startedAt: latestRun.startedAt ? new Date(latestRun.startedAt).toISOString() : null,
+          completedAt: latestRun.completedAt ? new Date(latestRun.completedAt).toISOString() : null,
+          responseCount,
+          brandMentionedRate: responseCount > 0 ? Math.round((brandMentions / responseCount) * 10000) / 10000 : 0,
+          brandMentions,
+        };
+      } else {
+        payload = {
+          event: 'test' as const,
+          runId: 0,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          responseCount: 42,
+          brandMentionedRate: 0.65,
+          brandMentions: 27,
+        };
+      }
+
+      const result = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      res.json({ success: result.ok, status: result.status });
+    } catch (error: any) {
+      res.status(502).json({ error: error.message || "Webhook request failed" });
+    }
+  });
+
   // Unified GET — some keys are public (no role), others require admin
   const PUBLIC_SETTINGS_KEYS = new Set(['brand', 'models', 'analysis-schedule']);
 
@@ -88,6 +140,16 @@ export function registerSettingsRoutes(app: Express) {
           const password = await getSetting('chatgptPassword');
           const totpSecret = await getSetting('chatgptTotpSecret');
           return res.json({ hasEmail: !!email, hasPassword: !!password, hasTotpSecret: !!totpSecret, email: email || '' });
+        }
+        case 'webhook': {
+          const raw = await storage.getSetting('webhookConfig');
+          if (!raw) return res.json({ url: '', authType: 'none', token: '' });
+          try {
+            const config = JSON.parse(raw);
+            return res.json({ url: config.url || '', authType: config.authType || 'none', token: config.token || '' });
+          } catch {
+            return res.json({ url: '', authType: 'none', token: '' });
+          }
         }
         default:
           return res.status(404).json({ error: `Unknown setting: ${key}` });
@@ -199,6 +261,20 @@ export function registerSettingsRoutes(app: Express) {
           if (email !== undefined) await setSetting('chatgptEmail', email || '');
           if (password !== undefined) await setSetting('chatgptPassword', password || '');
           if (totpSecret !== undefined) await setSetting('chatgptTotpSecret', totpSecret || '');
+          return res.json({ success: true });
+        }
+        case 'webhook': {
+          const { url, authType, token } = req.body;
+          if (url && typeof url === 'string') {
+            try { new URL(url); } catch {
+              return res.status(400).json({ error: "Invalid webhook URL" });
+            }
+          }
+          if (authType && authType !== 'none' && authType !== 'bearer') {
+            return res.status(400).json({ error: "authType must be 'none' or 'bearer'" });
+          }
+          const config = { url: url || '', authType: authType || 'none', token: token || '' };
+          await storage.setSetting('webhookConfig', JSON.stringify(config));
           return res.json({ success: true });
         }
         case 'analysis-config': {

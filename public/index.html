@@ -495,6 +495,105 @@ nav .nav-inner {
   line-height: 1.6;
 }
 
+/* ─── Integrations ─── */
+.integrations-section {
+  padding-top: 80px;
+  padding-bottom: 100px;
+}
+.integrations-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+  text-align: center;
+}
+.integrations-section > .container > .section-subtitle {
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 560px;
+  margin: 0 auto 56px;
+}
+.integrations-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.integrations-text {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 28px;
+}
+.integration-item {
+  display: flex;
+  gap: 16px;
+}
+.integration-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.integration-item h3 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+.integration-item p {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.integrations-image {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  position: relative;
+}
+.integrations-image::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(14,165,233,0.25), transparent, rgba(37,99,235,0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+.integrations-image img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.integrations-image .placeholder-img {
+  aspect-ratio: 4 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+@media (max-width: 768px) {
+  .integrations-text {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ─── Get Started ─── */
 .getstarted-section {
   padding-top: 80px;
@@ -815,6 +914,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
       <li><a href="#demo">Demo</a></li>
       <li><a href="#how-it-works">How It Works</a></li>
       <li><a href="#features">Features</a></li>
+      <li><a href="#integrations">Integrations</a></li>
       <li><a href="#get-started">Get Started</a></li>
       <li><a href="/docs/">Docs</a></li>
       <li><a href="https://github.com/jakubsuchy/traceaio" class="btn-nav btn-nav-github" target="_blank"><svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a></li>
@@ -957,8 +1057,53 @@ footer .footer-right a:hover { color: var(--text-secondary); }
       </div>
       <div class="feature-card">
         <div class="feature-num">06</div>
-        <h3>MCP Integration</h3>
-        <p>Query your brand data directly from Claude Code or Claude Desktop. 16 built-in tools for deep analysis.</p>
+        <h3>Integrations</h3>
+        <p>Webhooks, n8n, REST API, and MCP server. Push results where you need them and pull data however you want.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Integrations -->
+<section class="integrations-section" id="integrations">
+  <div class="container">
+    <div class="section-label reveal" style="text-align:center">// integrations</div>
+    <h2 class="reveal reveal-delay-1">Connect to your workflow</h2>
+    <p class="section-subtitle reveal reveal-delay-2">Push results where you need them. Pull data however you want.</p>
+
+    <div class="integrations-layout reveal reveal-delay-3">
+      <div class="integrations-text">
+        <div class="integration-item">
+          <div class="integration-icon"><svg viewBox="-10 -5 1034 1034" width="22" height="22"><path fill="currentColor" d="M482 226h-1l-10 2q-33 4-64.5 18.5t-55.5 38.5q-41 37-57 91q-9 30-8 63t12 63q17 45 52 78l13 12l-83 135q-26-1-45 7q-30 13-45 40q-7 15-9 31t2 32q8 30 33 48q15 10 33 14.5t36 2t34.5-12.5t27.5-25q12-17 14.5-39t-5.5-41q-1-5-7-14l-3-6l118-192q6-9 8-14l-10-3q-9-2-13-4q-23-10-41.5-27.5t-28.5-39.5q-17-36-9-75q4-23 17-43t31-34q37-27 82-27q27-1 52.5 9.5t44.5 30.5q17 16 26.5 38.5t10.5 45.5q0 17-6 42l70 19l8 1q14-43 7-86q-4-33-19.5-63.5t-39.5-53.5q-42-42-103-56q-6-2-18-4l-14-2h-37zM500 350q-17 0-34 7t-30.5 20.5t-19.5 31.5q-8 20-4 44q3 18 14 34t28 25q24 15 56 13q3 4 5 8l112 191q3 6 6 9q27-26 58.5-35.5t65-3.5t58.5 26q32 25 43.5 61.5t0.5 73.5q-8 28-28.5 50t-48.5 33q-31 13-66.5 8.5t-63.5-24.5q-4-3-13-10l-5-6q-4 3-11 10l-47 46q23 23 52 38.5t61 21.5l22 4h39l28-5q64-13 110-60q22-22 36.5-50.5t19.5-59.5q5-36-2-71.5t-25-64.5t-44-51t-57-35q-34-14-70.5-16t-71.5 7l-17 5l-81-137q13-19 16-37q5-32-13-60q-16-25-44-35q-17-6-35-6zM218 614q-58 13-100 53q-47 44-61 105l-4 24v37l2 11q2 13 4 20q7 31 24.5 59t42.5 49q50 41 115 49q38 4 76-4.5t70-28.5q53-34 78-91q7-17 14-45q6-1 18 0l125 2q14 0 20 1q11 20 25 31t31.5 16t35.5 4q28-3 50-20q27-21 32-54q2-17-1.5-33t-13.5-30q-16-22-41-32q-17-7-35.5-6.5t-35.5 7.5q-28 12-43 37l-3 6q-14 0-42-1l-113-1q-15-1-43-1l-50-1l3 17q8 43-13 81q-14 27-40 45t-57 22q-35 6-70-7.5t-57-42.5q-28-35-27-79q1-37 23-69q13-19 32-32t41-19l9-3z"/></svg></div>
+          <div>
+            <h3>Webhooks</h3>
+            <p>Get notified when analysis completes. Configure a URL, optional Bearer token auth, and receive run results as a POST &mdash; pipe them into Slack, n8n, Zapier, or your own backend.</p>
+          </div>
+        </div>
+        <div class="integration-item">
+          <div class="integration-icon"><svg fill="currentColor" fill-rule="evenodd" height="22" viewBox="0 0 24 24" width="22"><path clip-rule="evenodd" d="M24 8.4c0 1.325-1.102 2.4-2.462 2.4-1.146 0-2.11-.765-2.384-1.8h-3.436c-.602 0-1.115.424-1.214 1.003l-.101.592a2.38 2.38 0 01-.8 1.405c.412.354.704.844.8 1.405l.1.592A1.222 1.222 0 0015.719 15h.975c.273-1.035 1.237-1.8 2.384-1.8 1.36 0 2.461 1.075 2.461 2.4S20.436 18 19.078 18c-1.147 0-2.11-.765-2.384-1.8h-.975c-1.204 0-2.23-.848-2.428-2.005l-.101-.592a1.222 1.222 0 00-1.214-1.003H10.97c-.308.984-1.246 1.7-2.356 1.7-1.11 0-2.048-.716-2.355-1.7H4.817c-.308.984-1.246 1.7-2.355 1.7C1.102 14.3 0 13.225 0 11.9s1.102-2.4 2.462-2.4c1.183 0 2.172.815 2.408 1.9h1.337c.236-1.085 1.225-1.9 2.408-1.9 1.184 0 2.172.815 2.408 1.9h.952c.601 0 1.115-.424 1.213-1.003l.102-.592c.198-1.157 1.225-2.005 2.428-2.005h3.436c.274-1.035 1.238-1.8 2.384-1.8C22.898 6 24 7.075 24 8.4zm-1.23 0c0 .663-.552 1.2-1.232 1.2-.68 0-1.23-.537-1.23-1.2 0-.663.55-1.2 1.23-1.2.68 0 1.231.537 1.231 1.2zM2.461 13.1c.68 0 1.23-.537 1.23-1.2 0-.663-.55-1.2-1.23-1.2-.68 0-1.231.537-1.231 1.2 0 .663.55 1.2 1.23 1.2zm6.153 0c.68 0 1.231-.537 1.231-1.2 0-.663-.55-1.2-1.23-1.2-.68 0-1.231.537-1.231 1.2 0 .663.55 1.2 1.23 1.2zm10.462 3.7c.68 0 1.23-.537 1.23-1.2 0-.663-.55-1.2-1.23-1.2-.68 0-1.23.537-1.23 1.2 0 .663.55 1.2 1.23 1.2z"/></svg></div>
+          <div>
+            <h3>n8n</h3>
+            <p>Community node for n8n. Trigger workflows on analysis completion, sync results to spreadsheets, send reports via email, and connect to 400+ other apps.</p>
+          </div>
+        </div>
+        <div class="integration-item">
+          <div class="integration-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/><path d="M14.5 4l-5 16"/></svg></div>
+          <div>
+            <h3>REST API</h3>
+            <p>Full API with Swagger docs. Fetch runs, responses, competitors, sources, and metrics. Build dashboards, reports, or feed data into your own analytics pipeline.</p>
+          </div>
+        </div>
+        <div class="integration-item">
+          <div class="integration-icon"><svg viewBox="0 0 180 180" width="22" height="22" fill="none"><path d="M18 84.8528L85.8822 16.9706C95.2548 7.59798 110.451 7.59798 119.823 16.9706C129.196 26.3431 129.196 41.5391 119.823 50.9117L68.5581 102.177" stroke="currentColor" stroke-width="12" stroke-linecap="round"/><path d="M69.2652 101.47L119.823 50.9117C129.196 41.5391 144.392 41.5391 153.765 50.9117L154.118 51.2652C163.491 60.6378 163.491 75.8338 154.118 85.2063L92.7248 146.6C89.6006 149.724 89.6006 154.789 92.7248 157.913L105.331 170.52" stroke="currentColor" stroke-width="12" stroke-linecap="round"/><path d="M102.853 33.9411L52.6482 84.1457C43.2756 93.5183 43.2756 108.714 52.6482 118.087C62.0208 127.459 77.2167 127.459 86.5893 118.087L136.794 67.8822" stroke="currentColor" stroke-width="12" stroke-linecap="round"/></svg></div>
+          <div>
+            <h3>MCP Server</h3>
+            <p>16 built-in tools for Claude Code and Claude Desktop. Query your brand data conversationally &mdash; compare models, find citation gaps, track trends across runs.</p>
+          </div>
+        </div>
+      </div>
+      <div class="integrations-image">
+        <img src="images/integrations-flow.svg" alt="Integration flow: TraceAIO connects via Webhook, n8n, and REST API to Salesforce, HubSpot, Slack, and more">
       </div>
     </div>
   </div>

@@ -91,9 +91,13 @@ export async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   analysisWorker.runFullAnalysis(useExisting, savedPrompts || undefined).then(async () => {
     await storage.completeAnalysisRun(analysisRun.id, 'complete');
     console.log(`[DEBUG] Analysis run #${analysisRun.id} completed`);
+    const { fireWebhook } = await import('../services/webhook');
+    fireWebhook(analysisRun.id, 'complete');
   }).catch(async (error) => {
     await storage.completeAnalysisRun(analysisRun.id, 'error');
     console.error("Analysis failed:", error);
+    const { fireWebhook } = await import('../services/webhook');
+    fireWebhook(analysisRun.id, 'error');
   });
 
   return sessionId;

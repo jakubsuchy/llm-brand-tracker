@@ -63,9 +63,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         worker.runFullAnalysis(true).then(async () => {
           await storage.completeAnalysisRun(latestRun.id, 'complete');
           console.log(`[STARTUP] Recovered analysis run #${latestRun.id} completed`);
+          const { fireWebhook } = await import('./services/webhook');
+          fireWebhook(latestRun.id, 'complete');
         }).catch(async (error) => {
           await storage.completeAnalysisRun(latestRun.id, 'error');
           console.error('[STARTUP] Recovered analysis run failed:', error);
+          const { fireWebhook } = await import('./services/webhook');
+          fireWebhook(latestRun.id, 'error');
         });
       }
     }

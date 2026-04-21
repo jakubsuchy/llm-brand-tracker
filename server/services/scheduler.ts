@@ -91,6 +91,8 @@ function initExpirationWatchdog(): void {
           console.log(`[WATCHDOG] Analysis run #${run.id} exceeded 24h (${Math.round(elapsed / 3600000)}h), expiring`);
           await storage.cancelJobsForRun(run.id);
           await storage.completeAnalysisRun(run.id, 'error');
+          const { fireWebhook } = await import('./webhook');
+          fireWebhook(run.id, 'error');
         }
       }
     } catch (error) {
