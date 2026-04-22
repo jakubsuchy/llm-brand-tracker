@@ -92,12 +92,32 @@ export function parseHttpUrl(raw: string): URL | null {
  *    lowercased paths and missed matches are a bigger problem than overlap)
  *  - Trailing slash stripped (except on root)
  *  - Fragment dropped
- *  - `utm_*` query params dropped; remaining params sorted by key (stable —
- *    same-key value order preserved)
+ *  - Tracking query params dropped (case-insensitive): `utm_*` plus a curated
+ *    list of ad-click and analytics IDs (see TRACKING_PARAMS below). Remaining
+ *    params sorted by key (stable — same-key value order preserved)
  *
  * Falls back to `raw.trim().toLowerCase()` if parsing fails so malformed
  * inputs still get a stable (if blunt) key.
  */
+// Tracking query params that encode user identity or campaign attribution,
+// not content. Stripped during normalization so URLs cited with/without
+// tracking query strings collapse to the same canonical form.
+const TRACKING_PARAMS = new Set([
+  'trackingid',
+  // Google
+  'gclid', 'gbraid', 'wbraid', 'gad', 'gad_source', 'gclsrc', 'dclid', '_gl',
+  // Meta / Facebook
+  'fbclid',
+  // Microsoft / Bing
+  'msclkid',
+  // TikTok, Yandex, Pinterest, Instagram, LinkedIn
+  'ttclid', 'yclid', 'epik', 'igshid', 'li_fat_id',
+  // Mailchimp, Marketo
+  'mc_cid', 'mc_eid', 'mkt_tok',
+  // HubSpot
+  '_hsenc', '_hsmi', '__hstc', '__hssc', '__hsfp',
+]);
+
 export function normalizeUrl(raw: string): string {
   try {
     const u = new URL(raw.trim());
@@ -107,7 +127,10 @@ export function normalizeUrl(raw: string): string {
     const port = !u.port || defaultPort ? '' : `:${u.port}`;
     let path = (u.pathname || '/').toLowerCase();
     if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-    const params = [...u.searchParams.entries()].filter(([k]) => !k.toLowerCase().startsWith('utm_'));
+    const params = [...u.searchParams.entries()].filter(([k]) => {
+      const kl = k.toLowerCase();
+      return !kl.startsWith('utm_') && !TRACKING_PARAMS.has(kl);
+    });
     params.sort((a, b) => a[0].localeCompare(b[0]));
     const query = params.length ? '?' + new URLSearchParams(params).toString() : '';
     return `https://${host}${port}${path}${query}`;

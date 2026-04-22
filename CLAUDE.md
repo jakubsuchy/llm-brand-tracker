@@ -41,6 +41,7 @@ server/routes/metrics.ts    # Dashboard metrics (visibility, trends, by-model, c
 server/routes/topics.ts     # Topics + prompts + topic analysis
 server/routes/competitors.ts # Competitor CRUD, merge, analysis, blocking
 server/routes/sources.ts    # Source analysis + reclassification
+server/routes/watched-urls.ts # Source Watchlist CRUD + new-citations polling
 server/routes/responses.ts  # Responses, prompts list, data clear
 server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
 server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
@@ -68,7 +69,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (69 total)
+## API Routes (70 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -99,8 +100,9 @@ SOURCES (4)     server/routes/sources.ts
   GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses
   POST      /api/sources/reclassify
 
-WATCHED URLS (5) server/routes/sources.ts
-  GET       /api/watched-urls, /api/watched-urls/:id/citations
+WATCHED URLS (6) server/routes/watched-urls.ts
+  GET       /api/watched-urls, /api/watched-urls/new-citations,
+            /api/watched-urls/:id/citations
   POST      /api/watched-urls
   PUT       /api/watched-urls/:id
   DELETE    /api/watched-urls/:id
@@ -183,7 +185,9 @@ api_usage (OpenAI token tracking)
 - **Matching is indexed**: `source_urls.normalized_url` holds the canonical form (populated on write, backfilled at startup via `backfillNormalizedSourceUrls`). `getWatchedUrlCitations` JOINs `source_urls` on `normalized_url = watched_urls.normalized_url` — indexed b-tree lookup, not a table scan. The JOIN resolves responses via `(analysis_run_id, model)` and filters with `ANY(r.sources)` to pick the exact response that cited the URL.
 - **Canonicalization** lives in `normalizeUrl` (`server/services/analysis.ts`). Intentional transformations: coerce scheme to `https`, strip `www.`, drop default ports, lowercase path, strip trailing slash, drop fragment, drop `utm_*` params, sort remaining params by key. http↔https are treated as equivalent by design. Path lowercasing is a deliberate tradeoff — produces false positives on case-sensitive servers but matches typical content URLs.
 - **Adding new URLs**: `POST /api/watched-urls` uses `parseHttpUrl` (same module) to reject non-http(s) schemes before normalization — this prevents a stored `javascript:` URL from ever reaching the `<a href>` sink in the UI.
-- UI lives as the first tab on the Sources page (`client/src/components/sources/watchlist-tab.tsx`). Do NOT promote to a top-level menu unless it needs a dashboard widget — kept nested to cluster with related source data.
+- **Routes live in their own module** (`server/routes/watched-urls.ts`), not in `sources.ts`. Each resource gets its own file per the route-module convention.
+- **Post-run polling**: `GET /api/watched-urls/new-citations?sinceRunId=X` returns watched URLs first cited in any run with id > X. Intended pairing: subscribe to the webhook that fires on run completion, then call this endpoint with the last-observed run ID to get fresh debut citations. The MCP `list-watched-urls` tool accepts the same `sinceRunId` argument for the same purpose.
+- UI lives as a tab on the Sources page (`client/src/components/sources/watchlist-tab.tsx`), secondary to the Domains tab. Do NOT promote to a top-level menu unless it needs a dashboard widget.
 - Never hard-delete a watched URL via DB — use `DELETE /api/watched-urls/:id`, which removes the row (no cascading effect, since no other table references `watched_urls`).
 
 ### Authentication & Route Protection

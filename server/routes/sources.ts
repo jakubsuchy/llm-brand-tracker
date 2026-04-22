@@ -1,7 +1,6 @@
 import type { Express } from "express";
-import { parseDateRange, getCurrentBrandName, requireRole } from "./helpers";
+import { parseDateRange, getCurrentBrandName } from "./helpers";
 import { storage } from "../storage";
-import { normalizeUrl, parseHttpUrl } from "../services/analysis";
 
 export function registerSourceRoutes(app: Express) {
   app.get("/api/sources", async (req, res) => {
@@ -258,100 +257,6 @@ export function registerSourceRoutes(app: Express) {
     } catch (error) {
       console.error("Error fetching source analysis:", error);
       res.status(500).json({ error: "Failed to fetch source analysis" });
-    }
-  });
-
-  // --- Watched URLs (Source Watchlist) ---
-
-  app.get("/api/watched-urls", async (req, res) => {
-    // #swagger.tags = ['Watched URLs']
-    try {
-      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const model = (req.query.model || req.query.provider) as string | undefined;
-      const withCitations = req.query.citations === 'true';
-      if (withCitations) {
-        const result = await storage.getWatchedUrlsWithCitations(runId, model);
-        res.json(result);
-      } else {
-        res.json(await storage.getWatchedUrls());
-      }
-    } catch (error) {
-      console.error("Error fetching watched URLs:", error);
-      res.status(500).json({ error: "Failed to fetch watched URLs" });
-    }
-  });
-
-  app.get("/api/watched-urls/:id/citations", async (req, res) => {
-    // #swagger.tags = ['Watched URLs']
-    try {
-      const id = parseInt(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
-      const model = (req.query.model || req.query.provider) as string | undefined;
-      const result = await storage.getWatchedUrlCitations(id, runId, model);
-      if (!result) return res.status(404).json({ error: "Watched URL not found" });
-      res.json(result);
-    } catch (error) {
-      console.error("Error fetching watched URL citations:", error);
-      res.status(500).json({ error: "Failed to fetch citations" });
-    }
-  });
-
-  app.post("/api/watched-urls", requireRole('analyst'), async (req, res) => {
-    // #swagger.tags = ['Watched URLs']
-    try {
-      const { url, title, notes } = req.body || {};
-      if (!url || typeof url !== 'string') {
-        return res.status(400).json({ error: "url is required" });
-      }
-      if (!parseHttpUrl(url)) {
-        return res.status(400).json({ error: "url must be a valid http(s) URL" });
-      }
-      const normalizedUrl = normalizeUrl(url);
-      const existing = await storage.getWatchedUrlByNormalized(normalizedUrl);
-      if (existing) {
-        return res.status(409).json({ error: "URL already in watchlist", watchedUrl: existing });
-      }
-      const userId = (req.user as any)?.id;
-      const created = await storage.createWatchedUrl({
-        url: url.trim(),
-        normalizedUrl,
-        title: title || null,
-        notes: notes || null,
-        addedByUserId: userId || null,
-      });
-      res.status(201).json(created);
-    } catch (error) {
-      console.error("Error creating watched URL:", error);
-      res.status(500).json({ error: "Failed to create watched URL" });
-    }
-  });
-
-  app.put("/api/watched-urls/:id", requireRole('analyst'), async (req, res) => {
-    // #swagger.tags = ['Watched URLs']
-    try {
-      const id = parseInt(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-      const { title, notes } = req.body || {};
-      const updated = await storage.updateWatchedUrl(id, { title, notes });
-      if (!updated) return res.status(404).json({ error: "Watched URL not found" });
-      res.json(updated);
-    } catch (error) {
-      console.error("Error updating watched URL:", error);
-      res.status(500).json({ error: "Failed to update watched URL" });
-    }
-  });
-
-  app.delete("/api/watched-urls/:id", requireRole('analyst'), async (req, res) => {
-    // #swagger.tags = ['Watched URLs']
-    try {
-      const id = parseInt(req.params.id);
-      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-      await storage.deleteWatchedUrl(id);
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error deleting watched URL:", error);
-      res.status(500).json({ error: "Failed to delete watched URL" });
     }
   });
 

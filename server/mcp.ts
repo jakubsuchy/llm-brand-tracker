@@ -409,7 +409,7 @@ function createMcpServer(): McpServer {
   // ---- list-watched-urls ----
   server.tool(
     'list-watched-urls',
-    'List URLs on the Source Watchlist (content the user is tracking to see when LLMs start citing it). Returns each URL with citation count, first-cited run, per-model citation counts, and the full list of citations (responseId, runId, model, citedAt, promptText, brandMentioned). Use for "has anyone cited my blog post?", "which of my pages are being cited?", "show my watchlist status". Do NOT use for discovered third-party sources — use list-sources instead.',
+    'List URLs on the Source Watchlist (content the user is tracking to see when LLMs start citing it). Returns each URL with citation count, first-cited run, per-model citation counts, and the full list of citations (responseId, runId, model, citedAt, promptText, brandMentioned). Use for "has anyone cited my blog post?", "which of my pages are being cited?", "show my watchlist status". Use the sinceRunId arg for "what got newly cited since run X?" — it returns only URLs first cited in a run AFTER sinceRunId. Do NOT use for discovered third-party sources — use list-sources instead.',
     {
       runId: z.number().optional().describe('Filter citations by analysis run ID'),
       model: z
@@ -420,12 +420,19 @@ function createMcpServer(): McpServer {
         .boolean()
         .optional()
         .describe('If true, omit watched URLs that have zero citations'),
+      sinceRunId: z
+        .number()
+        .optional()
+        .describe('If set, only return watched URLs first cited in runs with id > sinceRunId. Use for post-run polling to discover newly cited URLs.'),
     },
-    async ({ runId, model, onlyCited }) => {
-      const results = await storage.getWatchedUrlsWithCitations(runId, model);
-      const filtered = onlyCited ? results.filter((r) => r.citationCount > 0) : results;
+    async ({ runId, model, onlyCited, sinceRunId }) => {
+      let results = await storage.getWatchedUrlsWithCitations(runId, model);
+      if (sinceRunId !== undefined) {
+        results = results.filter((r) => r.firstCitedRunId !== null && r.firstCitedRunId > sinceRunId);
+      }
+      if (onlyCited) results = results.filter((r) => r.citationCount > 0);
       return textResult(
-        filtered.map((r) => ({
+        results.map((r) => ({
           id: r.id,
           url: r.url,
           title: r.title,

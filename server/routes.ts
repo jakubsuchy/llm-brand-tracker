@@ -8,6 +8,7 @@ import { registerMetricsRoutes } from "./routes/metrics";
 import { registerTopicRoutes } from "./routes/topics";
 import { registerCompetitorRoutes } from "./routes/competitors";
 import { registerSourceRoutes } from "./routes/sources";
+import { registerWatchedUrlRoutes } from "./routes/watched-urls";
 import { registerResponseRoutes } from "./routes/responses";
 import { registerAnalysisRoutes } from "./routes/analysis";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -43,6 +44,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerTopicRoutes(app);
   registerCompetitorRoutes(app);
   registerSourceRoutes(app);
+  registerWatchedUrlRoutes(app);
   registerResponseRoutes(app);
   registerAnalysisRoutes(app);
   registerSettingsRoutes(app);

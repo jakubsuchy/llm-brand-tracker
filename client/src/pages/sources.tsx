@@ -13,7 +13,7 @@ import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, C
 import type { SourceAnalysis, Topic } from "@shared/schema";
 import { WatchlistTab } from "@/components/sources/watchlist-tab";
 
-const SOURCE_TABS = ['watchlist', 'domains'] as const;
+const SOURCE_TABS = ['domains', 'watchlist'] as const;
 
 interface AnalysisRun {
   id: number;
@@ -39,7 +39,7 @@ interface DomainData {
 export default function SourcesPage() {
   const initialTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
     ? window.location.hash.slice(1)
-    : 'watchlist';
+    : 'domains';
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -152,8 +152,8 @@ export default function SourcesPage() {
     <div className="p-4 sm:p-8 space-y-8">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList className="mb-6">
-          <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
+          <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
         </TabsList>
 
         <TabsContent value="watchlist">
