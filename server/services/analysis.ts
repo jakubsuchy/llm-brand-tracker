@@ -62,6 +62,61 @@ export function extractUrlsFromMarkdown(text: string): string[] {
 }
 
 /**
+ * Parse a user-supplied URL and require http(s) scheme with a non-empty host.
+ * Returns the parsed URL, or null if invalid. Use this at every ingress point
+ * that stores a URL later rendered into an `href` or similar navigation sink —
+ * a `javascript:` URL in `href` is a classic stored-XSS vector.
+ */
+export function parseHttpUrl(raw: string): URL | null {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (!u.hostname) return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Canonicalize a URL for equality comparison. The result is stored in
+ * `source_urls.normalized_url` and `watched_urls.normalized_url` and used
+ * as the join key for citation lookups.
+ *
+ * Transformations:
+ *  - Scheme coerced to https (treat http/https as equivalent)
+ *  - Hostname lowercased; leading `www.` stripped
+ *  - Default ports (80/443) dropped; other ports preserved
+ *  - Path lowercased (deliberate tradeoff — produces false positives on
+ *    case-sensitive servers, but content URLs almost always live under
+ *    lowercased paths and missed matches are a bigger problem than overlap)
+ *  - Trailing slash stripped (except on root)
+ *  - Fragment dropped
+ *  - `utm_*` query params dropped; remaining params sorted by key (stable —
+ *    same-key value order preserved)
+ *
+ * Falls back to `raw.trim().toLowerCase()` if parsing fails so malformed
+ * inputs still get a stable (if blunt) key.
+ */
+export function normalizeUrl(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    let host = u.hostname.toLowerCase();
+    if (host.startsWith('www.')) host = host.slice(4);
+    const defaultPort = u.port === '443' || u.port === '80';
+    const port = !u.port || defaultPort ? '' : `:${u.port}`;
+    let path = (u.pathname || '/').toLowerCase();
+    if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+    const params = [...u.searchParams.entries()].filter(([k]) => !k.toLowerCase().startsWith('utm_'));
+    params.sort((a, b) => a[0].localeCompare(b[0]));
+    const query = params.length ? '?' + new URLSearchParams(params).toString() : '';
+    return `https://${host}${port}${path}${query}`;
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+/**
  * Calculate string similarity between two competitor names.
  * Used for deduplication — returns 0-100.
  */

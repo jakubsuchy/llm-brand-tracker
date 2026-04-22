@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -55,7 +55,20 @@ export const sourceUrls = pgTable("source_urls", {
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id),
   model: text("model"),
   url: text("url").notNull(),
+  normalizedUrl: text("normalized_url"),
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
+}, (t) => ({
+  normalizedUrlIdx: index("source_urls_normalized_url_idx").on(t.normalizedUrl),
+}));
+
+export const watchedUrls = pgTable("watched_urls", {
+  id: serial("id").primaryKey(),
+  url: text("url").notNull(),
+  normalizedUrl: text("normalized_url").notNull().unique(),
+  title: text("title"),
+  notes: text("notes"),
+  addedByUserId: integer("added_by_user_id"),
+  addedAt: timestamp("added_at").defaultNow(),
 });
 
 export const analytics = pgTable("analytics", {
@@ -232,6 +245,12 @@ export const insertUserRoleSchema = createInsertSchema(userRoles).omit({
   id: true,
 });
 
+export const insertWatchedUrlSchema = createInsertSchema(watchedUrls).omit({
+  id: true,
+  addedAt: true,
+  normalizedUrl: true,
+});
+
 // Types
 export type Topic = typeof topics.$inferSelect;
 export type InsertTopic = z.infer<typeof insertTopicSchema>;
@@ -275,6 +294,27 @@ export type UserRole = typeof userRoles.$inferSelect;
 export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
 
 export type UserWithRoles = User & { roles: string[] };
+
+export type WatchedUrl = typeof watchedUrls.$inferSelect;
+export type InsertWatchedUrl = z.infer<typeof insertWatchedUrlSchema>;
+
+export type WatchedUrlCitation = {
+  responseId: number;
+  runId: number | null;
+  model: string | null;
+  url: string;
+  citedAt: Date | null;
+  promptText: string;
+  brandMentioned: boolean;
+};
+
+export type WatchedUrlWithCitations = WatchedUrl & {
+  citationCount: number;
+  firstCitedAt: Date | null;
+  firstCitedRunId: number | null;
+  citationsByModel: Record<string, number>;
+  citations: WatchedUrlCitation[];
+};
 
 // Extended types for API responses
 export type PromptWithTopic = Prompt & { topic: Topic | null };

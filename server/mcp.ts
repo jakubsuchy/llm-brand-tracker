@@ -406,6 +406,41 @@ function createMcpServer(): McpServer {
     },
   );
 
+  // ---- list-watched-urls ----
+  server.tool(
+    'list-watched-urls',
+    'List URLs on the Source Watchlist (content the user is tracking to see when LLMs start citing it). Returns each URL with citation count, first-cited run, per-model citation counts, and the full list of citations (responseId, runId, model, citedAt, promptText, brandMentioned). Use for "has anyone cited my blog post?", "which of my pages are being cited?", "show my watchlist status". Do NOT use for discovered third-party sources — use list-sources instead.',
+    {
+      runId: z.number().optional().describe('Filter citations by analysis run ID'),
+      model: z
+        .string()
+        .optional()
+        .describe('Filter citations by model (perplexity, chatgpt, gemini)'),
+      onlyCited: z
+        .boolean()
+        .optional()
+        .describe('If true, omit watched URLs that have zero citations'),
+    },
+    async ({ runId, model, onlyCited }) => {
+      const results = await storage.getWatchedUrlsWithCitations(runId, model);
+      const filtered = onlyCited ? results.filter((r) => r.citationCount > 0) : results;
+      return textResult(
+        filtered.map((r) => ({
+          id: r.id,
+          url: r.url,
+          title: r.title,
+          notes: r.notes,
+          addedAt: r.addedAt,
+          citationCount: r.citationCount,
+          firstCitedAt: r.firstCitedAt,
+          firstCitedRunId: r.firstCitedRunId,
+          citationsByModel: r.citationsByModel,
+          citations: r.citations,
+        })),
+      );
+    },
+  );
+
   // ---- list-runs ----
   server.tool(
     'list-runs',

@@ -10,8 +10,10 @@ import {
   TopicAnalysis, CompetitorAnalysis, SourceAnalysis,
   MergeSuggestion, MergeHistoryEntry,
   JobQueueItem, InsertJobQueueItem, JobQueueProgress,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage
+  WatchedUrl, InsertWatchedUrl, WatchedUrlWithCitations, WatchedUrlCitation,
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls
 } from "@shared/schema";
+import { normalizeUrl } from "./services/analysis";
 import { db } from "./db";
 import { eq, desc, count, sql, isNull, and, gte, lte } from "drizzle-orm";
 import { IStorage } from "./storage";
@@ -28,6 +30,38 @@ export class DatabaseStorage implements IStorage {
       await this.initializeTopics();
       await this.initializeCompetitors();
       await this.initializeSources();
+    }
+    // Fill in any NULL normalized_url rows left over from before that column existed
+    this.backfillNormalizedSourceUrls().catch((err) => {
+      console.error('[backfill] normalized_url backfill failed:', err);
+    });
+  }
+
+  /**
+   * One-time backfill: computes normalized_url for any source_urls rows that
+   * don't have one yet. Idempotent — safe to call on every startup.
+   */
+  async backfillNormalizedSourceUrls(): Promise<void> {
+    const BATCH = 500;
+    let updated = 0;
+    while (true) {
+      const rows = await db
+        .select({ id: sourceUrls.id, url: sourceUrls.url })
+        .from(sourceUrls)
+        .where(isNull(sourceUrls.normalizedUrl))
+        .limit(BATCH);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        await db
+          .update(sourceUrls)
+          .set({ normalizedUrl: normalizeUrl(row.url) })
+          .where(eq(sourceUrls.id, row.id));
+      }
+      updated += rows.length;
+      if (rows.length < BATCH) break;
+    }
+    if (updated > 0) {
+      console.log(`[backfill] Normalized ${updated} source_urls rows.`);
     }
   }
 
@@ -247,7 +281,13 @@ export class DatabaseStorage implements IStorage {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     for (const url of urls) {
-      await db.insert(sourceUrls).values({ sourceId: source.id, url, analysisRunId: analysisRunId || null, model: model || null });
+      await db.insert(sourceUrls).values({
+        sourceId: source.id,
+        url,
+        normalizedUrl: normalizeUrl(url),
+        analysisRunId: analysisRunId || null,
+        model: model || null,
+      });
     }
   }
 
@@ -799,6 +839,124 @@ export class DatabaseStorage implements IStorage {
     await db.delete(apifyUsage);
     await db.delete(analysisRuns);
     console.log(`[${new Date().toISOString()}] DatabaseStorage: Results cleared, prompts and topics preserved`);
+  }
+
+  // Watched URLs
+  async getWatchedUrls(): Promise<WatchedUrl[]> {
+    return await db.select().from(watchedUrls).orderBy(desc(watchedUrls.addedAt));
+  }
+
+  async getWatchedUrlById(id: number): Promise<WatchedUrl | undefined> {
+    const [row] = await db.select().from(watchedUrls).where(eq(watchedUrls.id, id));
+    return row || undefined;
+  }
+
+  async getWatchedUrlByNormalized(normalized: string): Promise<WatchedUrl | undefined> {
+    const [row] = await db.select().from(watchedUrls).where(eq(watchedUrls.normalizedUrl, normalized));
+    return row || undefined;
+  }
+
+  async createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl> {
+    const [row] = await db.insert(watchedUrls).values(watched).returning();
+    return row;
+  }
+
+  async updateWatchedUrl(id: number, patch: Partial<Pick<WatchedUrl, 'title' | 'notes'>>): Promise<WatchedUrl | undefined> {
+    const [row] = await db.update(watchedUrls).set(patch).where(eq(watchedUrls.id, id)).returning();
+    return row || undefined;
+  }
+
+  async deleteWatchedUrl(id: number): Promise<void> {
+    await db.delete(watchedUrls).where(eq(watchedUrls.id, id));
+  }
+
+  /**
+   * Aggregate all watched URLs with their citations across source_urls and
+   * responses.sources (the array column on responses that stores raw cited URLs).
+   * Matches are done on normalized URL.
+   */
+  async getWatchedUrlsWithCitations(runId?: number, model?: string): Promise<WatchedUrlWithCitations[]> {
+    const watched = await this.getWatchedUrls();
+    if (watched.length === 0) return [];
+    const results: WatchedUrlWithCitations[] = [];
+    for (const w of watched) {
+      const single = await this.getWatchedUrlCitations(w.id, runId, model);
+      if (single) results.push(single);
+    }
+    return results;
+  }
+
+  async getWatchedUrlCitations(id: number, runId?: number, model?: string): Promise<WatchedUrlWithCitations | undefined> {
+    const watched = await this.getWatchedUrlById(id);
+    if (!watched) return undefined;
+
+    // JOIN on source_urls.normalized_url (indexed). Responses are resolved
+    // via (analysis_run_id, model) — unique per-prompt in each run — and the
+    // ANY(r.sources) filter disambiguates which response in a run×model group
+    // actually cited this URL when multiple prompts ran.
+    const whereClauses: any[] = [eq(sourceUrls.normalizedUrl, watched.normalizedUrl)];
+    if (runId) whereClauses.push(eq(sourceUrls.analysisRunId, runId));
+    if (model) whereClauses.push(eq(sourceUrls.model, model));
+
+    const rows = await db
+      .selectDistinct({
+        responseId: responses.id,
+        runId: responses.analysisRunId,
+        model: responses.model,
+        createdAt: responses.createdAt,
+        brandMentioned: responses.brandMentioned,
+        promptText: prompts.text,
+        citedUrl: sourceUrls.url,
+      })
+      .from(sourceUrls)
+      .innerJoin(
+        responses,
+        and(
+          eq(responses.analysisRunId, sourceUrls.analysisRunId),
+          eq(responses.model, sourceUrls.model),
+          sql`${sourceUrls.url} = ANY(${responses.sources})`,
+        ),
+      )
+      .leftJoin(prompts, eq(responses.promptId, prompts.id))
+      .where(and(...whereClauses));
+
+    const citations: WatchedUrlCitation[] = [];
+    const citationsByModel: Record<string, number> = {};
+    let firstCitedAt: Date | null = null;
+    let firstCitedRunId: number | null = null;
+
+    for (const r of rows) {
+      citations.push({
+        responseId: r.responseId,
+        runId: r.runId,
+        model: r.model,
+        url: r.citedUrl,
+        citedAt: r.createdAt,
+        promptText: r.promptText || '',
+        brandMentioned: !!r.brandMentioned,
+      });
+      const m = r.model || 'unknown';
+      citationsByModel[m] = (citationsByModel[m] || 0) + 1;
+      if (r.createdAt && (!firstCitedAt || r.createdAt < firstCitedAt)) {
+        firstCitedAt = r.createdAt;
+        firstCitedRunId = r.runId;
+      }
+    }
+
+    citations.sort((a, b) => {
+      const ta = a.citedAt ? a.citedAt.getTime() : 0;
+      const tb = b.citedAt ? b.citedAt.getTime() : 0;
+      return tb - ta;
+    });
+
+    return {
+      ...watched,
+      citationCount: citations.length,
+      firstCitedAt,
+      firstCitedRunId,
+      citationsByModel,
+      citations,
+    };
   }
 
   async clearAllAnalysisData(): Promise<void> {

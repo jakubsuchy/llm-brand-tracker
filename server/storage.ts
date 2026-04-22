@@ -30,6 +30,9 @@ import {
   type JobQueueItem,
   type InsertJobQueueItem,
   type JobQueueProgress,
+  type WatchedUrl,
+  type InsertWatchedUrl,
+  type WatchedUrlWithCitations,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -114,6 +117,16 @@ export interface IStorage {
   recoverStalledJobs(stallTimeoutMs?: number): Promise<number>;
   getFailedJobs(analysisRunId: number): Promise<JobQueueItem[]>;
   cancelJobsForRun(analysisRunId: number): Promise<void>;
+
+  // Watched URLs
+  getWatchedUrls(): Promise<WatchedUrl[]>;
+  getWatchedUrlById(id: number): Promise<WatchedUrl | undefined>;
+  getWatchedUrlByNormalized(normalizedUrl: string): Promise<WatchedUrl | undefined>;
+  createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl>;
+  updateWatchedUrl(id: number, patch: Partial<Pick<WatchedUrl, 'title' | 'notes'>>): Promise<WatchedUrl | undefined>;
+  deleteWatchedUrl(id: number): Promise<void>;
+  getWatchedUrlsWithCitations(runId?: number, model?: string): Promise<WatchedUrlWithCitations[]>;
+  getWatchedUrlCitations(id: number, runId?: number, model?: string): Promise<WatchedUrlWithCitations | undefined>;
 
   // Data clearing methods
   clearAllPrompts(): Promise<void>;
@@ -607,6 +620,18 @@ export class MemStorage implements IStorage {
     const allPrompts = Array.from(this.prompts.values());
     return allPrompts.sort((a, b) => a.id - b.id);
   }
+
+  // Watched URLs stubs (MemStorage does not persist the watchlist — use DatabaseStorage)
+  async getWatchedUrls(): Promise<WatchedUrl[]> { return []; }
+  async getWatchedUrlById(_id: number): Promise<WatchedUrl | undefined> { return undefined; }
+  async getWatchedUrlByNormalized(_n: string): Promise<WatchedUrl | undefined> { return undefined; }
+  async createWatchedUrl(w: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl> {
+    return { id: 1, url: w.url, normalizedUrl: w.normalizedUrl, title: w.title ?? null, notes: w.notes ?? null, addedByUserId: w.addedByUserId ?? null, addedAt: new Date() };
+  }
+  async updateWatchedUrl(_id: number): Promise<WatchedUrl | undefined> { return undefined; }
+  async deleteWatchedUrl(_id: number): Promise<void> {}
+  async getWatchedUrlsWithCitations(): Promise<WatchedUrlWithCitations[]> { return []; }
+  async getWatchedUrlCitations(): Promise<WatchedUrlWithCitations | undefined> { return undefined; }
 }
 
 import { DatabaseStorage } from './database-storage';

@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import logoUrl from "@/logo.png";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Home,
   MessageSquare,
@@ -16,9 +17,12 @@ import {
   Key,
   Copy,
   Check,
+  Download,
+  Archive,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 
 const McpIcon = () => (
@@ -35,6 +39,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [copied, setCopied] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  const { data: brandData } = useQuery<{ brandName: string | null }>({ queryKey: ['/api/settings/brand'] });
+  const brandName = brandData?.brandName || 'my brand';
+  const suggestedPrompt = `Open this zip file, read through README.md to discover the structure of this data, and let me run an analysis.\n\nMy brand is ${brandName}, what is the top source citing my brand?`;
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const handleRegenerateKey = async () => {
     setRegenerating(true);
@@ -118,79 +126,123 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <McpIcon />
-                Connect to Claude AI
+                Chat with your data
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Query your brand tracking data using natural language in Claude Desktop or Claude Code.
-              </p>
+            <Tabs defaultValue="mcp">
+              <TabsList className="w-full">
+                <TabsTrigger value="mcp" className="flex-1">Claude Code (MCP)</TabsTrigger>
+                <TabsTrigger value="export" className="flex-1">Export Data</TabsTrigger>
+              </TabsList>
 
-              <div className="space-y-2">
-                <Button size="sm" variant="outline" className="w-full text-xs" onClick={handleRegenerateKey} disabled={regenerating}>
-                  <Key className="h-3 w-3 mr-1.5" />
-                  {regenerating ? 'Generating...' : user?.hasApiKey || generatedKey ? 'Regenerate API Key' : 'Generate API Key'}
-                </Button>
-                {generatedKey && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                      <code className="text-xs text-gray-800 truncate flex-1 select-all">{generatedKey}</code>
+              <TabsContent value="mcp" className="space-y-4 mt-4">
+                <p className="text-sm text-gray-600">
+                  Query your brand tracking data using natural language in Claude Desktop or Claude Code.
+                </p>
+
+                <div className="space-y-2">
+                  <Button size="sm" variant="outline" className="w-full text-xs" onClick={handleRegenerateKey} disabled={regenerating}>
+                    <Key className="h-3 w-3 mr-1.5" />
+                    {regenerating ? 'Generating...' : user?.hasApiKey || generatedKey ? 'Regenerate API Key' : 'Generate API Key'}
+                  </Button>
+                  {generatedKey && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                        <code className="text-xs text-gray-800 truncate flex-1 select-all">{generatedKey}</code>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 shrink-0"
+                          onClick={() => { navigator.clipboard.writeText(generatedKey); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                        >
+                          {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-amber-700">Copy this key now. It won't be shown again.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-700">Install command (Claude Code):</p>
+                  {generatedKey ? (
+                    <div className="relative">
+                      <pre className="bg-gray-50 border rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+{`claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`}
+                      </pre>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-7 w-7 p-0 shrink-0"
-                        onClick={() => { navigator.clipboard.writeText(generatedKey); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                        className="absolute top-1 right-1 h-7 w-7 p-0"
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            `claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`
+                          );
+                        }}
                       >
-                        {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+                        <Copy className="h-3 w-3" />
                       </Button>
                     </div>
-                    <p className="text-xs text-amber-700">Copy this key now. It won't be shown again.</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-gray-700">Install command (Claude Code):</p>
-                {generatedKey ? (
-                  <div className="relative">
-                    <pre className="bg-gray-50 border rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-{`claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`}
+                  ) : (
+                    <pre className="bg-gray-50 border rounded-lg p-3 text-xs text-gray-400">
+                      Click {user?.hasApiKey ? 'Regenerate' : 'Generate'} API Key to see the full command
                     </pre>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-700">Example questions you can ask:</p>
+                  <div className="grid gap-1.5">
+                    {[
+                      "What's my brand mention rate?",
+                      "Which model performs best for us?",
+                      "Who are our top competitors?",
+                      "What prompts don't mention us?",
+                      "Which sources cite competitors but not us?",
+                    ].map(q => (
+                      <div key={q} className="text-xs text-gray-600 bg-gray-50 rounded px-2.5 py-1.5">"{q}"</div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="export" className="space-y-4 mt-4">
+                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                  <p className="text-sm text-indigo-900 font-medium mb-1">No access to run MCP?</p>
+                  <p className="text-xs text-indigo-700">
+                    Export your data in a zip format, and give it to the AI manually. The archive contains a README plus one CSV per key table.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-700">Suggested prompt to paste with your zip:</p>
+                  <div className="relative">
+                    <pre className="bg-gray-50 border rounded-lg p-3 text-xs whitespace-pre-wrap break-words">{suggestedPrompt}</pre>
                     <Button
                       size="sm"
                       variant="ghost"
                       className="absolute top-1 right-1 h-7 w-7 p-0"
                       onClick={() => {
-                        navigator.clipboard.writeText(
-                          `claude mcp add --transport http brand-tracker ${window.location.origin}/mcp --header "Authorization:Bearer ${generatedKey}"`
-                        );
+                        navigator.clipboard.writeText(suggestedPrompt);
+                        setPromptCopied(true);
+                        setTimeout(() => setPromptCopied(false), 2000);
                       }}
                     >
-                      <Copy className="h-3 w-3" />
+                      {promptCopied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
                     </Button>
                   </div>
-                ) : (
-                  <pre className="bg-gray-50 border rounded-lg p-3 text-xs text-gray-400">
-                    Click {user?.hasApiKey ? 'Regenerate' : 'Generate'} API Key to see the full command
-                  </pre>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-gray-700">Example questions you can ask:</p>
-                <div className="grid gap-1.5">
-                  {[
-                    "What's my brand mention rate?",
-                    "Which model performs best for us?",
-                    "Who are our top competitors?",
-                    "What prompts don't mention us?",
-                    "Which sources cite competitors but not us?",
-                  ].map(q => (
-                    <div key={q} className="text-xs text-gray-600 bg-gray-50 rounded px-2.5 py-1.5">"{q}"</div>
-                  ))}
                 </div>
-              </div>
-            </div>
+
+                <Button
+                  className="w-full"
+                  onClick={() => { window.location.href = '/api/export/bundle'; }}
+                >
+                  <Archive className="h-4 w-4 mr-1.5" />
+                  Export ZIP
+                  <Download className="h-4 w-4 ml-1.5" />
+                </Button>
+              </TabsContent>
+            </Tabs>
           </DialogContent>
         </Dialog>
       </div>

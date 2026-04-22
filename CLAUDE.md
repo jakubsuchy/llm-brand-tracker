@@ -45,7 +45,8 @@ server/routes/responses.ts  # Responses, prompts list, data clear
 server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
 server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
 server/routes/docs.ts       # Swagger UI at /api-docs (authenticated)
-server/mcp.ts               # MCP server with 16 tools for Claude AI integration
+server/routes/export.ts     # Data export: README.md + CSVs streamed as zip
+server/mcp.ts               # MCP server with 17 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
 server/services/settings.ts # DB-stored settings (override env vars)
@@ -59,6 +60,7 @@ server/storage.ts           # IStorage interface + in-memory implementation
 client/src/pages/           # Page components (dashboard, competitors, sources, etc.)
 client/src/components/      # Shared UI components (metrics, charts, topic analysis, etc.)
 client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
+client/src/components/sources/  # Sources page tab components (e.g. watchlist-tab.tsx)
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
 docs/                       # Documentation markdown source files
 scripts/build-docs.ts       # Builds docs/ → public/docs/ static HTML (markdown-it)
@@ -66,7 +68,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (63 total)
+## API Routes (69 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -97,6 +99,15 @@ SOURCES (4)     server/routes/sources.ts
   GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses
   POST      /api/sources/reclassify
 
+WATCHED URLS (5) server/routes/sources.ts
+  GET       /api/watched-urls, /api/watched-urls/:id/citations
+  POST      /api/watched-urls
+  PUT       /api/watched-urls/:id
+  DELETE    /api/watched-urls/:id
+
+EXPORT (1)      server/routes/export.ts
+  GET       /api/export/bundle
+
 RESPONSES (5)   server/routes/responses.ts
   GET       /api/prompts, /api/responses, /api/responses/:id
   POST      /api/prompts/test, /api/data/clear
@@ -123,6 +134,7 @@ topics → prompts → responses (with model, brand_mentioned, competitors_menti
                  → competitor_mentions (junction: competitor × response × run)
 competitors (name, name_key UNIQUE, domain, category, merged_into)
 sources → source_urls (per-run, per-model)
+watched_urls (url, normalized_url UNIQUE, title, notes — user-registered content to track for LLM citations)
 analysis_runs (status, brand_name, total_prompts, completed_prompts)
 job_queue (prompt_text, model, status, attempts, original_job_id for retry chains)
 users (email, full_name, hashed_password, salt, google_id, api_key)
@@ -166,6 +178,14 @@ api_usage (OpenAI token tracking)
 - The `generatePromptsForTopic` system prompt explicitly forbids brand names
 - Mix generic ("Recommend a load balancer") with enterprise-qualified prompts
 
+### Source Watchlist
+- Separate `watched_urls` table — NOT a flag on `sources`. Reason: `sources` is per-*domain*; watched entries are per-*URL* (e.g. a specific blog post).
+- **Matching is indexed**: `source_urls.normalized_url` holds the canonical form (populated on write, backfilled at startup via `backfillNormalizedSourceUrls`). `getWatchedUrlCitations` JOINs `source_urls` on `normalized_url = watched_urls.normalized_url` — indexed b-tree lookup, not a table scan. The JOIN resolves responses via `(analysis_run_id, model)` and filters with `ANY(r.sources)` to pick the exact response that cited the URL.
+- **Canonicalization** lives in `normalizeUrl` (`server/services/analysis.ts`). Intentional transformations: coerce scheme to `https`, strip `www.`, drop default ports, lowercase path, strip trailing slash, drop fragment, drop `utm_*` params, sort remaining params by key. http↔https are treated as equivalent by design. Path lowercasing is a deliberate tradeoff — produces false positives on case-sensitive servers but matches typical content URLs.
+- **Adding new URLs**: `POST /api/watched-urls` uses `parseHttpUrl` (same module) to reject non-http(s) schemes before normalization — this prevents a stored `javascript:` URL from ever reaching the `<a href>` sink in the UI.
+- UI lives as the first tab on the Sources page (`client/src/components/sources/watchlist-tab.tsx`). Do NOT promote to a top-level menu unless it needs a dashboard widget — kept nested to cluster with related source data.
+- Never hard-delete a watched URL via DB — use `DELETE /api/watched-urls/:id`, which removes the row (no cascading effect, since no other table references `watched_urls`).
+
 ### Authentication & Route Protection
 
 All API routes protected by PassportJS session auth. The guard in `server/routes/auth.ts` (`registerAuthGuard`) checks authentication on all `/api/*` routes.
@@ -189,7 +209,7 @@ All API routes protected by PassportJS session auth. The guard in `server/routes
 
 Integrated at `/mcp` inside the Express app (not a separate process). Uses `@modelcontextprotocol/sdk` with Streamable HTTP transport.
 
-- 16 tools for querying brand data (see `server/mcp.ts`)
+- 17 tools for querying brand data (see `server/mcp.ts`)
 - Authenticated via per-user API key (`Authorization: Bearer <key>`)
 - API keys auto-generated on user creation, stored in `users.api_key`
 - Legacy users get keys backfilled at startup (`backfillApiKeys()`)

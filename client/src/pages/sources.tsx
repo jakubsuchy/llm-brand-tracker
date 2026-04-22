@@ -5,11 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import type { SourceAnalysis, Topic } from "@shared/schema";
+import { WatchlistTab } from "@/components/sources/watchlist-tab";
+
+const SOURCE_TABS = ['watchlist', 'domains'] as const;
 
 interface AnalysisRun {
   id: number;
@@ -33,6 +37,14 @@ interface DomainData {
 }
 
 export default function SourcesPage() {
+  const initialTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
+    ? window.location.hash.slice(1)
+    : 'watchlist';
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') window.location.hash = tab;
+  };
   const [categoryFilter, setCategoryFilter] = useState<CategoryType>('all');
   const [showBrand, setShowBrand] = useState(true);
   const [showCompetitor, setShowCompetitor] = useState(true);
@@ -136,25 +148,31 @@ export default function SourcesPage() {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
   }
 
-  if (isLoading) {
-    return (
-      <div className="p-4 sm:p-8">
+  return (
+    <div className="p-4 sm:p-8 space-y-8">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <TabsList className="mb-6">
+          <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
+          <TabsTrigger value="domains">Domains</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="watchlist">
+          <WatchlistTab />
+        </TabsContent>
+
+        <TabsContent value="domains">
+      {isLoading ? (
         <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/2 mb-8"></div>
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-4" />
+          <div className="h-4 bg-gray-200 rounded w-1/2 mb-8" />
           <div className="space-y-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-gray-200 rounded"></div>
+              <div key={i} className="h-16 bg-gray-200 rounded" />
             ))}
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 sm:p-8 space-y-8">
-      {/* Source Domains Section */}
+      ) : (
+      /* Source Domains Section */
       <div>
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
@@ -545,6 +563,9 @@ export default function SourcesPage() {
           </Table>
         </div>
       </div>
+      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
