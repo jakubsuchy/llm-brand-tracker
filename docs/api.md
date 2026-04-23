@@ -34,6 +34,8 @@ Generate an API key from the sidebar MCP dialog, or via `POST /api/users/:id/api
 
 All metrics endpoints support `?runId=`, `?model=`, `?from=`, `?to=` query parameters.
 
+Valid `model` values: `chatgpt`, `perplexity`, `gemini`, `google-ai-mode`, `openai-api`, `anthropic-api`.
+
 ### Analysis
 | Method | Path | Description |
 |--------|------|-------------|

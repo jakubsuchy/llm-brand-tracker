@@ -39,7 +39,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 ## Available Tools
 
-TraceAIO exposes 16 MCP tools. Claude automatically picks the right tool based on your question.
+TraceAIO exposes 17 MCP tools. Claude automatically picks the right tool based on your question.
 
 ### Overview
 
@@ -68,6 +68,7 @@ TraceAIO exposes 16 MCP tools. Claude automatically picks the right tool based o
 | `get-response` | Full response by ID — prompt text, model, brand mention, competitors, sources |
 | `search-prompts` | Search prompts/responses by keyword, with mention status and model filters |
 | `find-unmentioned` | Prompts where your brand is NOT mentioned, grouped by prompt text |
+| `list-watched-urls` | Watched URLs and citation status; pass `sinceRunId` to get only URLs first cited after a given run |
 
 ### Comparisons
 

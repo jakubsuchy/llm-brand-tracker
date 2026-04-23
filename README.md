@@ -3,12 +3,18 @@
 Track how your brand is mentioned across LLMs.
 
 Currently supported models:
+
+**Browser-based** (replays the real chat UI):
 - ChatGPT
 - Perplexity
 - Google Gemini
 - Google AI Mode
 
-Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't. All prompts run directly against the LLM model browser chat interfaces, so it models exactly what users ask.
+**API-based** (provider's API with built-in web search):
+- OpenAI API — GPT-5 via the Responses API + `web_search`
+- Anthropic API — Claude Sonnet 4.6 via the Messages API + `web_search_20250305`
+
+Generate prompts, run them against multiple providers, and analyze where your brand appears — and where it doesn't. Browser models replay exactly what users see in the chat UI; API models are faster and cheaper for high-volume runs. Enable both for the same provider to get quick signal plus ground truth. See [Choosing Models](docs/getting-started.md#choosing-models) for guidance.
 
 ## Demo
 
@@ -120,7 +126,7 @@ Switch between modes in Settings → Credentials → Browser Analysis Mode.
 - Brand configuration
 - Analysis schedule (manual, hourly, daily, weekly, monthly)
 - API keys (OpenAI or Anthropic, Apify) — all configurable in the UI
-- Provider enable/disable (Perplexity, ChatGPT, Gemini)
+- Provider enable/disable (Perplexity, ChatGPT, Gemini, Google AI Mode, OpenAI API, Anthropic API)
 - Competitor source recognition rules
 - Danger zone (delete results or everything)
 
