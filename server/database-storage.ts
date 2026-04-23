@@ -38,8 +38,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * One-time backfill: computes normalized_url for any source_urls rows that
-   * don't have one yet. Idempotent — safe to call on every startup.
+   * One-time backfill: computes normalized_url and normalized_url_stripped
+   * for any source_urls rows that don't have them yet. Idempotent — safe to
+   * call on every startup.
    */
   async backfillNormalizedSourceUrls(): Promise<void> {
     const BATCH = 500;
@@ -48,13 +49,16 @@ export class DatabaseStorage implements IStorage {
       const rows = await db
         .select({ id: sourceUrls.id, url: sourceUrls.url })
         .from(sourceUrls)
-        .where(isNull(sourceUrls.normalizedUrl))
+        .where(sql`${sourceUrls.normalizedUrl} IS NULL OR ${sourceUrls.normalizedUrlStripped} IS NULL`)
         .limit(BATCH);
       if (rows.length === 0) break;
       for (const row of rows) {
         await db
           .update(sourceUrls)
-          .set({ normalizedUrl: normalizeUrl(row.url) })
+          .set({
+            normalizedUrl: normalizeUrl(row.url),
+            normalizedUrlStripped: normalizeUrl(row.url, { stripAllQuery: true }),
+          })
           .where(eq(sourceUrls.id, row.id));
       }
       updated += rows.length;
@@ -285,6 +289,7 @@ export class DatabaseStorage implements IStorage {
         sourceId: source.id,
         url,
         normalizedUrl: normalizeUrl(url),
+        normalizedUrlStripped: normalizeUrl(url, { stripAllQuery: true }),
         analysisRunId: analysisRunId || null,
         model: model || null,
       });
@@ -842,8 +847,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Watched URLs
-  async getWatchedUrls(): Promise<WatchedUrl[]> {
-    return await db.select().from(watchedUrls).orderBy(desc(watchedUrls.addedAt));
+  async getWatchedUrls(opts: { source?: 'manual' | 'sitemap'; limit?: number; offset?: number } = {}): Promise<WatchedUrl[]> {
+    let q = db.select().from(watchedUrls).$dynamic();
+    if (opts.source) q = q.where(eq(watchedUrls.source, opts.source));
+    q = q.orderBy(desc(watchedUrls.addedAt));
+    if (opts.limit !== undefined) q = q.limit(opts.limit);
+    if (opts.offset !== undefined) q = q.offset(opts.offset);
+    return await q;
+  }
+
+  async getWatchedUrlCount(source?: 'manual' | 'sitemap'): Promise<number> {
+    const q = source
+      ? db.select({ c: count() }).from(watchedUrls).where(eq(watchedUrls.source, source))
+      : db.select({ c: count() }).from(watchedUrls);
+    const [row] = await q;
+    return Number(row?.c || 0);
   }
 
   async getWatchedUrlById(id: number): Promise<WatchedUrl | undefined> {
@@ -856,9 +874,41 @@ export class DatabaseStorage implements IStorage {
     return row || undefined;
   }
 
-  async createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl> {
-    const [row] = await db.insert(watchedUrls).values(watched).returning();
+  async createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string; ignoreQueryStrings?: boolean; source?: 'manual' | 'sitemap' }): Promise<WatchedUrl> {
+    const [row] = await db.insert(watchedUrls).values({
+      ...watched,
+      ignoreQueryStrings: watched.ignoreQueryStrings ?? false,
+      source: watched.source ?? 'manual',
+    }).returning();
     return row;
+  }
+
+  /**
+   * Bulk import for auto-discovered URLs (from sitemap). Uses
+   * ON CONFLICT (normalized_url) DO NOTHING so manual entries — added
+   * through the UI with a different `source` value — are never overwritten.
+   * Returns the number of rows actually inserted.
+   */
+  async bulkInsertWatchedUrls(rows: { url: string; normalizedUrl: string; ignoreQueryStrings: boolean; source: 'manual' | 'sitemap'; title?: string | null; addedByUserId?: number | null }[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const BATCH = 500;
+    let inserted = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH).map(r => ({
+        url: r.url,
+        normalizedUrl: r.normalizedUrl,
+        ignoreQueryStrings: r.ignoreQueryStrings,
+        source: r.source,
+        title: r.title ?? null,
+        addedByUserId: r.addedByUserId ?? null,
+      }));
+      const result = await db.insert(watchedUrls)
+        .values(batch)
+        .onConflictDoNothing({ target: watchedUrls.normalizedUrl })
+        .returning({ id: watchedUrls.id });
+      inserted += result.length;
+    }
+    return inserted;
   }
 
   async updateWatchedUrl(id: number, patch: Partial<Pick<WatchedUrl, 'title' | 'notes'>>): Promise<WatchedUrl | undefined> {
@@ -871,16 +921,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * Aggregate all watched URLs with their citations across source_urls and
-   * responses.sources (the array column on responses that stores raw cited URLs).
-   * Matches are done on normalized URL.
+   * Aggregate watched URLs with their citations. Accepts the same filters as
+   * getWatchedUrls plus runId/model scoping on the citation side.
    */
-  async getWatchedUrlsWithCitations(runId?: number, model?: string): Promise<WatchedUrlWithCitations[]> {
-    const watched = await this.getWatchedUrls();
+  async getWatchedUrlsWithCitations(opts: { runId?: number; model?: string; source?: 'manual' | 'sitemap'; limit?: number; offset?: number } = {}): Promise<WatchedUrlWithCitations[]> {
+    const watched = await this.getWatchedUrls({ source: opts.source, limit: opts.limit, offset: opts.offset });
     if (watched.length === 0) return [];
     const results: WatchedUrlWithCitations[] = [];
     for (const w of watched) {
-      const single = await this.getWatchedUrlCitations(w.id, runId, model);
+      const single = await this.getWatchedUrlCitations(w.id, opts.runId, opts.model);
       if (single) results.push(single);
     }
     return results;
@@ -890,11 +939,18 @@ export class DatabaseStorage implements IStorage {
     const watched = await this.getWatchedUrlById(id);
     if (!watched) return undefined;
 
-    // JOIN on source_urls.normalized_url (indexed). Responses are resolved
-    // via (analysis_run_id, model) — unique per-prompt in each run — and the
-    // ANY(r.sources) filter disambiguates which response in a run×model group
-    // actually cited this URL when multiple prompts ran.
-    const whereClauses: any[] = [eq(sourceUrls.normalizedUrl, watched.normalizedUrl)];
+    // Which source_urls column to match against depends on how the watched
+    // URL was normalized: strict matchers (default) hit normalized_url;
+    // query-ignoring matchers hit normalized_url_stripped (also indexed).
+    // Both source_urls columns are populated on write and at startup-backfill.
+    const matchColumn = watched.ignoreQueryStrings
+      ? sourceUrls.normalizedUrlStripped
+      : sourceUrls.normalizedUrl;
+
+    // Responses are resolved via (analysis_run_id, model) — unique per-prompt
+    // in each run — and the ANY(r.sources) filter disambiguates which
+    // response in a run×model group actually cited this URL.
+    const whereClauses: any[] = [eq(matchColumn, watched.normalizedUrl)];
     if (runId) whereClauses.push(eq(sourceUrls.analysisRunId, runId));
     if (model) whereClauses.push(eq(sourceUrls.model, model));
 

@@ -426,7 +426,7 @@ function createMcpServer(): McpServer {
         .describe('If set, only return watched URLs first cited in runs with id > sinceRunId. Use for post-run polling to discover newly cited URLs.'),
     },
     async ({ runId, model, onlyCited, sinceRunId }) => {
-      let results = await storage.getWatchedUrlsWithCitations(runId, model);
+      let results = await storage.getWatchedUrlsWithCitations({ runId, model });
       if (sinceRunId !== undefined) {
         results = results.filter((r) => r.firstCitedRunId !== null && r.firstCitedRunId > sinceRunId);
       }

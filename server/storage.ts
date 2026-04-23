@@ -119,13 +119,15 @@ export interface IStorage {
   cancelJobsForRun(analysisRunId: number): Promise<void>;
 
   // Watched URLs
-  getWatchedUrls(): Promise<WatchedUrl[]>;
+  getWatchedUrls(opts?: { source?: 'manual' | 'sitemap'; limit?: number; offset?: number }): Promise<WatchedUrl[]>;
+  getWatchedUrlCount(source?: 'manual' | 'sitemap'): Promise<number>;
   getWatchedUrlById(id: number): Promise<WatchedUrl | undefined>;
   getWatchedUrlByNormalized(normalizedUrl: string): Promise<WatchedUrl | undefined>;
-  createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl>;
+  createWatchedUrl(watched: InsertWatchedUrl & { normalizedUrl: string; ignoreQueryStrings?: boolean; source?: 'manual' | 'sitemap' }): Promise<WatchedUrl>;
+  bulkInsertWatchedUrls(rows: { url: string; normalizedUrl: string; ignoreQueryStrings: boolean; source: 'manual' | 'sitemap'; title?: string | null; addedByUserId?: number | null }[]): Promise<number>;
   updateWatchedUrl(id: number, patch: Partial<Pick<WatchedUrl, 'title' | 'notes'>>): Promise<WatchedUrl | undefined>;
   deleteWatchedUrl(id: number): Promise<void>;
-  getWatchedUrlsWithCitations(runId?: number, model?: string): Promise<WatchedUrlWithCitations[]>;
+  getWatchedUrlsWithCitations(opts?: { runId?: number; model?: string; source?: 'manual' | 'sitemap'; limit?: number; offset?: number }): Promise<WatchedUrlWithCitations[]>;
   getWatchedUrlCitations(id: number, runId?: number, model?: string): Promise<WatchedUrlWithCitations | undefined>;
 
   // Data clearing methods
@@ -623,11 +625,23 @@ export class MemStorage implements IStorage {
 
   // Watched URLs stubs (MemStorage does not persist the watchlist — use DatabaseStorage)
   async getWatchedUrls(): Promise<WatchedUrl[]> { return []; }
+  async getWatchedUrlCount(): Promise<number> { return 0; }
   async getWatchedUrlById(_id: number): Promise<WatchedUrl | undefined> { return undefined; }
   async getWatchedUrlByNormalized(_n: string): Promise<WatchedUrl | undefined> { return undefined; }
-  async createWatchedUrl(w: InsertWatchedUrl & { normalizedUrl: string }): Promise<WatchedUrl> {
-    return { id: 1, url: w.url, normalizedUrl: w.normalizedUrl, title: w.title ?? null, notes: w.notes ?? null, addedByUserId: w.addedByUserId ?? null, addedAt: new Date() };
+  async createWatchedUrl(w: InsertWatchedUrl & { normalizedUrl: string; ignoreQueryStrings?: boolean; source?: 'manual' | 'sitemap' }): Promise<WatchedUrl> {
+    return {
+      id: 1,
+      url: w.url,
+      normalizedUrl: w.normalizedUrl,
+      title: w.title ?? null,
+      notes: w.notes ?? null,
+      addedByUserId: w.addedByUserId ?? null,
+      addedAt: new Date(),
+      ignoreQueryStrings: !!w.ignoreQueryStrings,
+      source: w.source ?? 'manual',
+    };
   }
+  async bulkInsertWatchedUrls(_rows: any[]): Promise<number> { return 0; }
   async updateWatchedUrl(_id: number): Promise<WatchedUrl | undefined> { return undefined; }
   async deleteWatchedUrl(_id: number): Promise<void> {}
   async getWatchedUrlsWithCitations(): Promise<WatchedUrlWithCitations[]> { return []; }

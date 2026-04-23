@@ -193,16 +193,32 @@ export class BrandAnalyzer {
           chatgpt: { enabled: true, type: 'browser' },
           gemini: { enabled: true, type: 'browser' },
           'google-aimode': { enabled: true, type: 'browser' },
+          'openai-api': { enabled: false, type: 'api' },
+          'anthropic-api': { enabled: false, type: 'api' },
         };
 
         const { isBrowserAvailable } = await import('./chatgpt-browser');
+        const { isOpenAiApiAvailable } = await import('./openai-api');
+        const { isAnthropicApiAvailable } = await import('./anthropic-api');
         const browserAvailable = await isBrowserAvailable();
+
+        const apiAvailability: Record<string, { ok: boolean; reason: string }> = {
+          'openai-api': { ok: isOpenAiApiAvailable(), reason: 'OpenAI API key not configured' },
+          'anthropic-api': { ok: isAnthropicApiAvailable(), reason: 'Anthropic API key not configured' },
+        };
 
         for (const [name, settings] of Object.entries(config) as [string, any][]) {
           if (!settings.enabled) continue;
           if (settings.type === 'browser' && !browserAvailable) {
             console.log(`[${new Date().toISOString()}] Skipping ${name} — browser not available`);
             continue;
+          }
+          if (settings.type === 'api') {
+            const check = apiAvailability[name];
+            if (!check?.ok) {
+              console.log(`[${new Date().toISOString()}] Skipping ${name} — ${check?.reason || 'API not available'}`);
+              continue;
+            }
           }
           activeModels.push(name);
         }
@@ -219,7 +235,8 @@ export class BrandAnalyzer {
       await this.enqueueJobs(allPrompts, activeModels, this.analysisRunId!);
 
       const totalTasks = allPrompts.length * activeModels.length;
-      const hasBrowserModels = activeModels.some(p => p !== 'api');
+      const { isApiModel } = await import('./analysis');
+      const hasBrowserModels = activeModels.some(m => !isApiModel(m));
       console.log(`[${new Date().toISOString()}] Enqueued: ${allPrompts.length} prompts x ${activeModels.length} models (${activeModels.join(', ')}) = ${totalTasks} tasks`);
 
       // Run worker loop — browser jobs run serially, API jobs can run in parallel

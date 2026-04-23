@@ -1,6 +1,8 @@
 import type { Express } from "express";
-import { parseDateRange, getCurrentBrandName } from "./helpers";
+import { parseDateRange, getCurrentBrandName, requireRole } from "./helpers";
 import { storage } from "../storage";
+import { fetchSitemap } from "../services/sitemap-fetch";
+import { parseHttpUrl } from "../services/analysis";
 
 export function registerSourceRoutes(app: Express) {
   app.get("/api/sources", async (req, res) => {
@@ -11,6 +13,26 @@ export function registerSourceRoutes(app: Express) {
     } catch (error) {
       console.error("Error fetching sources:", error);
       res.status(500).json({ error: "Failed to fetch sources" });
+    }
+  });
+
+  // Fetch a sitemap and return the URLs it lists. Read-only — does NOT persist
+  // anything to watched_urls. Use the watchlist endpoints to save.
+  app.post("/api/sources/extract-sitemap", requireRole('analyst'), async (req, res) => {
+    // #swagger.tags = ['Sources']
+    try {
+      const { url } = req.body || {};
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: "url is required" });
+      }
+      if (!parseHttpUrl(url)) {
+        return res.status(400).json({ error: "url must be a valid http(s) URL" });
+      }
+      const result = await fetchSitemap(url);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error extracting sitemap:", error);
+      res.status(500).json({ error: error?.message || "Failed to extract sitemap" });
     }
   });
 

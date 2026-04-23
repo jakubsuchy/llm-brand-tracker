@@ -95,6 +95,9 @@ export function parseHttpUrl(raw: string): URL | null {
  *  - Tracking query params dropped (case-insensitive): `utm_*` plus a curated
  *    list of ad-click and analytics IDs (see TRACKING_PARAMS below). Remaining
  *    params sorted by key (stable — same-key value order preserved)
+ *  - `stripAllQuery: true` additionally drops ALL remaining params (used for
+ *    watchlist entries with `ignore_query_strings` and to populate
+ *    `source_urls.normalized_url_stripped`)
  *
  * Falls back to `raw.trim().toLowerCase()` if parsing fails so malformed
  * inputs still get a stable (if blunt) key.
@@ -118,7 +121,7 @@ const TRACKING_PARAMS = new Set([
   '_hsenc', '_hsmi', '__hstc', '__hssc', '__hsfp',
 ]);
 
-export function normalizeUrl(raw: string): string {
+export function normalizeUrl(raw: string, opts: { stripAllQuery?: boolean } = {}): string {
   try {
     const u = new URL(raw.trim());
     let host = u.hostname.toLowerCase();
@@ -127,12 +130,15 @@ export function normalizeUrl(raw: string): string {
     const port = !u.port || defaultPort ? '' : `:${u.port}`;
     let path = (u.pathname || '/').toLowerCase();
     if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-    const params = [...u.searchParams.entries()].filter(([k]) => {
-      const kl = k.toLowerCase();
-      return !kl.startsWith('utm_') && !TRACKING_PARAMS.has(kl);
-    });
-    params.sort((a, b) => a[0].localeCompare(b[0]));
-    const query = params.length ? '?' + new URLSearchParams(params).toString() : '';
+    let query = '';
+    if (!opts.stripAllQuery) {
+      const params = [...u.searchParams.entries()].filter(([k]) => {
+        const kl = k.toLowerCase();
+        return !kl.startsWith('utm_') && !TRACKING_PARAMS.has(kl);
+      });
+      params.sort((a, b) => a[0].localeCompare(b[0]));
+      query = params.length ? '?' + new URLSearchParams(params).toString() : '';
+    }
     return `https://${host}${port}${path}${query}`;
   } catch {
     return raw.trim().toLowerCase();
@@ -171,6 +177,17 @@ export function deduplicateCompetitors(competitors: string[], maxResults: number
 }
 
 /**
+ * Model keys whose responses come from a direct API call instead of a
+ * browser session. Kept in one place so the analyzer, worker pool, and
+ * availability gates stay in sync.
+ */
+export const API_MODELS = new Set<string>(['openai-api', 'anthropic-api']);
+
+export function isApiModel(model: string): boolean {
+  return API_MODELS.has(model);
+}
+
+/**
  * Get a response from the browser actor and extract sources.
  * This is the transport layer — works with any browser-based model.
  */
@@ -193,6 +210,29 @@ export async function getResponseViaBrowser(
 }
 
 /**
+ * Dispatch a prompt to whichever transport the model uses (browser vs API).
+ * Extracts markdown URLs on the API side too, since web_search annotations
+ * only cover the explicit citations the model emits.
+ */
+export async function getModelResponse(
+  prompt: string,
+  model: string,
+  context?: { analysisRunId?: number; jobId?: number },
+): Promise<{ responseText: string; sources: string[] }> {
+  if (isApiModel(model)) {
+    const result = model === 'anthropic-api'
+      ? await (await import('./anthropic-api')).askAnthropicApi(prompt, context)
+      : await (await import('./openai-api')).askOpenAiApi(prompt, context);
+    const markdownUrls = extractUrlsFromMarkdown(result.responseText);
+    return {
+      responseText: result.responseText,
+      sources: Array.from(new Set([...result.sources, ...markdownUrls])),
+    };
+  }
+  return getResponseViaBrowser(prompt, model, context);
+}
+
+/**
  * Core analysis pipeline: get response, detect brand, extract competitors.
  * The competitor extraction is delegated to a provider-specific function.
  */
@@ -208,7 +248,7 @@ export async function analyzePromptResponse(
 
   console.log(`[analyzePromptResponse] Model: ${model} | Prompt: "${prompt.substring(0, 80)}..."`);
 
-  const { responseText, sources } = await getResponseViaBrowser(prompt, model, context);
+  const { responseText, sources } = await getModelResponse(prompt, model, context);
 
   console.log(`[analyzePromptResponse] ${model} response: ${responseText.length} chars, ${sources.length} sources in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 

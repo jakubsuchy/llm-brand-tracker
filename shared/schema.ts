@@ -56,9 +56,15 @@ export const sourceUrls = pgTable("source_urls", {
   model: text("model"),
   url: text("url").notNull(),
   normalizedUrl: text("normalized_url"),
+  // Same as normalizedUrl but with ALL query params stripped. Populated on
+  // write + backfilled at startup. Enables watchlist entries with
+  // `ignoreQueryStrings = true` to match citations that differ only by
+  // query string, without forcing that behavior on strict watchers.
+  normalizedUrlStripped: text("normalized_url_stripped"),
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
 }, (t) => ({
   normalizedUrlIdx: index("source_urls_normalized_url_idx").on(t.normalizedUrl),
+  normalizedUrlStrippedIdx: index("source_urls_normalized_url_stripped_idx").on(t.normalizedUrlStripped),
 }));
 
 export const watchedUrls = pgTable("watched_urls", {
@@ -67,6 +73,15 @@ export const watchedUrls = pgTable("watched_urls", {
   normalizedUrl: text("normalized_url").notNull().unique(),
   title: text("title"),
   notes: text("notes"),
+  // If true, normalization strips ALL query params (matched against
+  // source_urls.normalized_url_stripped). Default false preserves existing
+  // behavior — matches use source_urls.normalized_url (utm/tracking
+  // params already dropped, the rest kept).
+  ignoreQueryStrings: boolean("ignore_query_strings").default(false).notNull(),
+  // Origin: 'manual' (user added via UI/API) or 'sitemap' (auto-discovered
+  // from brand sitemap.xml on analysis start). Used to split the UI list
+  // and decide whether to overwrite on re-import.
+  source: text("source").default('manual').notNull(),
   addedByUserId: integer("added_by_user_id"),
   addedAt: timestamp("added_at").defaultNow(),
 });
@@ -249,6 +264,8 @@ export const insertWatchedUrlSchema = createInsertSchema(watchedUrls).omit({
   id: true,
   addedAt: true,
   normalizedUrl: true,
+  ignoreQueryStrings: true,
+  source: true,
 });
 
 // Types

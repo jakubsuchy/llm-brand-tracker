@@ -53,6 +53,8 @@ server/services/auth.ts     # PassportJS config, user CRUD, API key generation
 server/services/settings.ts # DB-stored settings (override env vars)
 server/services/analysis.ts # Generic analysis utilities (brand detection, URL extraction, similarity)
 server/services/openai.ts   # OpenAI-specific LLM calls: prompt generation, competitor extraction
+server/services/openai-api.ts       # OpenAI Responses API + web_search — "openai-api" model
+server/services/anthropic-api.ts    # Anthropic Messages API + web_search — "anthropic-api" model
 server/services/chatgpt-browser.ts  # Browser actor client (local + Apify Cloud)
 server/config.ts            # Public API paths config
 shared/models.ts            # Canonical model metadata (labels, brand colors, icons, descriptions)
@@ -62,6 +64,7 @@ client/src/pages/           # Page components (dashboard, competitors, sources, 
 client/src/components/      # Shared UI components (metrics, charts, topic analysis, etc.)
 client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
 client/src/components/sources/  # Sources page tab components (e.g. watchlist-tab.tsx)
+client/src/components/model-logos.tsx  # Inline SVG brand logos (OpenAiLogo, ClaudeLogo, etc.) + ModelLogo dispatcher
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
 docs/                       # Documentation markdown source files
 scripts/build-docs.ts       # Builds docs/ → public/docs/ static HTML (markdown-it)
@@ -69,7 +72,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (70 total)
+## API Routes (71 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -96,9 +99,9 @@ COMPETITORS (7) server/routes/competitors.ts
             /api/competitors/merge-suggestions, /api/competitors/merge-history
   POST      /api/competitors/merge, /api/competitors/unmerge, /api/competitors/block
 
-SOURCES (4)     server/routes/sources.ts
+SOURCES (5)     server/routes/sources.ts
   GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses
-  POST      /api/sources/reclassify
+  POST      /api/sources/reclassify, /api/sources/extract-sitemap
 
 WATCHED URLS (6) server/routes/watched-urls.ts
   GET       /api/watched-urls, /api/watched-urls/new-citations,
@@ -136,7 +139,7 @@ topics → prompts → responses (with model, brand_mentioned, competitors_menti
                  → competitor_mentions (junction: competitor × response × run)
 competitors (name, name_key UNIQUE, domain, category, merged_into)
 sources → source_urls (per-run, per-model)
-watched_urls (url, normalized_url UNIQUE, title, notes — user-registered content to track for LLM citations)
+watched_urls (url, normalized_url UNIQUE, title, notes, ignore_query_strings, source — 'manual' or 'sitemap'; content tracked for LLM citations)
 analysis_runs (status, brand_name, total_prompts, completed_prompts)
 job_queue (prompt_text, model, status, attempts, original_job_id for retry chains)
 users (email, full_name, hashed_password, salt, google_id, api_key)
@@ -149,11 +152,30 @@ api_usage (OpenAI token tracking)
 ## Critical Design Decisions
 
 ### Multi-model analysis
-- Prompts are sent to multiple LLM models (Perplexity, ChatGPT, Gemini, Google AI Mode)
-- Model config stored in DB (`app_settings` key `modelsConfig`), manageable via Settings → Models
-- Each (prompt, model) pair is a separate job in the queue
-- Browser models run via local container or Apify Cloud (configurable per-deployment)
-- **Model metadata** (labels, brand colors, icons, descriptions) lives in `shared/models.ts` (`MODEL_META`). Used by both server (labels) and client (chart colors, settings UI). When adding a new model provider, add it here.
+- Prompts are sent to multiple LLM models across two transport types:
+  - **Browser**: Perplexity, ChatGPT, Gemini, Google AI Mode — run via the Apify actor (local container or Apify Cloud)
+  - **API**: `openai-api` (OpenAI Responses API + `web_search`), `anthropic-api` (Anthropic Messages API + `web_search_20250305`) — run directly from the main app process
+- Model config stored in DB (`app_settings` key `modelsConfig`), manageable via Settings → Models. Each entry has `{ enabled, type: 'browser' | 'api', label }`.
+- Each (prompt, model) pair is a separate job in the queue — the same worker pool processes both browser and API jobs; the branch happens inside `processJob` → `analyzePromptResponse` → `getModelResponse` (in `server/services/analysis.ts`) which dispatches on `API_MODELS`.
+- **Model metadata** (labels, brand colors, emoji, descriptions) lives in `shared/models.ts` (`MODEL_META`). Used by server (labels) and client (chart colors, settings UI).
+
+**When adding a new model provider, update all of these in lockstep:**
+1. `shared/models.ts` → add a `MODEL_META` entry (label, color, icon fallback, description)
+2. `server/routes/helpers.ts` → add to `DEFAULT_MODELS_CONFIG` with the correct `type`
+3. `server/services/analyzer.ts` → add to the inline fallback config in `enqueueActiveModels` so first-run defaults work
+4. For an API model: create `server/services/<name>-api.ts` mirroring `openai-api.ts` (export `ask<Name>Api` and `is<Name>ApiAvailable`), register it in `API_MODELS` in `server/services/analysis.ts` and in the dispatch switch inside `getModelResponse`, and add it to the per-model availability map in `analyzer.ts`
+5. For a browser model: extend `BrowserModel` in `server/services/chatgpt-browser.ts` and the actor's input schema
+6. `client/src/components/model-logos.tsx` → add a `<BrandLogo>` component and map the model key in `MODEL_TO_LOGO` (see Brand logos below)
+7. If the API model requires its own key, wire the key-presence gate into `/api/settings/models` GET and PUT (`server/routes/settings.ts`) — see the `openai-api` / `anthropic-api` pattern
+
+### Brand logos
+- **`client/src/components/model-logos.tsx`** — the single source of truth for every provider's SVG logo. Logos are embedded as inline JSX (no HTTP fetch, tree-shakeable).
+- Two call shapes:
+  - **Named**: `<OpenAiLogo size={28} />`, `<ChatGptLogo/>` (alias), `<AnthropicLogo/>`, `<ClaudeLogo/>`, `<PerplexityLogo/>`, `<GeminiLogo/>`, `<GoogleAiModeLogo/>` (alias) — use this when the brand is known at the call site.
+  - **Dispatch by model key**: `<ModelLogo model="openai-api" size={28} fallback={...} />` — use this when iterating over `modelsConfig`.
+- Props: `size?: number` (sets both width and height, default 24), `className?: string`, `title?: string` (for the `<title>` a11y element).
+- OpenAI / Anthropic (A) / Perplexity SVGs use `fill="currentColor"` so they inherit text color via Tailwind (`text-gray-800`, `text-white`, etc). Claude and Gemini use their brand colors — don't try to re-theme them.
+- When adding a new logo: convert all kebab-case SVG attrs to camelCase (`fill-rule` → `fillRule`, `stop-color` → `stopColor`, `stroke-linejoin` → `strokeLinejoin`), strip `<desc>` marketing text, keep `<title>` for a11y, and register the key in `MODEL_TO_LOGO` at the bottom of the file.
 
 ### Job queue
 - PostgreSQL-based with `SELECT FOR UPDATE SKIP LOCKED` for dequeuing
@@ -182,10 +204,12 @@ api_usage (OpenAI token tracking)
 
 ### Source Watchlist
 - Separate `watched_urls` table — NOT a flag on `sources`. Reason: `sources` is per-*domain*; watched entries are per-*URL* (e.g. a specific blog post).
-- **Matching is indexed**: `source_urls.normalized_url` holds the canonical form (populated on write, backfilled at startup via `backfillNormalizedSourceUrls`). `getWatchedUrlCitations` JOINs `source_urls` on `normalized_url = watched_urls.normalized_url` — indexed b-tree lookup, not a table scan. The JOIN resolves responses via `(analysis_run_id, model)` and filters with `ANY(r.sources)` to pick the exact response that cited the URL.
-- **Canonicalization** lives in `normalizeUrl` (`server/services/analysis.ts`). Intentional transformations: coerce scheme to `https`, strip `www.`, drop default ports, lowercase path, strip trailing slash, drop fragment, drop `utm_*` params, sort remaining params by key. http↔https are treated as equivalent by design. Path lowercasing is a deliberate tradeoff — produces false positives on case-sensitive servers but matches typical content URLs.
-- **Adding new URLs**: `POST /api/watched-urls` uses `parseHttpUrl` (same module) to reject non-http(s) schemes before normalization — this prevents a stored `javascript:` URL from ever reaching the `<a href>` sink in the UI.
-- **Routes live in their own module** (`server/routes/watched-urls.ts`), not in `sources.ts`. Each resource gets its own file per the route-module convention.
+- **Matching is indexed with two columns**: `source_urls.normalized_url` (strict, keeps non-tracking query params) and `source_urls.normalized_url_stripped` (query-free). Both populated on write and backfilled at startup. Which column a watched URL matches against depends on its `ignore_query_strings` flag — strict matchers hit `normalized_url`, query-ignoring matchers hit `normalized_url_stripped`. Both are indexed b-tree lookups.
+- **Canonicalization** lives in `normalizeUrl` (`server/services/analysis.ts`) and takes an `opts.stripAllQuery` flag. Base transformations: coerce scheme to `https`, strip `www.`, drop default ports, lowercase path, strip trailing slash, drop fragment, drop `utm_*` and a curated tracking-param list (gclid, fbclid, msclkid, etc.), sort remaining params. With `stripAllQuery`, ALL query params are dropped. Path lowercasing is a deliberate tradeoff — produces false positives on case-sensitive servers but matches typical content URLs.
+- **Adding new URLs**: `POST /api/watched-urls` uses `parseHttpUrl` (same module) to reject non-http(s) schemes before normalization — this prevents a stored `javascript:` URL from ever reaching the `<a href>` sink in the UI. Accepts an `ignoreQueryStrings` boolean; stored on the row and applied at normalization time.
+- **Auto-discovery from sitemap.xml**: controlled by the `autoWatchBrandUrls` setting (default true, editable in Settings → Brand). On `launchAnalysis`, `ingestBrandSitemap` fetches the brand sitemap (either `brandSitemapUrl` or `<brandUrl>/sitemap.xml`), normalizes each URL with `stripAllQuery: true`, and bulk-inserts as `source='sitemap', ignore_query_strings=true` via `ON CONFLICT DO NOTHING` — manual entries are never overwritten. Sitemap fetch failures log and continue; they never block an analysis run. The fetcher wraps `sitemapper` with a 20s timeout and a 50k URL cap.
+- **UI lists are split by `source`**: manual and sitemap entries render as separate paginated sections (`?source=manual|sitemap&page=N&pageSize=20`) — sitemap lists can reach thousands of rows.
+- **Routes live in their own module** (`server/routes/watched-urls.ts`), not in `sources.ts`. Each resource gets its own file per the route-module convention. The sitemap extractor is at `POST /api/sources/extract-sitemap` (read-only; does NOT persist).
 - **Post-run polling**: `GET /api/watched-urls/new-citations?sinceRunId=X` returns watched URLs first cited in any run with id > X. Intended pairing: subscribe to the webhook that fires on run completion, then call this endpoint with the last-observed run ID to get fresh debut citations. The MCP `list-watched-urls` tool accepts the same `sinceRunId` argument for the same purpose.
 - UI lives as a tab on the Sources page (`client/src/components/sources/watchlist-tab.tsx`), secondary to the Domains tab. Do NOT promote to a top-level menu unless it needs a dashboard widget.
 - Never hard-delete a watched URL via DB — use `DELETE /api/watched-urls/:id`, which removes the row (no cascading effect, since no other table references `watched_urls`).

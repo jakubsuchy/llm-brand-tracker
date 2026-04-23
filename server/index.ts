@@ -24,6 +24,15 @@ const app = express();
 app.disable('x-powered-by');
 // Trust proxy headers (X-Forwarded-Proto, X-Forwarded-Host) when behind ingress/load balancer
 app.set('trust proxy', 1);
+
+// Shared static assets (project-root /public/{images,...}) — mounted *first*
+// so Vite's SPA catch-all in dev mode doesn't swallow them with an index.html
+// response. `process.cwd()` is the project root under both `tsx server/...`
+// and the esbuild-bundled prod entrypoint.
+const projectPublicRoot = path.resolve(process.cwd(), 'public');
+console.log(`[static] serving /public assets from ${projectPublicRoot}`);
+app.use(express.static(projectPublicRoot));
+
 // Skip body parsing for /mcp — the MCP transport reads the raw stream itself
 app.use((req, res, next) => {
   if (req.path === '/mcp') return next();
@@ -100,10 +109,6 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
     throw err;
   });
-
-  // Serve shared static assets (e.g. /images/) from project-root public/ in all modes
-  const publicRoot = path.resolve(import.meta.dirname, '..', 'public');
-  app.use(express.static(publicRoot));
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

@@ -100,12 +100,38 @@ export function registerSettingsRoutes(app: Express) {
         case 'brand': {
           const brandUrl = await storage.getSetting('brandUrl');
           const brandName = await storage.getSetting('brandName');
-          return res.json({ brandUrl, brandName });
+          // autoWatchBrandUrls defaults to true (unset → checked). Any stored
+          // value takes precedence — use strict 'false' check so we don't
+          // flip the default by accident on legacy DBs.
+          const autoWatchRaw = await storage.getSetting('autoWatchBrandUrls');
+          const autoWatchBrandUrls = autoWatchRaw === null ? true : autoWatchRaw !== 'false';
+          const brandSitemapUrl = await storage.getSetting('brandSitemapUrl');
+          return res.json({ brandUrl, brandName, autoWatchBrandUrls, brandSitemapUrl: brandSitemapUrl || '' });
         }
         case 'models': {
           const raw = await storage.getSetting('modelsConfig');
-          const saved = raw ? JSON.parse(raw) : {};
-          return res.json({ ...DEFAULT_MODELS_CONFIG, ...saved });
+          const saved: Record<string, any> = raw ? JSON.parse(raw) : {};
+          const merged: Record<string, any> = { ...DEFAULT_MODELS_CONFIG, ...saved };
+
+          // Gate api-based models on whether their key is actually saved.
+          // - no key  → force disabled + keyAvailable:false (UI disables toggle)
+          // - key set + never-seen model (first run) → auto-enable
+          // - key set + user already has a saved preference → honor it
+          const apiKeyPresence: Record<string, boolean> = {
+            'openai-api': !!(await getSetting('openaiApiKey')),
+            'anthropic-api': !!(await getSetting('anthropicApiKey')),
+          };
+          for (const [modelKey, hasKey] of Object.entries(apiKeyPresence)) {
+            const base = merged[modelKey] || { type: 'api', label: modelKey };
+            if (!hasKey) {
+              merged[modelKey] = { ...base, enabled: false, keyAvailable: false };
+            } else if (!(modelKey in saved)) {
+              merged[modelKey] = { ...base, enabled: true, keyAvailable: true };
+            } else {
+              merged[modelKey] = { ...base, keyAvailable: true };
+            }
+          }
+          return res.json(merged);
         }
         case 'openai-key':
           return res.json({ hasKey: !!(await getSetting('openaiApiKey')) });
@@ -164,24 +190,61 @@ export function registerSettingsRoutes(app: Express) {
   app.put("/api/settings/:key", requireRole("admin"), async (req, res) => {
     // #swagger.tags = ['Settings']
     const key = req.params.key;
-    const { setSetting } = await import('../services/settings');
+    const { setSetting, getSetting } = await import('../services/settings');
 
     try {
       switch (key) {
         case 'brand': {
-          const { brandUrl, brandName } = req.body;
+          const { brandUrl, brandName, autoWatchBrandUrls, brandSitemapUrl } = req.body;
           if (brandUrl !== undefined) await storage.setSetting('brandUrl', brandUrl);
           if (brandName !== undefined) {
             await saveBrandName(brandName);
           }
+          if (autoWatchBrandUrls !== undefined) {
+            await storage.setSetting('autoWatchBrandUrls', autoWatchBrandUrls ? 'true' : 'false');
+          }
+          if (brandSitemapUrl !== undefined) {
+            await storage.setSetting('brandSitemapUrl', brandSitemapUrl || '');
+          }
           return res.json({ success: true });
         }
         case 'models': {
-          await storage.setSetting('modelsConfig', JSON.stringify(req.body));
+          const body: Record<string, any> = req.body || {};
+
+          const apiKeyPresence: Record<string, boolean> = {
+            'openai-api': !!(await getSetting('openaiApiKey')),
+            'anthropic-api': !!(await getSetting('anthropicApiKey')),
+          };
+          for (const [modelKey, hasKey] of Object.entries(apiKeyPresence)) {
+            if (body[modelKey]?.enabled && !hasKey) {
+              return res.status(400).json({
+                error: `Cannot enable ${modelKey} — add the required API key first.`,
+              });
+            }
+          }
+
+          // Strip transient `keyAvailable` flag — it's a GET-time annotation,
+          // not part of the stored config.
+          const clean: Record<string, any> = {};
+          for (const [k, v] of Object.entries(body)) {
+            if (v && typeof v === 'object') {
+              const { keyAvailable: _drop, ...rest } = v as any;
+              clean[k] = rest;
+            } else {
+              clean[k] = v;
+            }
+          }
+
+          await storage.setSetting('modelsConfig', JSON.stringify(clean));
           return res.json({ success: true });
         }
         case 'openai-key': {
           const { apiKey } = req.body;
+          // Empty string clears the key (mirrors apify-token).
+          if (apiKey === '' || apiKey === null) {
+            await setSetting('openaiApiKey', '');
+            return res.json({ success: true, message: "OpenAI API key removed" });
+          }
           if (!apiKey || typeof apiKey !== 'string' || !apiKey.startsWith('sk-')) {
             return res.status(400).json({ error: "Invalid API key format (must start with sk-)" });
           }
@@ -194,6 +257,10 @@ export function registerSettingsRoutes(app: Express) {
         }
         case 'anthropic-key': {
           const { apiKey } = req.body;
+          if (apiKey === '' || apiKey === null) {
+            await setSetting('anthropicApiKey', '');
+            return res.json({ success: true, message: "Anthropic API key removed" });
+          }
           if (!apiKey || typeof apiKey !== 'string') return res.status(400).json({ error: "Invalid API key format" });
           const testRes = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',

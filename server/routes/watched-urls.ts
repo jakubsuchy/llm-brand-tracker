@@ -14,21 +14,56 @@ import { normalizeUrl, parseHttpUrl } from "../services/analysis";
  * URL validation: `parseHttpUrl` rejects non-http(s) schemes at ingress so a
  * `javascript:` URL can never reach the `<a href>` sink in the UI.
  *
- * Citation matching is indexed via `source_urls.normalized_url` (see
- * getWatchedUrlCitations in database-storage.ts).
+ * Citation matching uses either `source_urls.normalized_url` (strict) or
+ * `source_urls.normalized_url_stripped` (ignore query strings) depending on
+ * the watched URL's `ignoreQueryStrings` flag. Both columns are indexed.
+ *
+ * Pagination: `source=manual|sitemap` (required for paged listing),
+ * `page` (1-based), `pageSize` (default 20, max 100). Auto-imported
+ * sitemap lists can be very large — the UI shows the two sources separately.
  */
+function parseSource(raw: unknown): 'manual' | 'sitemap' | undefined {
+  if (raw === 'manual' || raw === 'sitemap') return raw;
+  return undefined;
+}
+
 export function registerWatchedUrlRoutes(app: Express) {
   app.get("/api/watched-urls", async (req, res) => {
     // #swagger.tags = ['Watched URLs']
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
+      const source = parseSource(req.query.source);
       const withCitations = req.query.citations === 'true';
+
+      const pageParam = req.query.page ? parseInt(req.query.page as string) : undefined;
+      const pageSizeParam = req.query.pageSize ? parseInt(req.query.pageSize as string) : undefined;
+      const hasPagination = pageParam !== undefined || pageSizeParam !== undefined;
+      let limit: number | undefined;
+      let offset: number | undefined;
+      let page = 1;
+      let pageSize = 20;
+      if (hasPagination) {
+        page = Math.max(1, pageParam || 1);
+        pageSize = Math.min(100, Math.max(1, pageSizeParam || 20));
+        limit = pageSize;
+        offset = (page - 1) * pageSize;
+      }
+
       if (withCitations) {
-        const result = await storage.getWatchedUrlsWithCitations(runId, model);
-        res.json(result);
+        const rows = await storage.getWatchedUrlsWithCitations({ runId, model, source, limit, offset });
+        if (hasPagination) {
+          const total = await storage.getWatchedUrlCount(source);
+          return res.json({ rows, page, pageSize, total });
+        }
+        return res.json(rows);
       } else {
-        res.json(await storage.getWatchedUrls());
+        const rows = await storage.getWatchedUrls({ source, limit, offset });
+        if (hasPagination) {
+          const total = await storage.getWatchedUrlCount(source);
+          return res.json({ rows, page, pageSize, total });
+        }
+        return res.json(rows);
       }
     } catch (error) {
       console.error("Error fetching watched URLs:", error);
@@ -74,14 +109,15 @@ export function registerWatchedUrlRoutes(app: Express) {
   app.post("/api/watched-urls", requireRole('analyst'), async (req, res) => {
     // #swagger.tags = ['Watched URLs']
     try {
-      const { url, title, notes } = req.body || {};
+      const { url, title, notes, ignoreQueryStrings } = req.body || {};
       if (!url || typeof url !== 'string') {
         return res.status(400).json({ error: "url is required" });
       }
       if (!parseHttpUrl(url)) {
         return res.status(400).json({ error: "url must be a valid http(s) URL" });
       }
-      const normalizedUrl = normalizeUrl(url);
+      const stripQuery = !!ignoreQueryStrings;
+      const normalizedUrl = normalizeUrl(url, { stripAllQuery: stripQuery });
       const existing = await storage.getWatchedUrlByNormalized(normalizedUrl);
       if (existing) {
         return res.status(409).json({ error: "URL already in watchlist", watchedUrl: existing });
@@ -93,6 +129,8 @@ export function registerWatchedUrlRoutes(app: Express) {
         title: title || null,
         notes: notes || null,
         addedByUserId: userId || null,
+        ignoreQueryStrings: stripQuery,
+        source: 'manual',
       });
       res.status(201).json(created);
     } catch (error) {

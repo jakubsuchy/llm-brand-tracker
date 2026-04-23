@@ -69,6 +69,15 @@ export async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   const brandName = currentBrandName;
   console.log(`[DEBUG] launchAnalysis: brandName="${brandName}", savedPrompts=${savedPrompts?.length ?? 'none'}`);
 
+  // Auto-discover brand URLs via sitemap.xml (checked by default in Settings →
+  // Brand). Inserts as source='sitemap', ignore_query_strings=true so any
+  // cited variant (?utm=..., ?page=2, ...) matches. ON CONFLICT DO NOTHING
+  // preserves any manual entries already on the list. Failures are logged
+  // and swallowed — they must not block the analysis from starting.
+  await ingestBrandSitemap().catch((err) => {
+    console.warn('[sitemap-ingest] failed but continuing:', err?.message || err);
+  });
+
   const totalPrompts = savedPrompts?.length || (await storage.getPrompts()).length;
   const analysisRun = await storage.createAnalysisRun({
     status: 'running',
@@ -130,6 +139,54 @@ export const DEFAULT_MODELS_CONFIG: Record<string, any> = {
   chatgpt: { enabled: true, type: 'browser', label: 'ChatGPT' },
   gemini: { enabled: true, type: 'browser', label: 'Google Gemini' },
   'google-aimode': { enabled: true, type: 'browser', label: 'Google AI Mode' },
+  'openai-api': { enabled: false, type: 'api', label: 'OpenAI API - GPT-5' },
+  'anthropic-api': { enabled: false, type: 'api', label: 'Anthropic API - Claude Sonnet 4.6' },
 };
 
 export const DEFAULT_BLOCKLIST = ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com'];
+
+/**
+ * Fetch the brand sitemap (if the auto-watch setting is enabled) and bulk-
+ * insert every URL into watched_urls with source='sitemap' and
+ * ignore_query_strings=true. No-ops silently if:
+ *  - autoWatchBrandUrls is 'false'
+ *  - neither brandSitemapUrl nor brandUrl is configured
+ *  - the sitemap URL can't be derived or the fetch fails
+ *
+ * The ingestion is best-effort — never throws up to the caller.
+ */
+export async function ingestBrandSitemap(): Promise<{ discovered: number; inserted: number } | null> {
+  const autoWatchRaw = await storage.getSetting('autoWatchBrandUrls');
+  const enabled = autoWatchRaw === null ? true : autoWatchRaw !== 'false';
+  if (!enabled) return null;
+
+  const { parseHttpUrl, normalizeUrl } = await import('../services/analysis');
+  const { fetchSitemap, deriveSitemapUrl } = await import('../services/sitemap-fetch');
+
+  const explicit = await storage.getSetting('brandSitemapUrl');
+  const brandUrl = await storage.getSetting('brandUrl');
+  const sitemapUrl = (explicit && explicit.trim()) || (brandUrl ? deriveSitemapUrl(brandUrl) : null);
+  if (!sitemapUrl) return null;
+
+  console.log(`[sitemap-ingest] fetching ${sitemapUrl}`);
+  const result = await fetchSitemap(sitemapUrl);
+  if (!result.sites.length) {
+    console.log(`[sitemap-ingest] no URLs discovered (errors: ${result.errors.length})`);
+    return { discovered: 0, inserted: 0 };
+  }
+
+  const seen = new Set<string>();
+  const rows: { url: string; normalizedUrl: string; ignoreQueryStrings: boolean; source: 'sitemap' }[] = [];
+  for (const raw of result.sites) {
+    if (typeof raw !== 'string') continue;
+    if (!parseHttpUrl(raw)) continue;
+    const normalizedUrl = normalizeUrl(raw, { stripAllQuery: true });
+    if (seen.has(normalizedUrl)) continue;
+    seen.add(normalizedUrl);
+    rows.push({ url: raw.trim(), normalizedUrl, ignoreQueryStrings: true, source: 'sitemap' });
+  }
+
+  const inserted = await storage.bulkInsertWatchedUrls(rows);
+  console.log(`[sitemap-ingest] discovered=${rows.length} inserted=${inserted} truncated=${result.truncated}`);
+  return { discovered: rows.length, inserted };
+}

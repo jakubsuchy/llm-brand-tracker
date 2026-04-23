@@ -16,6 +16,7 @@ import { CompetitorSubdomainsCard } from "@/components/settings/competitor-subdo
 import { CompetitorExclusionsCard } from "@/components/settings/competitor-exclusions-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 import { WebhookCard } from "@/components/settings/webhook-card";
+import { IntegrationsFlowDiagram } from "@/components/integrations-flow-diagram";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Code, ExternalLink } from "lucide-react";
 
@@ -105,7 +106,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
         </TabsContent>
 
         <TabsContent value="models" className="space-y-6">
-          <ModelsCard />
+          <ModelsCard wizardMode={wizardMode} />
           {wizardMode && (
             <Button onClick={() => setLocation('/prompt-generator')} className="w-full">
               Continue to Prompt Generator →
@@ -123,7 +124,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
 
         {!wizardMode && (
           <TabsContent value="integrations" className="space-y-6">
-            <img src="/images/integrations-flow.svg" alt="Integration flow: TraceAIO connects via Webhook, n8n, and REST API to Salesforce, HubSpot, Slack, and more" className="w-full rounded-xl border" />
+            <IntegrationsFlowDiagram className="w-full rounded-xl border" />
 
             <WebhookCard />
 

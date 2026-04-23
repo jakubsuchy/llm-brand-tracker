@@ -29,6 +29,18 @@ export const MODEL_META: Record<string, {
     icon: '🌐',
     description: 'Browser-based. Google Search AI Mode with web-grounded responses.',
   },
+  'openai-api': {
+    label: 'OpenAI API - GPT-5',
+    color: 'hsl(150, 60%, 35%)', // deeper OpenAI green, distinguishable from ChatGPT teal
+    icon: '⚡',
+    description: 'API-based. OpenAI Responses API (gpt-5.4) with the web_search tool — real citations, no browser needed.',
+  },
+  'anthropic-api': {
+    label: 'Anthropic API - Claude Sonnet 4.6',
+    color: 'hsl(25, 70%, 45%)',  // Anthropic terracotta/orange
+    icon: '🧠',
+    description: 'API-based. Anthropic Messages API (claude-sonnet-4-6) with the web_search server tool — returns cited_text and source URLs.',
+  },
 };
 
 export function getModelColor(model: string): string {

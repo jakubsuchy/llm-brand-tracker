@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, Pencil, Trash2 } from "lucide-react";
 import { MODEL_META } from "@shared/models";
 
 interface ModelConfig {
@@ -20,9 +20,14 @@ const MODEL_INFO = MODEL_META;
 
 export function AnalysisLlmCard() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // When a key is already saved, the editors stay hidden until the user
+  // clicks "Change". This prevents accidental overwrites and keeps the card compact.
+  const [editingOpenai, setEditingOpenai] = useState(false);
+  const [editingAnthropic, setEditingAnthropic] = useState(false);
 
   const { data: llmSetting, refetch: refetchLlm } = useQuery<{ llm: string }>({
     queryKey: ['/api/settings/analysis-llm'],
@@ -67,7 +72,10 @@ export function AnalysisLlmCard() {
       if (res.ok) {
         toast({ title: "Success", description: "OpenAI API key saved and validated" });
         setOpenaiKey("");
+        setEditingOpenai(false);
         refetchOpenai();
+        // Models card gates openai-api on this key — refresh it too.
+        queryClient.invalidateQueries({ queryKey: ['/api/settings/models'] });
       } else {
         toast({ title: "Error", description: "Invalid OpenAI API key", variant: "destructive" });
       }
@@ -90,7 +98,9 @@ export function AnalysisLlmCard() {
       if (res.ok) {
         toast({ title: "Success", description: "Anthropic API key saved and validated" });
         setAnthropicKey("");
+        setEditingAnthropic(false);
         refetchAnthropic();
+        queryClient.invalidateQueries({ queryKey: ['/api/settings/models'] });
       } else {
         toast({ title: "Error", description: "Invalid Anthropic API key", variant: "destructive" });
       }
@@ -98,6 +108,33 @@ export function AnalysisLlmCard() {
       toast({ title: "Error", description: "Failed to save key", variant: "destructive" });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const removeKey = async (provider: 'openai' | 'anthropic') => {
+    const label = provider === 'openai' ? 'OpenAI' : 'Anthropic';
+    if (!confirm(`Remove ${label} API key? Any ${label} API-based model will be disabled and future analyses will skip it.`)) return;
+    try {
+      const res = await fetch(`/api/settings/${provider}-key`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: '' }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed');
+      toast({ title: "Removed", description: `${label} API key cleared` });
+      if (provider === 'openai') {
+        setOpenaiKey('');
+        setEditingOpenai(false);
+        refetchOpenai();
+      } else {
+        setAnthropicKey('');
+        setEditingAnthropic(false);
+        refetchAnthropic();
+      }
+      // Gate logic in models card depends on key presence — refresh it.
+      queryClient.invalidateQueries({ queryKey: ['/api/settings/models'] });
+    } catch (err) {
+      toast({ title: "Error", description: (err as Error).message, variant: "destructive" });
     }
   };
 
@@ -126,24 +163,49 @@ export function AnalysisLlmCard() {
                 <div className="text-xs text-gray-500 mt-0.5">GPT-4o</div>
               </div>
               {openaiStatus?.hasKey && (
-                <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
-                  <CheckCircle className="h-3 w-3 mr-1" /> Connected
-                </Badge>
+                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                  <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
+                    <CheckCircle className="h-3 w-3 mr-1" /> Connected
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    title="Change key"
+                    onClick={() => setEditingOpenai(v => !v)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    title="Remove key"
+                    onClick={() => removeKey('openai')}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
             </div>
-            {currentLlm === 'openai' && !openaiStatus?.hasKey && (
+            {((currentLlm === 'openai' && !openaiStatus?.hasKey) || editingOpenai) && (
               <div className="mt-3 pt-3 border-t" onClick={e => e.stopPropagation()}>
                 <div className="flex gap-2">
                   <Input
                     type="password"
-                    placeholder="sk-..."
+                    placeholder={openaiStatus?.hasKey ? "Enter new key to replace" : "sk-..."}
                     value={openaiKey}
                     onChange={e => setOpenaiKey(e.target.value)}
                     className="flex-1 h-8 text-sm"
                   />
                   <Button size="sm" onClick={saveOpenaiKey} disabled={isSaving || !openaiKey.trim()}>
-                    {isSaving ? 'Checking...' : 'Connect'}
+                    {isSaving ? 'Checking...' : openaiStatus?.hasKey ? 'Replace' : 'Connect'}
                   </Button>
+                  {editingOpenai && (
+                    <Button variant="ghost" size="sm" onClick={() => { setEditingOpenai(false); setOpenaiKey(''); }}>
+                      Cancel
+                    </Button>
+                  )}
                 </div>
                 <p className="text-xs text-gray-400 mt-1.5">
                   Get your key at{' '}
@@ -170,24 +232,49 @@ export function AnalysisLlmCard() {
                 <div className="text-xs text-gray-500 mt-0.5">Claude Sonnet 4.6</div>
               </div>
               {anthropicStatus?.hasKey && (
-                <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
-                  <CheckCircle className="h-3 w-3 mr-1" /> Connected
-                </Badge>
+                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                  <Badge className="text-[10px] bg-green-100 text-green-700 border-green-200">
+                    <CheckCircle className="h-3 w-3 mr-1" /> Connected
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    title="Change key"
+                    onClick={() => setEditingAnthropic(v => !v)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    title="Remove key"
+                    onClick={() => removeKey('anthropic')}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               )}
             </div>
-            {currentLlm === 'anthropic' && !anthropicStatus?.hasKey && (
+            {((currentLlm === 'anthropic' && !anthropicStatus?.hasKey) || editingAnthropic) && (
               <div className="mt-3 pt-3 border-t" onClick={e => e.stopPropagation()}>
                 <div className="flex gap-2">
                   <Input
                     type="password"
-                    placeholder="sk-ant-..."
+                    placeholder={anthropicStatus?.hasKey ? "Enter new key to replace" : "sk-ant-..."}
                     value={anthropicKey}
                     onChange={e => setAnthropicKey(e.target.value)}
                     className="flex-1 h-8 text-sm"
                   />
                   <Button size="sm" onClick={saveAnthropicKey} disabled={isSaving || !anthropicKey.trim()}>
-                    {isSaving ? 'Checking...' : 'Connect'}
+                    {isSaving ? 'Checking...' : anthropicStatus?.hasKey ? 'Replace' : 'Connect'}
                   </Button>
+                  {editingAnthropic && (
+                    <Button variant="ghost" size="sm" onClick={() => { setEditingAnthropic(false); setAnthropicKey(''); }}>
+                      Cancel
+                    </Button>
+                  )}
                 </div>
                 <p className="text-xs text-gray-400 mt-1.5">
                   Get your key at{' '}
