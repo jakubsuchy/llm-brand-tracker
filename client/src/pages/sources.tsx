@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,8 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import type { SourceAnalysis, Topic } from "@shared/schema";
 import { WatchlistTab } from "@/components/sources/watchlist-tab";
+import { PagesTab } from "@/components/sources/pages-tab";
 
-const SOURCE_TABS = ['domains', 'watchlist'] as const;
+const SOURCE_TABS = ['domains', 'pages', 'watchlist'] as const;
 
 interface AnalysisRun {
   id: number;
@@ -37,13 +39,22 @@ interface DomainData {
 }
 
 export default function SourcesPage() {
-  const initialTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
+  // ?page=... in the query string means a deep-link to a specific page detail —
+  // force the "By Page" tab even if the user shared the URL without #pages.
+  const hasPageDeepLink = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('page');
+  const hashTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
     ? window.location.hash.slice(1)
-    : 'domains';
+    : null;
+  const initialTab = hasPageDeepLink ? 'pages' : (hashTab || 'domains');
   const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const [, setLocation] = useLocation();
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (typeof window !== 'undefined') window.location.hash = tab;
+  };
+  const showPageDetail = (url: string) => {
+    setLocation(`/sources?page=${encodeURIComponent(url)}`);
+    handleTabChange('pages');
   };
   const [categoryFilter, setCategoryFilter] = useState<CategoryType>('all');
   const [showBrand, setShowBrand] = useState(true);
@@ -152,9 +163,14 @@ export default function SourcesPage() {
     <div className="p-4 sm:p-8 space-y-8">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList className="mb-6">
-          <TabsTrigger value="domains">Domains</TabsTrigger>
+          <TabsTrigger value="domains">By Domain</TabsTrigger>
+          <TabsTrigger value="pages">By Page</TabsTrigger>
           <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="pages">
+          <PagesTab />
+        </TabsContent>
 
         <TabsContent value="watchlist">
           <WatchlistTab />
@@ -398,10 +414,10 @@ export default function SourcesPage() {
                         </div>
                       </div>
                       {expandedView === 'prompts' && (
-                        <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} />
+                        <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} onFilterByRun={(id) => setSelectedRun(id.toString())} />
                       )}
                       {expandedView === 'pages' && (
-                        <DomainPages urls={domain.urls} domain={domain.domain} />
+                        <DomainPages urls={domain.urls} domain={domain.domain} onShowPageDetail={showPageDetail} />
                       )}
                     </div>
                   )}
@@ -547,10 +563,10 @@ export default function SourcesPage() {
                               </div>
                             </div>
                             {expandedView === 'prompts' && (
-                              <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} />
+                              <DomainResponses domain={domain.domain} runId={selectedRun !== 'all' ? selectedRun : undefined} model={selectedModel !== 'all' ? selectedModel : undefined} topicId={selectedTopic !== 'all' ? selectedTopic : undefined} onFilterByRun={(id) => setSelectedRun(id.toString())} />
                             )}
                             {expandedView === 'pages' && (
-                              <DomainPages urls={domain.urls} domain={domain.domain} />
+                              <DomainPages urls={domain.urls} domain={domain.domain} onShowPageDetail={showPageDetail} />
                             )}
                           </TableCell>
                         </TableRow>
@@ -570,7 +586,19 @@ export default function SourcesPage() {
   );
 }
 
-function DomainResponses({ domain, runId, model, topicId }: { domain: string; runId?: string; model?: string; topicId?: string }) {
+function formatRunStamp(r: { analysisRunId?: number | null; createdAt?: string | null }): string {
+  const parts: string[] = [];
+  if (r.analysisRunId != null) parts.push(`Run #${r.analysisRunId}`);
+  if (r.createdAt) {
+    const d = new Date(r.createdAt);
+    if (!isNaN(d.getTime())) {
+      parts.push(`${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    }
+  }
+  return parts.join(' • ');
+}
+
+function DomainResponses({ domain, runId, model, topicId, onFilterByRun }: { domain: string; runId?: string; model?: string; topicId?: string; onFilterByRun: (runId: number) => void }) {
   const params = new URLSearchParams();
   if (runId) params.set('runId', runId);
   if (model) params.set('model', model);
@@ -602,6 +630,15 @@ function DomainResponses({ domain, runId, model, topicId }: { domain: string; ru
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             {r.model && <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{r.model}</Badge>}
             {r.brandMentioned && <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700">Brand mentioned</Badge>}
+            {r.analysisRunId != null && (
+              <button
+                onClick={() => onFilterByRun(r.analysisRunId)}
+                className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                title="Filter this view by this run"
+              >
+                {formatRunStamp(r)}
+              </button>
+            )}
             {r.competitorsMentioned?.length > 0 && (
               <span className="text-xs text-gray-500">
                 Competitors: {r.competitorsMentioned.join(', ')}
@@ -627,7 +664,15 @@ function DomainResponses({ domain, runId, model, topicId }: { domain: string; ru
   );
 }
 
-function DomainPages({ urls, domain }: { urls: string[]; domain: string }) {
+// Defense-in-depth: stored URLs come from raw LLM output (responses.sources).
+// Strip any non-http(s) URL before it lands in an `href` sink. The server
+// boundary is also guarded via parseHttpUrl, but we re-check here in case a
+// junk URL slipped in from a prior run before the filter existed.
+function safeHttpHref(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
+function DomainPages({ urls, domain, onShowPageDetail }: { urls: string[]; domain: string; onShowPageDetail: (url: string) => void }) {
   if (!urls || urls.length === 0) {
     return <div className="p-4 text-sm text-gray-500">No pages found for this domain.</div>;
   }
@@ -635,15 +680,32 @@ function DomainPages({ urls, domain }: { urls: string[]; domain: string }) {
   return (
     <div className="p-4 space-y-1 max-h-96 overflow-y-auto">
       <p className="text-xs text-gray-500 mb-2">{urls.length} page{urls.length !== 1 ? 's' : ''} from {domain}</p>
-      {urls.map((url, i) => (
-        <div key={i} className="flex items-center gap-2 py-1">
-          <span className="text-xs text-gray-400 w-6">{i + 1}.</span>
-          <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 break-all">
-            {url}
-          </a>
-          <ExternalLink className="w-3 h-3 text-gray-400 shrink-0" />
-        </div>
-      ))}
+      {urls.map((url, i) => {
+        const safeUrl = safeHttpHref(url);
+        return (
+          <div key={i} className="flex items-center gap-2 py-1">
+            <span className="text-xs text-gray-400 w-6">{i + 1}.</span>
+            {safeUrl ? (
+              <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 break-all flex-1 min-w-0">
+                {url}
+              </a>
+            ) : (
+              <span className="text-sm text-gray-500 break-all flex-1 min-w-0" title="Non-http(s) URL — link disabled">{url}</span>
+            )}
+            <ExternalLink className="w-3 h-3 text-gray-400 shrink-0" />
+            {/* Plain href so right-click → "Copy link" produces a shareable URL,
+                click handler intercepts to do an SPA-style navigation. */}
+            <a
+              href={`/sources?page=${encodeURIComponent(url)}#pages`}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onShowPageDetail(url); }}
+              className="text-xs text-blue-600 hover:text-blue-800 shrink-0 whitespace-nowrap ml-2"
+              title="Open page detail (shareable link)"
+            >
+              Show detail →
+            </a>
+          </div>
+        );
+      })}
     </div>
   );
 }

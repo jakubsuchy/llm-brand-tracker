@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { storage } from './storage';
 import { findUserByApiKey } from './services/auth';
+import { parseHttpUrl } from './services/analysis';
 import type { Express, Request, Response } from 'express';
 import type { ResponseWithPrompt } from '@shared/schema';
 
@@ -403,6 +404,67 @@ function createMcpServer(): McpServer {
         .sort((a: any, b: any) => b.citationCount - a.citationCount);
 
       return textResult(filtered);
+    },
+  );
+
+  // ---- list-pages ----
+  server.tool(
+    'list-pages',
+    'Top individual page URLs cited across LLM responses, with citation counts and source classification (brand/competitor/neutral). Mirrors the "By Page" tab on the Sources screen — use this when the user asks about specific pages or articles being cited (e.g. "which of my blog posts are cited?", "what URLs do LLMs cite most?", "show me top cited pages"). Use list-sources instead for domain-level breakdown. Paginated; use the page argument to step through results.',
+    {
+      runId: z.number().optional().describe('Filter by analysis run ID'),
+      model: z
+        .string()
+        .optional()
+        .describe('Filter by model (perplexity, chatgpt, gemini, openai-api, anthropic-api)'),
+      topicId: z.number().optional().describe('Filter by topic ID'),
+      sourceType: z
+        .string()
+        .optional()
+        .describe('Filter by source type: brand, competitor, or neutral'),
+      page: z.number().optional().describe('1-based page number (default 1)'),
+      pageSize: z.number().optional().describe('Results per page (default 50, max 200)'),
+    },
+    async ({ runId, model, topicId, sourceType, page, pageSize }) => {
+      const pageNum = Math.max(1, page || 1);
+      const ps = Math.min(200, Math.max(1, pageSize || 50));
+
+      let responses = await storage.getResponsesWithPrompts(runId);
+      responses = filterByModel(responses, model);
+      if (topicId !== undefined) responses = responses.filter((r) => r.prompt?.topicId === topicId);
+
+      const counts = new Map<string, { url: string; domain: string; count: number }>();
+      for (const r of responses) {
+        if (!r.sources || r.sources.length === 0) continue;
+        const seen = new Set<string>();
+        for (const raw of r.sources) {
+          if (typeof raw !== 'string') continue;
+          const parsed = parseHttpUrl(raw);
+          if (!parsed) continue;
+          const url = raw.trim();
+          if (seen.has(url)) continue;
+          seen.add(url);
+          const domain = parsed.hostname.replace(/^www\./, '').toLowerCase();
+          const existing = counts.get(url);
+          if (existing) existing.count++;
+          else counts.set(url, { url, domain, count: 1 });
+        }
+      }
+
+      const classify = await classifySources();
+      let all = Array.from(counts.values()).map((p) => ({
+        url: p.url,
+        domain: p.domain,
+        sourceType: classify(p.domain),
+        citationCount: p.count,
+      }));
+      if (sourceType) all = all.filter((p) => p.sourceType === sourceType);
+      all.sort((a, b) => b.citationCount - a.citationCount);
+
+      const total = all.length;
+      const start = (pageNum - 1) * ps;
+      const rows = all.slice(start, start + ps);
+      return textResult({ rows, page: pageNum, pageSize: ps, total });
     },
   );
 

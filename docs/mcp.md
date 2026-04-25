@@ -39,7 +39,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 ## Available Tools
 
-TraceAIO exposes 17 MCP tools. Claude automatically picks the right tool based on your question.
+TraceAIO exposes 18 MCP tools. Claude automatically picks the right tool based on your question.
 
 ### Overview
 
@@ -57,6 +57,7 @@ TraceAIO exposes 17 MCP tools. Claude automatically picks the right tool based o
 | `list-competitors` | Ranked competitors by mention rate |
 | `list-topics` | Topic-level mention rates |
 | `list-sources` | Top source domains with citation counts and type (brand/competitor/neutral) |
+| `list-pages` | Top individual page URLs cited across responses, with citation counts and source classification. Paginated. |
 | `list-runs` | All analysis runs with status and progress |
 
 ### Deep Dives

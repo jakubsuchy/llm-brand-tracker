@@ -121,6 +121,37 @@ const TRACKING_PARAMS = new Set([
   '_hsenc', '_hsmi', '__hstc', '__hssc', '__hsfp',
 ]);
 
+/**
+ * Strip tracking query params from a URL while preserving everything else
+ * (original scheme, host casing incl. `www.`, path casing, fragment, and any
+ * non-tracking query params). Use this for the *display* URL stored in
+ * `responses.sources` and `source_urls.url`. For canonical equality
+ * comparison, use `normalizeUrl` instead.
+ *
+ * Returns the input unchanged on parse failure.
+ */
+export function stripTrackingParams(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    const kept: [string, string][] = [];
+    for (const [k, v] of u.searchParams.entries()) {
+      const kl = k.toLowerCase();
+      if (kl.startsWith('utm_')) continue;
+      if (TRACKING_PARAMS.has(kl)) continue;
+      kept.push([k, v]);
+    }
+    if (kept.length === u.searchParams.size) {
+      // No tracking params present — return raw to preserve original encoding.
+      return raw;
+    }
+    u.search = '';
+    for (const [k, v] of kept) u.searchParams.append(k, v);
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 export function normalizeUrl(raw: string, opts: { stripAllQuery?: boolean } = {}): string {
   try {
     const u = new URL(raw.trim());

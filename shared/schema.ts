@@ -362,6 +362,13 @@ export type SourceAnalysis = {
   urls: string[];
 };
 
+export type PageAnalysis = {
+  url: string;
+  domain: string;
+  sourceType: string;
+  citationCount: number;
+};
+
 export type MergeSuggestion = {
   competitors: { id: number; name: string; mentionCount: number }[];
   similarity: number;

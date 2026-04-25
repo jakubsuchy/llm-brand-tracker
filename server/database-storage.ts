@@ -13,7 +13,7 @@ import {
   WatchedUrl, InsertWatchedUrl, WatchedUrlWithCitations, WatchedUrlCitation,
   topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls
 } from "@shared/schema";
-import { normalizeUrl } from "./services/analysis";
+import { normalizeUrl, stripTrackingParams } from "./services/analysis";
 import { db } from "./db";
 import { eq, desc, count, sql, isNull, and, gte, lte } from "drizzle-orm";
 import { IStorage } from "./storage";
@@ -34,6 +34,11 @@ export class DatabaseStorage implements IStorage {
     // Fill in any NULL normalized_url rows left over from before that column existed
     this.backfillNormalizedSourceUrls().catch((err) => {
       console.error('[backfill] normalized_url backfill failed:', err);
+    });
+    // Strip tracking params (utm_*, gclid, fbclid, etc.) from URLs that were
+    // stored before stripTrackingParams was applied at the analyzer boundary.
+    this.backfillStripTrackingParams().catch((err) => {
+      console.error('[backfill] tracking-param backfill failed:', err);
     });
   }
 
@@ -66,6 +71,59 @@ export class DatabaseStorage implements IStorage {
     }
     if (updated > 0) {
       console.log(`[backfill] Normalized ${updated} source_urls rows.`);
+    }
+  }
+
+  /**
+   * One-time backfill: strips tracking params (utm_*, gclid, fbclid, ...) from
+   * `source_urls.url` and `responses.sources` for rows written before the
+   * stripTrackingParams write-time guard existed. Idempotent — rows already
+   * clean produce a no-op match.
+   */
+  async backfillStripTrackingParams(): Promise<void> {
+    const BATCH = 500;
+    let urlUpdated = 0;
+    // source_urls.url — match anything containing a known tracking key
+    while (true) {
+      const rows = await db
+        .select({ id: sourceUrls.id, url: sourceUrls.url })
+        .from(sourceUrls)
+        .where(sql`${sourceUrls.url} ~* '[?&](utm_[a-z]+|gclid|gbraid|wbraid|fbclid|msclkid|ttclid|yclid|epik|igshid|li_fat_id|mc_cid|mc_eid|mkt_tok|_hsenc|_hsmi|__hstc|__hssc|__hsfp|trackingid|gad_source|gclsrc|dclid|_gl|gad)='`)
+        .limit(BATCH);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const cleaned = stripTrackingParams(row.url);
+        if (cleaned !== row.url) {
+          await db.update(sourceUrls).set({ url: cleaned }).where(eq(sourceUrls.id, row.id));
+          urlUpdated++;
+        }
+      }
+      if (rows.length < BATCH) break;
+    }
+
+    // responses.sources — array column, scan rows that have any element with a tracking param
+    let respUpdated = 0;
+    while (true) {
+      const rows = await db
+        .select({ id: responses.id, sources: responses.sources })
+        .from(responses)
+        .where(sql`EXISTS (SELECT 1 FROM unnest(${responses.sources}) AS s WHERE s ~* '[?&](utm_[a-z]+|gclid|gbraid|wbraid|fbclid|msclkid|ttclid|yclid|epik|igshid|li_fat_id|mc_cid|mc_eid|mkt_tok|_hsenc|_hsmi|__hstc|__hssc|__hsfp|trackingid|gad_source|gclsrc|dclid|_gl|gad)=')`)
+        .limit(BATCH);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        if (!row.sources) continue;
+        const cleaned = Array.from(new Set(row.sources.map(stripTrackingParams)));
+        const same = cleaned.length === row.sources.length && cleaned.every((u, i) => u === row.sources![i]);
+        if (!same) {
+          await db.update(responses).set({ sources: cleaned }).where(eq(responses.id, row.id));
+          respUpdated++;
+        }
+      }
+      if (rows.length < BATCH) break;
+    }
+
+    if (urlUpdated > 0 || respUpdated > 0) {
+      console.log(`[backfill] Stripped tracking params from ${urlUpdated} source_urls.url and ${respUpdated} responses.sources rows.`);
     }
   }
 

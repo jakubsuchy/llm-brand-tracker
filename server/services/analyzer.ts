@@ -1,6 +1,7 @@
 import { storage } from "../storage";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
 import { setCurrentRunId } from "./llm";
+import { stripTrackingParams } from "./analysis";
 
 // Dynamic LLM module resolver — reads analysisLlm setting to pick openai or anthropic
 async function getLlmModule() {
@@ -449,9 +450,11 @@ export class BrandAnalyzer {
       }
     }
 
-    // Process sources
-    const responseUrls = extractUrlsFromText(analysis.response);
-    const analysisSources = analysis.sources || [];
+    // Process sources. Strip utm/click-tracking params at the storage boundary
+    // so display URLs in sources.urls and responses.sources stay clean and
+    // collapse correctly across runs (e.g. ?utm_source=openai variants).
+    const responseUrls = extractUrlsFromText(analysis.response).map(stripTrackingParams);
+    const analysisSources = (analysis.sources || []).map(stripTrackingParams);
     const allUrls = Array.from(new Set([...responseUrls, ...analysisSources]));
 
     const urlsByDomain = new Map<string, string[]>();
@@ -503,7 +506,7 @@ export class BrandAnalyzer {
         const resolved = resolvedCompetitors.find(r => r.name.toLowerCase() === name.toLowerCase());
         return resolved?.name || name;
       }),
-      sources: analysis.sources
+      sources: analysisSources,
     });
 
     // Create competitor mention records + log identification source
