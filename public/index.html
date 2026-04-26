@@ -3,901 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TraceAIO — Track Your Brand Across LLMs</title>
-<meta name="description" content="Open-source LLM brand tracker. See where ChatGPT, Perplexity, and Gemini mention your brand — and where they don't.">
+<title>TraceAIO | Track Your Brand Across LLMs</title>
+<meta name="description" content="Open-source LLM brand tracker. See where ChatGPT, Perplexity, and Gemini mention your brand, and where they don't.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
-<style>
-*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-:root {
-  --bg-deep: #060a14;
-  --bg-surface: #0a1020;
-  --bg-elevated: #111a2e;
-  --text-primary: #e8ecf4;
-  --text-secondary: #8892a8;
-  --text-dim: #505a70;
-  --accent-blue: #2563eb;
-  --accent-sky: #0ea5e9;
-  --accent-blue-glow: rgba(37, 99, 235, 0.18);
-  --accent-sky-glow: rgba(14, 165, 233, 0.15);
-  --border: rgba(100, 130, 180, 0.1);
-  --font-display: 'Fraunces', serif;
-  --font-body: 'Instrument Sans', sans-serif;
-  --font-mono: 'DM Mono', monospace;
-}
-
-html { scroll-behavior: smooth; }
-
-body {
-  background: var(--bg-deep);
-  color: var(--text-primary);
-  font-family: var(--font-body);
-  line-height: 1.6;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* ─── Ambient background ─── */
-.bg-mesh {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-.bg-mesh::before {
-  content: '';
-  position: absolute;
-  width: 900px;
-  height: 900px;
-  top: -300px;
-  right: -200px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.07) 0%, transparent 70%);
-  animation: drift 25s ease-in-out infinite alternate;
-}
-.bg-mesh::after {
-  content: '';
-  position: absolute;
-  width: 800px;
-  height: 800px;
-  bottom: -200px;
-  left: -200px;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.05) 0%, transparent 70%);
-  animation: drift 30s ease-in-out infinite alternate-reverse;
-}
-@keyframes drift {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(60px, 40px) scale(1.1); }
-}
-
-/* ─── Grain overlay ─── */
-.grain {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px;
-}
-
-/* ─── Layout ─── */
-.wrapper {
-  position: relative;
-  z-index: 2;
-}
-
-section {
-  padding: 0 24px;
-}
-
-.container {
-  max-width: 1100px;
-  margin: 0 auto;
-}
-
-/* ─── Nav ─── */
-nav {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  padding: 16px 24px;
-  backdrop-filter: blur(20px) saturate(1.4);
-  background: rgba(6, 8, 13, 0.7);
-  border-bottom: 1px solid var(--border);
-  transition: background 0.3s;
-}
-nav .nav-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.nav-logo {
-  display: flex;
-  align-items: center;
-  text-decoration: none;
-}
-.nav-logo img {
-  height: 40px;
-  width: auto;
-}
-.nav-links {
-  display: flex;
-  align-items: center;
-  gap: 32px;
-  list-style: none;
-}
-.nav-links a {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition: color 0.2s;
-}
-.nav-links a:hover { color: var(--text-primary); }
-
-.btn-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 18px;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.25s;
-  font-family: var(--font-body);
-}
-.btn-nav-github {
-  background: #f0f2f5;
-  color: #1a1a1a;
-}
-.btn-nav-github:hover {
-  background: #ffffff;
-  box-shadow: 0 0 20px rgba(255,255,255,0.1);
-  transform: translateY(-1px);
-}
-.btn-nav-github svg {
-  flex-shrink: 0;
-}
-
-/* ─── Hero ─── */
-.hero {
-  padding-top: 160px;
-  padding-bottom: 100px;
-  text-align: center;
-}
-.hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
-  border-radius: 100px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 500;
-  margin-bottom: 32px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.hero-badge .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-sky);
-  box-shadow: 0 0 8px var(--accent-sky);
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.hero h1 {
-  font-family: var(--font-display);
-  font-size: clamp(2.8rem, 7vw, 5rem);
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  margin-bottom: 24px;
-  max-width: 800px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.hero h1 .gradient-text {
-  background: linear-gradient(135deg, var(--accent-sky) 0%, var(--accent-blue) 50%, #1e3a8a 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.hero-sub {
-  font-size: 1.15rem;
-  color: var(--text-secondary);
-  max-width: 560px;
-  margin: 0 auto 48px;
-  line-height: 1.7;
-}
-
-.hero-ctas {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 28px;
-  border-radius: 10px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: var(--font-body);
-  cursor: pointer;
-  border: none;
-}
-.btn-primary {
-  background: linear-gradient(135deg, var(--accent-blue), #3b82f6);
-  color: #fff;
-  box-shadow: 0 4px 24px var(--accent-blue-glow), inset 0 1px 0 rgba(255,255,255,0.15);
-}
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 40px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,0.15);
-}
-.btn-secondary {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-}
-.btn-secondary:hover {
-  background: #1a2030;
-  border-color: rgba(136, 146, 168, 0.25);
-  transform: translateY(-2px);
-}
-
-/* ─── Models strip ─── */
-.models-strip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 40px;
-  margin-top: 64px;
-  padding-top: 40px;
-  border-top: 1px solid var(--border);
-}
-.model-tag {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-}
-.model-tag .indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  transform: rotate(45deg);
-}
-.model-tag:nth-child(1) .indicator { background: #0ea5e9; }
-.model-tag:nth-child(2) .indicator { background: #2563eb; }
-.model-tag:nth-child(3) .indicator { background: #1e3a8a; }
-.model-tag:nth-child(4) .indicator { background: #34d399; }
-
-/* ─── Demo section ─── */
-.demo-section {
-  padding-top: 80px;
-  padding-bottom: 100px;
-}
-.section-label {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--accent-sky);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: 16px;
-}
-.demo-section h2 {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 16px;
-}
-.demo-section p {
-  color: var(--text-secondary);
-  max-width: 500px;
-  margin-bottom: 48px;
-}
-.demo-frame {
-  position: relative;
-  width: 100%;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  aspect-ratio: 16 / 9;
-}
-.demo-frame::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: 17px;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(14,165,233,0.25), transparent, rgba(37,99,235,0.2));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  z-index: 1;
-}
-.demo-frame iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-  display: block;
-}
-
-/* ─── How It Works ─── */
-.howitworks-section {
-  padding-top: 80px;
-  padding-bottom: 100px;
-}
-.howitworks-section h2 {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 56px;
-  text-align: center;
-}
-.steps {
-  max-width: 700px;
-  margin: 0 auto;
-}
-.step {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-.step-num {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--accent-sky);
-}
-.step-content h3 {
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 8px;
-  letter-spacing: -0.01em;
-}
-.step-content > p {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  line-height: 1.65;
-}
-.step-connector {
-  width: 1px;
-  height: 32px;
-  background: var(--border);
-  margin: 8px 0 8px 19px;
-}
-.step-detail {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-}
-.step-detail-card {
-  flex: 1;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-  font-size: 0.82rem;
-  line-height: 1.55;
-}
-.step-detail-card strong {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-}
-.step-detail-card p {
-  color: var(--text-secondary);
-  margin: 0;
-}
-.step-detail-card a {
-  color: var(--accent-sky);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.step-detail-warn {
-  border-color: rgba(239, 68, 68, 0.15);
-  background: rgba(239, 68, 68, 0.03);
-}
-.step-detail-warn strong {
-  color: #f87171;
-}
-
-/* ─── Features ─── */
-.features-section {
-  padding-top: 80px;
-  padding-bottom: 100px;
-}
-.features-section h2 {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 56px;
-  text-align: center;
-}
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-.feature-card {
-  background: var(--bg-surface);
-  padding: 40px 32px;
-  transition: background 0.3s;
-}
-.feature-card:hover { background: var(--bg-elevated); }
-
-.feature-num {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  margin-bottom: 20px;
-  letter-spacing: 0.1em;
-}
-.feature-card h3 {
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 12px;
-  letter-spacing: -0.01em;
-}
-.feature-card p {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
-
-/* ─── Integrations ─── */
-.integrations-section {
-  padding-top: 80px;
-  padding-bottom: 100px;
-}
-.integrations-section h2 {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 16px;
-  text-align: center;
-}
-.integrations-section > .container > .section-subtitle {
-  color: var(--text-secondary);
-  text-align: center;
-  max-width: 560px;
-  margin: 0 auto 56px;
-}
-.integrations-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 48px;
-  max-width: 1000px;
-  margin: 0 auto;
-}
-.integrations-text {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 28px;
-}
-.integration-item {
-  display: flex;
-  gap: 16px;
-}
-.integration-icon {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-}
-.integration-item h3 {
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 4px;
-  letter-spacing: -0.01em;
-}
-.integration-item p {
-  color: var(--text-secondary);
-  font-size: 0.88rem;
-  line-height: 1.55;
-}
-.integrations-image {
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  position: relative;
-}
-.integrations-image::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: 17px;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(14,165,233,0.25), transparent, rgba(37,99,235,0.2));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  z-index: 1;
-}
-.integrations-image img {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-.integrations-image .placeholder-img {
-  aspect-ratio: 4 / 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-@media (max-width: 768px) {
-  .integrations-text {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ─── Get Started ─── */
-.getstarted-section {
-  padding-top: 80px;
-  padding-bottom: 120px;
-}
-.getstarted-section h2 {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 16px;
-  text-align: center;
-}
-.getstarted-section > .container > p {
-  color: var(--text-secondary);
-  text-align: center;
-  max-width: 500px;
-  margin: 0 auto 56px;
-}
-
-.requirements {
-  max-width: 900px;
-  margin: 0 auto 48px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 32px 36px;
-}
-.requirements h3 {
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 20px;
-  color: var(--text-primary);
-}
-.req-items {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.req-item {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  font-size: 0.9rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-.req-item a {
-  color: var(--accent-sky);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.req-num {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
-}
-.browser-modes {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 8px;
-  padding-left: 36px;
-}
-.browser-mode {
-  flex: 1;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px 20px;
-}
-.bm-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 0.9rem;
-  color: var(--text-primary);
-}
-.bm-badge {
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  padding: 3px 8px;
-  border-radius: 5px;
-  letter-spacing: 0.03em;
-  font-weight: 500;
-}
-.bm-free {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.2);
-}
-.bm-paid {
-  background: rgba(14, 165, 233, 0.1);
-  color: var(--accent-sky);
-  border: 1px solid rgba(14, 165, 233, 0.2);
-}
-.bm-stats {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-.bm-sep {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--text-dim);
-}
-.bm-note {
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
-.bm-note a {
-  color: var(--accent-sky);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.bm-or {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-dim);
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.start-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-.start-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 36px;
-  position: relative;
-  overflow: hidden;
-  transition: border-color 0.3s;
-}
-.start-card:hover { border-color: rgba(136, 146, 168, 0.25); }
-.start-card::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-}
-.start-card:first-child::after {
-  background: linear-gradient(90deg, var(--accent-sky), transparent);
-}
-.start-card:last-child::after {
-  background: linear-gradient(90deg, var(--accent-blue), transparent);
-}
-.start-card-label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: 16px;
-}
-.start-card:first-child .start-card-label { color: var(--accent-sky); }
-.start-card:last-child .start-card-label { color: var(--accent-blue); }
-
-.start-card h3 {
-  font-family: var(--font-display);
-  font-size: 1.3rem;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.start-card > p {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  margin-bottom: 24px;
-  line-height: 1.6;
-}
-
-.code-block {
-  background: var(--bg-deep);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px;
-  overflow-x: auto;
-  position: relative;
-}
-.code-block code {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  white-space: pre;
-  display: block;
-}
-.code-block .comment { color: var(--text-dim); }
-.code-block .cmd { color: var(--accent-sky); }
-.code-block .str { color: #60a5fa; }
-.code-block .flag { color: #93c5fd; }
-
-.copy-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.copy-btn:hover {
-  color: var(--text-primary);
-  border-color: rgba(136, 146, 168, 0.3);
-}
-
-.start-card-note {
-  margin-top: 20px;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-  line-height: 1.5;
-}
-.start-card-note a {
-  color: var(--text-secondary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* ─── Footer ─── */
-footer {
-  padding: 40px 24px;
-  border-top: 1px solid var(--border);
-}
-footer .container {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-footer .footer-left {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--text-dim);
-}
-footer .footer-right {
-  display: flex;
-  gap: 24px;
-}
-footer .footer-right a {
-  color: var(--text-dim);
-  text-decoration: none;
-  font-size: 0.85rem;
-  transition: color 0.2s;
-}
-footer .footer-right a:hover { color: var(--text-secondary); }
-
-/* ─── Animations ─── */
-.reveal {
-  opacity: 0;
-  transform: translateY(16px);
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.reveal.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-.reveal-delay-1 { transition-delay: 0.05s; }
-.reveal-delay-2 { transition-delay: 0.1s; }
-.reveal-delay-3 { transition-delay: 0.15s; }
-.reveal-delay-4 { transition-delay: 0.2s; }
-
-/* ─── Responsive ─── */
-@media (max-width: 768px) {
-  .nav-links { gap: 16px; }
-  .nav-links li:not(:last-child) { display: none; }
-  .features-grid { grid-template-columns: 1fr; }
-  .start-options { grid-template-columns: 1fr; }
-  .models-strip { flex-wrap: wrap; gap: 24px; }
-  .step-detail { flex-direction: column; }
-  .browser-modes { flex-direction: column; padding-left: 0; }
-  .bm-or { margin: -8px 0; }
-  .hero { padding-top: 120px; padding-bottom: 60px; }
-  footer .container { flex-direction: column; gap: 16px; text-align: center; }
-}
-</style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -969,14 +80,14 @@ footer .footer-right a:hover { color: var(--text-secondary); }
 <section class="howitworks-section" id="how-it-works">
   <div class="container">
     <div class="section-label reveal" style="text-align:center">// how it works</div>
-    <h2 class="reveal reveal-delay-1">Three steps. Real browser. Real results.</h2>
+    <h2 class="reveal reveal-delay-1">Real browsers. Real LLM responses.</h2>
 
     <div class="steps reveal reveal-delay-2">
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-content">
           <h3>Generate prompts</h3>
-          <p>AI creates brand-neutral prompts across topics relevant to your industry &mdash; the kind of questions your potential customers actually ask. Add your own custom prompts too. Prompts are saved and reusable across runs.</p>
+          <p>AI creates brand-neutral prompts on topics that matter in your industry, the kind of questions your potential customers actually ask. Add your own custom prompts too. Prompts are saved and reusable across runs.</p>
         </div>
       </div>
 
@@ -986,7 +97,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
         <div class="step-num">2</div>
         <div class="step-content">
           <h3>Ask LLMs via real browser</h3>
-          <p>Each prompt is sent to ChatGPT, Perplexity, Gemini, and Google AI Mode through an actual browser session &mdash; not an API. This is exactly what your users see when they type a question. No shortcuts, no API-only responses that differ from the real thing.</p>
+          <p>Each prompt is sent to ChatGPT, Perplexity, Gemini, and Google AI Mode through an actual browser session, not an API. That's what your users see when they type the same question. API-only tests miss what real users actually get.</p>
           <div class="step-detail">
             <div class="step-detail-card">
               <strong>3rd Party Proxy (recommended)</strong>
@@ -994,7 +105,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
             </div>
             <div class="step-detail-card step-detail-warn">
               <strong>Local Container</strong>
-              <p>Free but risky. Runs a real browser on your machine &mdash; one prompt at a time. Your IP address is exposed directly to each LLM provider. Anti-bot protections will likely flag and block your IP after repeated requests, potentially affecting your normal access to these services. Not recommended for production use.</p>
+              <p>Free but risky. Runs a real browser on your machine, one prompt at a time. Your IP is exposed directly to each LLM provider. Anti-bot systems catch repeated requests from the same address and can block your normal access to these services. Not recommended for production.</p>
             </div>
           </div>
         </div>
@@ -1016,7 +127,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
         <div class="step-num">4</div>
         <div class="step-content">
           <h3>Ask questions about your data</h3>
-          <p>Connect Claude via MCP and query your brand data conversationally. "Which prompts mention our competitor but not us?" "What sources does Perplexity cite that Gemini doesn't?" "How did our mention rate change after the last product launch?" Correlate across models, runs, topics, and competitors without writing queries.</p>
+          <p>Connect Claude via MCP and query your brand data conversationally. "Which prompts mention our competitor but not us?" "What sources does Perplexity cite that Gemini doesn't?" "How did our mention rate change after the last product launch?" No SQL required.</p>
         </div>
       </div>
     </div>
@@ -1037,7 +148,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
       <div class="feature-card">
         <div class="feature-num">02</div>
         <h3>Multi-Model Testing</h3>
-        <p>Runs against ChatGPT, Perplexity, Google Gemini, and Google AI Mode via real browser sessions. Not APIs &mdash; exactly what your users see.</p>
+        <p>Runs against ChatGPT, Perplexity, Google Gemini, and Google AI Mode via real browser sessions. Not APIs. Exactly what your users see.</p>
       </div>
       <div class="feature-card">
         <div class="feature-num">03</div>
@@ -1053,7 +164,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
       <div class="feature-card">
         <div class="feature-num">05</div>
         <h3>Scheduled Runs</h3>
-        <p>Set it and forget it. Run analysis hourly, daily, weekly, or monthly. Auto-expire stuck runs after 24 hours.</p>
+        <p>Schedule once. Run analysis hourly, daily, weekly, or monthly. Stuck runs auto-expire after 24 hours.</p>
       </div>
       <div class="feature-card">
         <div class="feature-num">06</div>
@@ -1077,7 +188,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
           <div class="integration-icon"><svg viewBox="-10 -5 1034 1034" width="22" height="22"><path fill="currentColor" d="M482 226h-1l-10 2q-33 4-64.5 18.5t-55.5 38.5q-41 37-57 91q-9 30-8 63t12 63q17 45 52 78l13 12l-83 135q-26-1-45 7q-30 13-45 40q-7 15-9 31t2 32q8 30 33 48q15 10 33 14.5t36 2t34.5-12.5t27.5-25q12-17 14.5-39t-5.5-41q-1-5-7-14l-3-6l118-192q6-9 8-14l-10-3q-9-2-13-4q-23-10-41.5-27.5t-28.5-39.5q-17-36-9-75q4-23 17-43t31-34q37-27 82-27q27-1 52.5 9.5t44.5 30.5q17 16 26.5 38.5t10.5 45.5q0 17-6 42l70 19l8 1q14-43 7-86q-4-33-19.5-63.5t-39.5-53.5q-42-42-103-56q-6-2-18-4l-14-2h-37zM500 350q-17 0-34 7t-30.5 20.5t-19.5 31.5q-8 20-4 44q3 18 14 34t28 25q24 15 56 13q3 4 5 8l112 191q3 6 6 9q27-26 58.5-35.5t65-3.5t58.5 26q32 25 43.5 61.5t0.5 73.5q-8 28-28.5 50t-48.5 33q-31 13-66.5 8.5t-63.5-24.5q-4-3-13-10l-5-6q-4 3-11 10l-47 46q23 23 52 38.5t61 21.5l22 4h39l28-5q64-13 110-60q22-22 36.5-50.5t19.5-59.5q5-36-2-71.5t-25-64.5t-44-51t-57-35q-34-14-70.5-16t-71.5 7l-17 5l-81-137q13-19 16-37q5-32-13-60q-16-25-44-35q-17-6-35-6zM218 614q-58 13-100 53q-47 44-61 105l-4 24v37l2 11q2 13 4 20q7 31 24.5 59t42.5 49q50 41 115 49q38 4 76-4.5t70-28.5q53-34 78-91q7-17 14-45q6-1 18 0l125 2q14 0 20 1q11 20 25 31t31.5 16t35.5 4q28-3 50-20q27-21 32-54q2-17-1.5-33t-13.5-30q-16-22-41-32q-17-7-35.5-6.5t-35.5 7.5q-28 12-43 37l-3 6q-14 0-42-1l-113-1q-15-1-43-1l-50-1l3 17q8 43-13 81q-14 27-40 45t-57 22q-35 6-70-7.5t-57-42.5q-28-35-27-79q1-37 23-69q13-19 32-32t41-19l9-3z"/></svg></div>
           <div>
             <h3>Webhooks</h3>
-            <p>Get notified when analysis completes. Configure a URL, optional Bearer token auth, and receive run results as a POST &mdash; pipe them into Slack, n8n, Zapier, or your own backend.</p>
+            <p>Get notified when analysis completes. Configure a URL with optional Bearer token auth, and run results arrive as a POST. Pipe them into Slack, n8n, Zapier, or your own backend.</p>
           </div>
         </div>
         <div class="integration-item">
@@ -1098,7 +209,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
           <div class="integration-icon"><svg viewBox="0 0 180 180" width="22" height="22" fill="none"><path d="M18 84.8528L85.8822 16.9706C95.2548 7.59798 110.451 7.59798 119.823 16.9706C129.196 26.3431 129.196 41.5391 119.823 50.9117L68.5581 102.177" stroke="currentColor" stroke-width="12" stroke-linecap="round"/><path d="M69.2652 101.47L119.823 50.9117C129.196 41.5391 144.392 41.5391 153.765 50.9117L154.118 51.2652C163.491 60.6378 163.491 75.8338 154.118 85.2063L92.7248 146.6C89.6006 149.724 89.6006 154.789 92.7248 157.913L105.331 170.52" stroke="currentColor" stroke-width="12" stroke-linecap="round"/><path d="M102.853 33.9411L52.6482 84.1457C43.2756 93.5183 43.2756 108.714 52.6482 118.087C62.0208 127.459 77.2167 127.459 86.5893 118.087L136.794 67.8822" stroke="currentColor" stroke-width="12" stroke-linecap="round"/></svg></div>
           <div>
             <h3>MCP Server</h3>
-            <p>16 built-in tools for Claude Code and Claude Desktop. Query your brand data conversationally &mdash; compare models, find citation gaps, track trends across runs.</p>
+            <p>16 built-in tools for Claude Code and Claude Desktop. Query your brand data conversationally. Compare models, find citation gaps, track trends across runs.</p>
           </div>
         </div>
       </div>
@@ -1121,15 +232,15 @@ footer .footer-right a:hover { color: var(--text-secondary); }
       <div class="req-items">
         <div class="req-item">
           <span class="req-num">1</span>
-          <div><strong>Docker</strong> &mdash; that's it for infrastructure</div>
+          <div><strong>Docker.</strong> That's all the infrastructure you need.</div>
         </div>
         <div class="req-item">
           <span class="req-num">2</span>
-          <div><strong>OpenAI or Anthropic API key</strong> &mdash; powers prompt generation and response analysis</div>
+          <div><strong>OpenAI or Anthropic API key.</strong> Powers prompt generation and response analysis.</div>
         </div>
         <div class="req-item">
           <span class="req-num">3</span>
-          <div><strong>Browser runtime</strong> &mdash; Perplexity, ChatGPT, and Gemini responses are fetched via real browser sessions. Pick one:</div>
+          <div><strong>Browser runtime.</strong> Perplexity, ChatGPT, and Gemini responses are fetched via real browser sessions. Pick one:</div>
         </div>
       </div>
       <div class="browser-modes">
@@ -1156,7 +267,7 @@ footer .footer-right a:hover { color: var(--text-secondary); }
             <span class="bm-sep"></span>
             <span>Residential proxies, no anti-bot issues</span>
           </div>
-          <div class="bm-note">Supported: <a href="https://apify.com/?fpr=1lkb9a">Apify</a> &mdash; free credits included on sign up</div>
+          <div class="bm-note">Supported: <a href="https://apify.com/?fpr=1lkb9a">Apify</a>. Free credits on sign up.</div>
         </div>
       </div>
       </div>
