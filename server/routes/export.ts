@@ -92,7 +92,7 @@ function uniquePromptRate(responses: ResponseWithPrompt[]) {
   return { total, mentioned, rate: total > 0 ? (mentioned / total) * 100 : 0 };
 }
 
-async function buildSummary(): Promise<string> {
+export async function buildSummary(): Promise<string> {
   const brandName = (await storage.getSetting('brandName')) || 'your brand';
   const allRuns = await storage.getAnalysisRuns();
   const completedRuns = allRuns.filter((r) => r.status === 'complete').sort((a, b) => b.id - a.id);
@@ -239,7 +239,7 @@ async function buildSummary(): Promise<string> {
   return lines.join('\n');
 }
 
-const README = `# TraceAIO Data Export
+export const README = `# TraceAIO Data Export
 
 This archive contains a snapshot of your brand-tracking data exported from TraceAIO.
 Each CSV file corresponds to a database table. Use this bundle to analyze your data

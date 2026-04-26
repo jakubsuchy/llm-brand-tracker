@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { storage } from './storage';
 import { findUserByApiKey } from './services/auth';
 import { parseHttpUrl } from './services/analysis';
+import { buildSummary, README } from './routes/export';
+import { computeVisibilityScore } from './routes/helpers';
+import { MODEL_META } from '@shared/models';
 import type { Express, Request, Response } from 'express';
 import type { ResponseWithPrompt } from '@shared/schema';
 
@@ -18,7 +21,12 @@ function textResult(data: unknown) {
   };
 }
 
-/** Compute unique-prompt-based mention rate from a list of responses. */
+/**
+ * Unique-prompt mention rate over a response set: a prompt counts as
+ * mentioned if ANY response (across models, runs) marked the brand mentioned.
+ * Use within a single-model slice (where it equals the visibility score) or
+ * when the optimistic "any LLM ever mentioned us" view is what you want.
+ */
 function computeMentionRate(responses: ResponseWithPrompt[]) {
   const promptMap = new Map<string, boolean>();
   for (const r of responses) {
@@ -30,6 +38,28 @@ function computeMentionRate(responses: ResponseWithPrompt[]) {
   const mentioned = [...promptMap.values()].filter(Boolean).length;
   const rate = total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0;
   return { rate, mentioned, total };
+}
+
+/**
+ * Returns BOTH headline metrics so callers don't have to pick one blind.
+ * - visibilityScore: per-model unique-prompt rate, then averaged across
+ *   models. Matches the dashboard's headline number.
+ * - uniquePromptMentionRate: optimistic — any model in any run counts the
+ *   prompt as a hit. Always >= visibilityScore on multi-model data.
+ *
+ * Use this for any aggregate that spans multiple models. For a single-model
+ * slice, the two are equal — `computeMentionRate` is enough.
+ */
+function computeMentionMetrics(responses: ResponseWithPrompt[]) {
+  const { rate: uniquePromptMentionRate, mentioned, total } = computeMentionRate(responses);
+  const { score, modelCount } = computeVisibilityScore(responses);
+  return {
+    visibilityScore: Math.round(score * 10) / 10,
+    uniquePromptMentionRate,
+    mentionedPrompts: mentioned,
+    totalUniquePrompts: total,
+    modelCount,
+  };
 }
 
 /** Build a competitor -> unique prompt count map. */
@@ -45,29 +75,38 @@ function competitorPromptCounts(responses: ResponseWithPrompt[]) {
   return map;
 }
 
-/** Classify source domain as brand/competitor/neutral using brand name and competitor list. */
+/**
+ * Classify source domain as brand/competitor/neutral.
+ *
+ * Match grain is a *token* of the domain (split on `.` and `-`) — exact
+ * equality, not substring. Substring matching is unsafe because brand names
+ * can contain incidental letter runs that match unrelated domains: e.g.
+ * "haproxy" contains "ox" as a substring, so the previous substring check
+ * flagged ox.security as the brand.
+ *
+ * Competitor name tokens shorter than 3 chars are dropped to avoid noise
+ * matches on common syllables. If a competitor's `domain` is recorded that
+ * still hits via direct equality.
+ */
 async function classifySources() {
   const brandName = ((await storage.getSetting('brandName')) || '').toLowerCase();
   const allCompetitors = (await storage.getAllCompetitorsIncludingMerged()).filter(
     (c) => c.mergedInto !== c.id,
   );
   const competitorDomains = new Set<string>();
-  const competitorNameWords: string[][] = [];
+  const competitorTokens = new Set<string>();
   for (const c of allCompetitors) {
     if (c.domain) competitorDomains.add(c.domain.toLowerCase());
-    competitorNameWords.push(c.name.toLowerCase().split(/\s+/));
+    for (const w of c.name.toLowerCase().split(/\s+/)) {
+      if (w.length >= 3) competitorTokens.add(w);
+    }
   }
   return (domain: string): string => {
     const dl = domain.toLowerCase();
-    const base = dl.split('.')[0];
-    if (brandName && (dl.includes(brandName) || brandName.includes(base))) return 'brand';
-    if (
-      competitorDomains.has(dl) ||
-      competitorNameWords.some((words) =>
-        words.some((w) => base.includes(w) || w.includes(base)),
-      )
-    )
-      return 'competitor';
+    const tokens = dl.split(/[.\-]/).filter(Boolean);
+    if (brandName && tokens.includes(brandName)) return 'brand';
+    if (competitorDomains.has(dl)) return 'competitor';
+    if (tokens.some((t) => competitorTokens.has(t))) return 'competitor';
     return 'neutral';
   };
 }
@@ -82,11 +121,33 @@ function filterByModel(responses: ResponseWithPrompt[], model?: string) {
 // MCP Server setup
 // ---------------------------------------------------------------------------
 
-function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: 'traceaio',
-    version: '1.0.0',
+/**
+ * Build the same guidance bundle as the "Chat with AI -> Export" feature
+ * (summary.md + README.md), and surface it as MCP server instructions.
+ *
+ * Per the MCP spec (and https://blog.modelcontextprotocol.io/posts/2025-11-03-using-server-instructions/),
+ * the `instructions` field is sent in the InitializeResult and lets the calling
+ * model pick the right counting metric, understand schema relationships, and
+ * see current brand stats without making a tool call first.
+ */
+async function buildMcpInstructions(): Promise<string> {
+  const summary = await buildSummary().catch((err) => {
+    console.error('[MCP] summary generation failed:', err);
+    return '# Brand Analysis Summary\n\n(summary generation failed; query tools directly to inspect current data)\n';
   });
+  const readme = README.replace('EXPORT_TIMESTAMP', new Date().toISOString());
+  return `${summary}\n\n---\n\n${readme}`;
+}
+
+async function createMcpServer(): Promise<McpServer> {
+  const instructions = await buildMcpInstructions();
+  const server = new McpServer(
+    {
+      name: 'traceaio',
+      version: '1.0.0',
+    },
+    { instructions },
+  );
 
   // =========================================================================
   // 1. QUICK OVERVIEW
@@ -95,19 +156,19 @@ function createMcpServer(): McpServer {
   // ---- brand-snapshot ----
   server.tool(
     'brand-snapshot',
-    'Quick brand health check. Returns mention rate, total prompts, top competitor, source count. Use for "how am I doing?" or "give me a summary". Do NOT use for detailed per-topic or per-model breakdowns.',
+    'Quick brand health check. Returns BOTH headline metrics: visibilityScore (per-model unique-prompt rate averaged across models — matches the dashboard) and uniquePromptMentionRate (any model in any run counts the prompt — optimistic). Default to visibilityScore when the user asks "how am I doing?" without specifying. Use brand-audit for per-topic / per-model breakdowns.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
     },
     async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
       responses = filterByModel(responses, model);
 
-      const { rate, mentioned, total } = computeMentionRate(responses);
+      const metrics = computeMentionMetrics(responses);
 
       const compCounts = competitorPromptCounts(responses);
       const topComp = [...compCounts.entries()].sort(
@@ -117,9 +178,7 @@ function createMcpServer(): McpServer {
       const sources = await storage.getSources();
 
       return textResult({
-        brandMentionRate: rate,
-        mentionedPrompts: mentioned,
-        totalUniquePrompts: total,
+        ...metrics,
         topCompetitor: topComp
           ? { name: topComp[0], promptCount: topComp[1].size }
           : null,
@@ -133,21 +192,21 @@ function createMcpServer(): McpServer {
   // ---- brand-audit ----
   server.tool(
     'brand-audit',
-    'Comprehensive brand assessment. Returns per-model rates, per-topic rates, top competitors with rates, top sources, AND the list of prompts where brand is NOT mentioned (the gap list). Use when you need a full picture. Do NOT use for a single quick number — use brand-snapshot instead.',
+    'Comprehensive brand assessment. Top-level returns BOTH headline metrics (visibilityScore = dashboard-aligned per-model average; uniquePromptMentionRate = optimistic any-model-any-run). Per-model rates are unambiguous (one model => visibility = unique-prompt rate). Per-topic returns BOTH metrics so per-model gaps within a topic are visible. Also returns top competitors, top sources, and the gap list of prompts where brand is NOT mentioned. Do NOT use for a single quick number — use brand-snapshot instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
     },
     async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
       responses = filterByModel(responses, model);
 
-      const { rate, mentioned, total } = computeMentionRate(responses);
+      const metrics = computeMentionMetrics(responses);
 
-      // Per-model breakdown
+      // Per-model breakdown — within a single model, visibility == unique-prompt rate.
       const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
         const p = r.model || 'unknown';
@@ -156,10 +215,16 @@ function createMcpServer(): McpServer {
       }
       const modelRates = [...modelGroups.entries()].map(([name, resps]) => {
         const m = computeMentionRate(resps);
-        return { model: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
+        return {
+          model: name,
+          label: MODEL_META[name]?.label || name,
+          mentionRate: m.rate,
+          mentioned: m.mentioned,
+          total: m.total,
+        };
       });
 
-      // Per-topic breakdown
+      // Per-topic breakdown — topics span models so we return both metrics.
       const topicGroups = new Map<string, { id: number; responses: ResponseWithPrompt[] }>();
       for (const r of responses) {
         const tName = r.prompt?.topic?.name || 'Uncategorized';
@@ -168,8 +233,15 @@ function createMcpServer(): McpServer {
         topicGroups.get(tName)!.responses.push(r);
       }
       const topicRates = [...topicGroups.entries()].map(([name, { id, responses: resps }]) => {
-        const m = computeMentionRate(resps);
-        return { topicId: id, topicName: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
+        const m = computeMentionMetrics(resps);
+        return {
+          topicId: id,
+          topicName: name,
+          visibilityScore: m.visibilityScore,
+          uniquePromptMentionRate: m.uniquePromptMentionRate,
+          mentioned: m.mentionedPrompts,
+          total: m.totalUniquePrompts,
+        };
       });
 
       // Top 5 competitors
@@ -180,7 +252,9 @@ function createMcpServer(): McpServer {
         .map(([name, promptSet]) => ({
           name,
           promptCount: promptSet.size,
-          rate: total > 0 ? Math.round((promptSet.size / total) * 1000) / 10 : 0,
+          rate: metrics.totalUniquePrompts > 0
+            ? Math.round((promptSet.size / metrics.totalUniquePrompts) * 1000) / 10
+            : 0,
         }));
 
       // Top 5 sources
@@ -215,9 +289,7 @@ function createMcpServer(): McpServer {
         .map(([text, v]) => ({ promptText: text, models: v.models, topicName: v.topicName }));
 
       return textResult({
-        brandMentionRate: rate,
-        mentionedPrompts: mentioned,
-        totalUniquePrompts: total,
+        ...metrics,
         totalResponses: responses.length,
         modelBreakdown: modelRates,
         topicBreakdown: topicRates,
@@ -236,7 +308,7 @@ function createMcpServer(): McpServer {
   // ---- list-models ----
   server.tool(
     'list-models',
-    'Per-model mention rate breakdown. Returns an array with each model\'s mention rate, count, and total prompts. Use when asked "which model mentions us most?" or "show model comparison". Do NOT use for full side-by-side diff — use compare-models instead.',
+    'Per-model unique-prompt mention rate. Within a single model the rate is unambiguous — visibility score and unique-prompt rate are equal. mentionRate = unique prompts mentioning the brand in this model / unique prompts seen by this model. Use when asked "which model mentions us most?". Do NOT use for full side-by-side diff — use compare-models instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
     },
@@ -250,17 +322,11 @@ function createMcpServer(): McpServer {
         modelGroups.get(p)!.push(r);
       }
 
-      const labels: Record<string, string> = {
-        perplexity: 'Perplexity',
-        chatgpt: 'ChatGPT',
-        gemini: 'Gemini',
-      };
-
       const result = [...modelGroups.entries()].map(([name, resps]) => {
         const m = computeMentionRate(resps);
         return {
           model: name,
-          label: labels[name] || name,
+          label: MODEL_META[name]?.label || name,
           mentionRate: m.rate,
           mentionedCount: m.mentioned,
           totalPrompts: m.total,
@@ -274,13 +340,13 @@ function createMcpServer(): McpServer {
   // ---- list-competitors ----
   server.tool(
     'list-competitors',
-    'Ranked list of competitors by mention rate (unique prompt count). Returns name, category, mention rate, mention count, total prompts. Use for "who are my competitors?" or "show competitor ranking". Do NOT use for a single competitor deep dive — use get-competitor instead.',
+    'Ranked list of competitors by share-of-voice. mentionRate here is "% of unique prompts where this competitor was mentioned by ANY model" — a *competitor* metric, not the brand visibility score. Returns name, category, mention rate, mention count, total prompts. Use for "who are my competitors?" or "show competitor ranking". Do NOT use for a single competitor deep dive — use get-competitor instead.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
     },
     async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
@@ -311,13 +377,13 @@ function createMcpServer(): McpServer {
   // ---- list-topics ----
   server.tool(
     'list-topics',
-    'Topic-level mention rate breakdown. Returns topicId, topicName, mentionRate, totalPrompts, brandMentions. Use for "which topics mention us?" or "show topic analysis". Do NOT use for response-level data — use search-prompts instead.',
+    'Topic-level breakdown returning BOTH headline metrics per topic: visibilityScore (per-model average within the topic — matches how the dashboard reads) and uniquePromptMentionRate (any-model-any-run within the topic — optimistic). The two diverge whenever some models mention the brand but others don\'t for the same prompt. Use for "which topics mention us?". Do NOT use for response-level data — use search-prompts.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api). Filtering to a single model collapses both metrics to the same number.'),
     },
     async ({ runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
@@ -337,23 +403,15 @@ function createMcpServer(): McpServer {
 
       const result = [...topicGroups.entries()].map(
         ([name, { id, responses: resps }]) => {
-          const promptMap = new Map<string, boolean>();
-          for (const r of resps) {
-            const key = r.prompt?.text?.toLowerCase().trim() || '';
-            if (!promptMap.has(key)) promptMap.set(key, false);
-            if (r.brandMentioned) promptMap.set(key, true);
-          }
-          const total = promptMap.size;
-          const brandMentions = [...promptMap.values()].filter(Boolean).length;
+          const m = computeMentionMetrics(resps);
           return {
             topicId: id,
             topicName: name,
-            mentionRate:
-              total > 0
-                ? Math.round((brandMentions / total) * 1000) / 10
-                : 0,
-            totalPrompts: total,
-            brandMentions,
+            visibilityScore: m.visibilityScore,
+            uniquePromptMentionRate: m.uniquePromptMentionRate,
+            totalPrompts: m.totalUniquePrompts,
+            brandMentions: m.mentionedPrompts,
+            modelCount: m.modelCount,
           };
         },
       );
@@ -513,7 +571,7 @@ function createMcpServer(): McpServer {
   // ---- list-runs ----
   server.tool(
     'list-runs',
-    'List all analysis runs with their status and progress. Returns id, startedAt, completedAt, status, brandName, totalPrompts, completedPrompts. Use for "show analysis history" or "what runs have been done?".',
+    'List all analysis runs with status and progress. NOTE: totalPrompts and completedPrompts count *jobs* (prompts × models), NOT unique prompts — completedPrompts also INCLUDES failures, so a low ratio of stored responses to completedPrompts means the run had many failed jobs. Use get-run for response counts, unique-prompt counts, and per-model coverage. Use for "show analysis history" or "what runs have been done?".',
     {},
     async () => {
       const runs = await storage.getAnalysisRuns();
@@ -523,6 +581,9 @@ function createMcpServer(): McpServer {
         completedAt: r.completedAt,
         status: r.status,
         brandName: r.brandName,
+        totalJobs: r.totalPrompts,
+        completedJobs: r.completedPrompts,
+        // Legacy aliases — kept for backward compat. Prefer totalJobs/completedJobs.
         totalPrompts: r.totalPrompts,
         completedPrompts: r.completedPrompts,
       }));
@@ -537,14 +598,14 @@ function createMcpServer(): McpServer {
   // ---- get-competitor ----
   server.tool(
     'get-competitor',
-    'Deep dive into a single competitor. Returns name, category, mention rate, and the list of prompts where they appeared (with brand mention status). Use for "tell me about [competitor]". Do NOT use for ranking all competitors — use list-competitors instead.',
+    'Deep dive into a single competitor. Returns name, category, mentionRate ("% of unique prompts where this competitor appears in ANY response", a competitor metric — not the brand visibility score), and the list of prompts where they appeared with brand mention status. Use for "tell me about [competitor]". Do NOT use for ranking all competitors — use list-competitors instead.',
     {
       name: z.string().describe('Competitor name (case-insensitive)'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
     },
     async ({ name, runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
@@ -796,7 +857,7 @@ function createMcpServer(): McpServer {
   // ---- compare-models ----
   server.tool(
     'compare-models',
-    'Side-by-side comparison of models. Shows per-model mention rates AND a diff of which prompts are mentioned by which model. Use for "compare models" or "which model is best for us?". Do NOT use for a single model summary — use list-models instead.',
+    'Side-by-side comparison of models. Each model\'s rate is its per-model unique-prompt mention rate (unambiguous within a model — visibility = unique-prompt rate). Also returns a diff of which prompts are mentioned by which model. Use for "compare models" or "which model is best for us?". Do NOT use for a single model summary — use list-models.',
     {
       runId: z.number().optional().describe('Filter by analysis run ID'),
     },
@@ -821,6 +882,7 @@ function createMcpServer(): McpServer {
           const mentioned = [...pMap.values()].filter(Boolean).length;
           return {
             name,
+            label: MODEL_META[name]?.label || name,
             rate:
               total > 0
                 ? Math.round((mentioned / total) * 1000) / 10
@@ -861,14 +923,14 @@ function createMcpServer(): McpServer {
   // ---- compare-competitor ----
   server.tool(
     'compare-competitor',
-    'Brand vs. a specific competitor. Shows mention rates for both, overlap (prompts where both appear), and prompts where only one appears. Use for "how do we compare to [competitor]?" or "brand vs [competitor]". Do NOT use for ranking all competitors — use list-competitors instead.',
+    'Brand vs. a specific competitor. brandRate and competitorRate are unique-prompt rates (any model in any run counts a hit) — NOT the dashboard\'s visibility score. Use brand-snapshot if you need the dashboard-aligned visibility score. Returns the both/only-brand/only-competitor/neither breakdown. Use for "how do we compare to [competitor]?". Do NOT use for ranking all competitors — use list-competitors.',
     {
       competitor: z.string().describe('Competitor name to compare against'),
       runId: z.number().optional().describe('Filter by analysis run ID'),
       model: z
         .string()
         .optional()
-        .describe('Filter by model (perplexity, chatgpt, gemini)'),
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
     },
     async ({ competitor, runId, model }) => {
       let responses = await storage.getResponsesWithPrompts(runId);
@@ -1039,7 +1101,7 @@ function createMcpServer(): McpServer {
   // ---- get-run ----
   server.tool(
     'get-run',
-    'Get details for a single analysis run including metrics, top competitors, failure count, and per-model breakdown. Use for "show me run #X" or "how did the last run go?". Do NOT use for listing all runs — use list-runs instead.',
+    'Details for a single run. Returns BOTH headline metrics (visibilityScore = dashboard-aligned per-model average; uniquePromptMentionRate = optimistic any-model-any-run), plus job-vs-data counts so you can spot silent failures: completedJobs (= completedPrompts, includes failures) vs responsesStored (actual response rows) vs uniquePromptsAnalyzed (distinct prompt texts). modelsExpected lists currently-enabled models; modelCoverage shows per-model responsesStored — a model with 0 here failed for the entire run. Use for "show me run #X" or "how did the last run go?". Do NOT use for listing all runs — use list-runs.',
     {
       id: z
         .number()
@@ -1060,9 +1122,9 @@ function createMcpServer(): McpServer {
       }
 
       const responses = await storage.getResponsesWithPrompts(run.id);
-      const { rate, mentioned, total } = computeMentionRate(responses);
+      const metrics = computeMentionMetrics(responses);
 
-      // Model breakdown
+      // Model breakdown — per-model rates (unambiguous within a model).
       const modelGroups = new Map<string, ResponseWithPrompt[]>();
       for (const r of responses) {
         const p = r.model || 'unknown';
@@ -1072,9 +1134,44 @@ function createMcpServer(): McpServer {
       const modelBreakdown = [...modelGroups.entries()].map(
         ([name, resps]) => {
           const m = computeMentionRate(resps);
-          return { model: name, mentionRate: m.rate, mentioned: m.mentioned, total: m.total };
+          return {
+            model: name,
+            label: MODEL_META[name]?.label || name,
+            mentionRate: m.rate,
+            mentioned: m.mentioned,
+            total: m.total,
+          };
         },
       );
+
+      // Models the run was *expected* to cover, from the active config. A model
+      // present here but absent from modelBreakdown / modelCoverage means every
+      // job for that model failed in this run.
+      let modelsExpected: string[] = [];
+      try {
+        const cfgRaw = await storage.getSetting('modelsConfig');
+        if (cfgRaw) {
+          const cfg = JSON.parse(cfgRaw);
+          modelsExpected = Object.entries(cfg)
+            .filter(([, v]) => (v as { enabled?: boolean })?.enabled)
+            .map(([k]) => k);
+        }
+      } catch {
+        // Settings may be missing on first run — leave empty.
+      }
+
+      // Per-model coverage: responsesStored == 0 for an expected model means
+      // it produced no rows at all for this run (likely all-failed).
+      const allModels = new Set<string>([...modelsExpected, ...modelGroups.keys()]);
+      const modelCoverage: Record<string, { responsesStored: number; uniquePromptsAnalyzed: number }> = {};
+      for (const m of allModels) {
+        const mResps = modelGroups.get(m) || [];
+        const uniq = new Set(mResps.map((r) => r.prompt?.text?.toLowerCase().trim() || ''));
+        modelCoverage[m] = {
+          responsesStored: mResps.length,
+          uniquePromptsAnalyzed: uniq.size,
+        };
+      }
 
       // Top competitors
       const compCounts = competitorPromptCounts(responses);
@@ -1098,13 +1195,20 @@ function createMcpServer(): McpServer {
         completedAt: run.completedAt,
         status: run.status,
         brandName: run.brandName,
-        mentionRate: rate,
-        mentionedPrompts: mentioned,
-        totalUniquePrompts: total,
-        totalResponses: responses.length,
-        topCompetitors,
+        // Headline metrics (use these for "how did the run do?").
+        ...metrics,
+        // Job vs data counts. completedJobs counts completed+failed jobs;
+        // a low responsesStored relative to completedJobs means many failed.
+        totalJobs: run.totalPrompts,
+        completedJobs: run.completedPrompts,
+        responsesStored: responses.length,
+        uniquePromptsAnalyzed: metrics.totalUniquePrompts,
         failureCount,
+        // Coverage — surfaces silently-missing models.
+        modelsExpected,
+        modelCoverage,
         modelBreakdown,
+        topCompetitors,
       });
     },
   );
@@ -1157,7 +1261,7 @@ export function registerMcpEndpoint(app: Express) {
         if (id) transports.delete(id);
       };
 
-      const server = createMcpServer();
+      const server = await createMcpServer();
       await server.connect(transport);
       await transport.handleRequest(req, res);
     } catch (err: any) {
