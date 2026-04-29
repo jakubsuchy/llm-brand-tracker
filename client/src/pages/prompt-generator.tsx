@@ -350,11 +350,10 @@ export default function PromptGeneratorPage() {
               >
                 3. Settings
               </Button>
-              <Button 
-                variant={currentStep === 'topics' ? "default" : "outline"} 
+              <Button
+                variant={currentStep === 'topics' ? "default" : "outline"}
                 size="sm"
                 onClick={() => navigateToStep('topics')}
-                disabled={generatedTopics.length === 0}
               >
                 4. Review
               </Button>
@@ -632,35 +631,45 @@ export default function PromptGeneratorPage() {
       )}
 
       {/* Step 4: Topic & Prompt Review */}
-      {currentStep === 'topics' && generatedTopics.length > 0 && (
+      {currentStep === 'topics' && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <h2 className="text-lg sm:text-xl font-semibold">Review Generated Topics & Prompts</h2>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                variant="outline"
-                onClick={() => generatePromptsMutation.mutate()}
-                disabled={generatePromptsMutation.isPending}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Regenerate
-              </Button>
-              <Button
-                onClick={() => runAnalysisMutation.mutate()}
-                disabled={runAnalysisMutation.isPending}
-                className="w-full sm:w-auto whitespace-normal text-center"
-              >
-                {runAnalysisMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Starting Analysis...
-                  </>
-                ) : (
-                  `Run Analysis with ${generatedTopics.reduce((sum, t) => sum + t.prompts.length, 0)} Prompts`
-                )}
-              </Button>
-            </div>
+            {generatedTopics.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => generatePromptsMutation.mutate()}
+                  disabled={generatePromptsMutation.isPending}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Regenerate
+                </Button>
+                <Button
+                  onClick={() => runAnalysisMutation.mutate()}
+                  disabled={runAnalysisMutation.isPending}
+                  className="w-full sm:w-auto whitespace-normal text-center"
+                >
+                  {runAnalysisMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Starting Analysis...
+                    </>
+                  ) : (
+                    `Run Analysis with ${generatedTopics.reduce((sum, t) => sum + t.prompts.length, 0)} Prompts`
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
+
+          {generatedTopics.length === 0 && (
+            <Card>
+              <CardContent className="pt-6 text-center text-sm text-gray-600">
+                No topics or prompts yet. Add a custom topic below, or go back to Step 3 to generate them.
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {generatedTopics.map((topic, topicIndex) => (

@@ -227,7 +227,7 @@ export async function getResponseViaBrowser(
   model: string,
   context?: { analysisRunId?: number; jobId?: number },
 ): Promise<{ responseText: string; sources: string[] }> {
-  const { askBrowser } = await import('./chatgpt-browser');
+  const { askBrowser } = await import('./browser-actor');
 
   const result = await askBrowser(prompt, model as any, context);
 

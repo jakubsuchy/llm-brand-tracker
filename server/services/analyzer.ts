@@ -198,7 +198,7 @@ export class BrandAnalyzer {
           'anthropic-api': { enabled: false, type: 'api' },
         };
 
-        const { isBrowserAvailable } = await import('./chatgpt-browser');
+        const { isBrowserAvailable } = await import('./browser-actor');
         const { isOpenAiApiAvailable } = await import('./openai-api');
         const { isAnthropicApiAvailable } = await import('./anthropic-api');
         const browserAvailable = await isBrowserAvailable();

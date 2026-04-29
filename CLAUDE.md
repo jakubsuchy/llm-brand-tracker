@@ -55,7 +55,7 @@ server/services/analysis.ts # Generic analysis utilities (brand detection, URL e
 server/services/openai.ts   # OpenAI-specific LLM calls: prompt generation, competitor extraction
 server/services/openai-api.ts       # OpenAI Responses API + web_search — "openai-api" model
 server/services/anthropic-api.ts    # Anthropic Messages API + web_search — "anthropic-api" model
-server/services/chatgpt-browser.ts  # Browser actor client (local + Apify Cloud)
+server/services/browser-actor.ts    # Browser actor client (local + Apify Cloud)
 server/config.ts            # Public API paths config
 shared/models.ts            # Canonical model metadata (labels, brand colors, icons, descriptions)
 server/database-storage.ts  # All DB queries (implements IStorage interface)
@@ -165,7 +165,7 @@ api_usage (OpenAI token tracking)
 2. `server/routes/helpers.ts` → add to `DEFAULT_MODELS_CONFIG` with the correct `type`
 3. `server/services/analyzer.ts` → add to the inline fallback config in `enqueueActiveModels` so first-run defaults work
 4. For an API model: create `server/services/<name>-api.ts` mirroring `openai-api.ts` (export `ask<Name>Api` and `is<Name>ApiAvailable`), register it in `API_MODELS` in `server/services/analysis.ts` and in the dispatch switch inside `getModelResponse`, and add it to the per-model availability map in `analyzer.ts`
-5. For a browser model: extend `BrowserModel` in `server/services/chatgpt-browser.ts` and the actor's input schema
+5. For a browser model: extend `BrowserModel` in `server/services/browser-actor.ts` and the actor's input schema
 6. `client/src/components/model-logos.tsx` → add a `<BrandLogo>` component and map the model key in `MODEL_TO_LOGO` (see Brand logos below)
 7. If the API model requires its own key, wire the key-presence gate into `/api/settings/models` GET and PUT (`server/routes/settings.ts`) — see the `openai-api` / `anthropic-api` pattern
 

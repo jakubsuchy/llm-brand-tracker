@@ -36,6 +36,7 @@ function buildRequestBody(question: string, model: BrowserModel) {
   const body: Record<string, any> = {
     prompts: [question],
     provider: model,
+    screenshots: true,
   };
   if (creds.email) body.chatgptEmail = creds.email;
   if (creds.password) body.chatgptPassword = creds.password;
