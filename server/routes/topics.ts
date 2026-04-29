@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { parseDateRange } from "./helpers";
+import { parseDateRange, requireRole } from "./helpers";
 import { storage } from "../storage";
 
 export function registerTopicRoutes(app: Express) {
@@ -37,6 +37,21 @@ export function registerTopicRoutes(app: Express) {
     }
   });
 
+  // Create a topic immediately (used by Prompt Generator's "Add Custom Topic")
+  app.post("/api/topics", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Topics']
+    try {
+      const name = (req.body?.name || "").toString().trim();
+      const description = (req.body?.description || "").toString().trim();
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const topic = await storage.createTopic({ name, description: description || null });
+      res.json(topic);
+    } catch (error) {
+      console.error("Error creating topic:", error);
+      res.status(500).json({ error: "Failed to create topic" });
+    }
+  });
+
   // Soft-delete a topic and its prompts
   app.delete("/api/topics/:id", async (req, res) => {
     // #swagger.tags = ['Topics']
@@ -60,6 +75,27 @@ export function registerTopicRoutes(app: Express) {
     } catch (error) {
       console.error("Error deleting prompt:", error);
       res.status(500).json({ error: "Failed to delete prompt" });
+    }
+  });
+
+  // Reassign a prompt to a different topic (drag-and-drop)
+  app.patch("/api/prompts/:id", requireRole("analyst"), async (req, res) => {
+    // #swagger.tags = ['Topics']
+    try {
+      const promptId = parseInt(req.params.id);
+      const topicId = Number(req.body?.topicId);
+      if (!Number.isFinite(topicId)) {
+        return res.status(400).json({ error: "topicId is required" });
+      }
+      const topic = await storage.getTopicById(topicId);
+      if (!topic || topic.deleted) {
+        return res.status(404).json({ error: "topic not found" });
+      }
+      await storage.updatePromptTopic(promptId, topicId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating prompt topic:", error);
+      res.status(500).json({ error: "Failed to update prompt" });
     }
   });
 

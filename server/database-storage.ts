@@ -171,6 +171,10 @@ export class DatabaseStorage implements IStorage {
     await db.update(prompts).set({ deleted: true }).where(eq(prompts.id, id));
   }
 
+  async updatePromptTopic(id: number, topicId: number): Promise<void> {
+    await db.update(prompts).set({ topicId }).where(eq(prompts.id, id));
+  }
+
   async updateCompetitorDomain(id: number, domain: string): Promise<void> {
     // Only set if not already set — first match wins
     const [comp] = await db.select().from(competitors).where(eq(competitors.id, id));

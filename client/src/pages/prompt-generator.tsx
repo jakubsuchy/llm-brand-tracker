@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, X, CheckCircle, AlertCircle, RefreshCw, PenLine } from "lucide-react";
+import { Loader2, Plus, X, CheckCircle, AlertCircle, RefreshCw, PenLine, GripVertical } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -54,6 +54,7 @@ export default function PromptGeneratorPage() {
   const [customTopicName, setCustomTopicName] = useState('');
   const [customTopicDescription, setCustomTopicDescription] = useState('');
   const [isAddingCustomTopic, setIsAddingCustomTopic] = useState(false);
+  const [dragOverTopicIndex, setDragOverTopicIndex] = useState<number | null>(null);
 
   // Load state from DB on mount
   const { data: dbTopicsWithPrompts } = useQuery<TopicWithPrompts[]>({
@@ -223,6 +224,12 @@ export default function PromptGeneratorPage() {
 
     setIsAddingCustomTopic(true);
     try {
+      const topicRes = await apiRequest('POST', '/api/topics', {
+        name: customTopicName,
+        description: customTopicDescription,
+      });
+      const topic = await topicRes.json();
+
       const response = await apiRequest('POST', '/api/generate-topic-prompts', {
         topicName: customTopicName,
         topicDescription: customTopicDescription,
@@ -230,25 +237,35 @@ export default function PromptGeneratorPage() {
         promptCount: settings.promptsPerTopic
       });
       const data = await response.json();
-      
+
+      const savedPrompts = await Promise.all(
+        (data.prompts as string[]).map(async (text) => {
+          const r = await apiRequest('POST', '/api/prompts/test', { text, topicId: topic.id });
+          const j = await r.json();
+          return { id: j.prompt?.id, text };
+        })
+      );
+
       const newTopic: TopicWithPrompts = {
+        id: topic.id,
         name: customTopicName,
         description: customTopicDescription,
-        prompts: data.prompts.map((p: string) => ({ text: p }))
+        prompts: savedPrompts,
       };
-      
+
       setGeneratedTopics(prev => [...prev, newTopic]);
       setCustomTopicName('');
       setCustomTopicDescription('');
-      
+      queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+
       toast({
         title: "Topic added",
-        description: `Created ${data.prompts.length} prompts for "${customTopicName}"`,
+        description: `Created ${savedPrompts.length} prompts for "${customTopicName}"`,
       });
     } catch (error) {
       toast({
         title: "Failed to add topic",
-        description: "Unable to generate prompts for custom topic",
+        description: "Unable to create topic and generate prompts",
         variant: "destructive",
       });
     } finally {
@@ -309,6 +326,43 @@ export default function PromptGeneratorPage() {
 
   const navigateToStep = (step: 'url' | 'competitors' | 'settings' | 'topics' | 'ready') => {
     setCurrentStep(step);
+  };
+
+  const movePromptToTopic = async (
+    promptId: number,
+    fromTopicIndex: number,
+    fromPromptIndex: number,
+    toTopicIndex: number,
+  ) => {
+    if (fromTopicIndex === toTopicIndex) return;
+    const targetTopic = generatedTopics[toTopicIndex];
+    const sourceTopic = generatedTopics[fromTopicIndex];
+    if (!targetTopic?.id || !sourceTopic) return;
+    const movedPrompt = sourceTopic.prompts[fromPromptIndex];
+    if (!movedPrompt) return;
+
+    const snapshot = generatedTopics;
+    setGeneratedTopics(prev => prev.map((t, i) => {
+      if (i === fromTopicIndex) {
+        return { ...t, prompts: t.prompts.filter((_, pi) => pi !== fromPromptIndex) };
+      }
+      if (i === toTopicIndex) {
+        return { ...t, prompts: [...t.prompts, movedPrompt] };
+      }
+      return t;
+    }));
+
+    try {
+      await apiRequest('PATCH', `/api/prompts/${promptId}`, { topicId: targetTopic.id });
+      queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+    } catch (error) {
+      setGeneratedTopics(snapshot);
+      toast({
+        title: "Move failed",
+        description: "Could not move the prompt. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -663,17 +717,30 @@ export default function PromptGeneratorPage() {
             )}
           </div>
 
-          {generatedTopics.length === 0 && (
-            <Card>
-              <CardContent className="pt-6 text-center text-sm text-gray-600">
-                No topics or prompts yet. Add a custom topic below, or go back to Step 3 to generate them.
-              </CardContent>
-            </Card>
-          )}
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {generatedTopics.map((topic, topicIndex) => (
-              <Card key={topic.id || topicIndex}>
+              <Card
+                key={topic.id || topicIndex}
+                onDragOver={(e) => {
+                  if (!topic.id) return;
+                  e.preventDefault();
+                  if (dragOverTopicIndex !== topicIndex) setDragOverTopicIndex(topicIndex);
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                  setDragOverTopicIndex(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverTopicIndex(null);
+                  const promptId = parseInt(e.dataTransfer.getData('promptId'));
+                  const fromTopicIndex = parseInt(e.dataTransfer.getData('fromTopicIndex'));
+                  const fromPromptIndex = parseInt(e.dataTransfer.getData('fromPromptIndex'));
+                  if (!Number.isFinite(promptId) || !Number.isFinite(fromTopicIndex) || !Number.isFinite(fromPromptIndex)) return;
+                  movePromptToTopic(promptId, fromTopicIndex, fromPromptIndex, topicIndex);
+                }}
+                className={dragOverTopicIndex === topicIndex ? 'ring-2 ring-blue-400 ring-offset-2' : ''}
+              >
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div>
@@ -699,37 +766,68 @@ export default function PromptGeneratorPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-1 max-h-64 overflow-y-auto">
-                    {topic.prompts.map((prompt, pIndex) => (
-                      <div key={prompt.id || pIndex} className="flex items-start gap-1 group">
-                        <p className="text-sm text-gray-700 p-2 bg-gray-50 rounded flex-1">
-                          {typeof prompt === 'string' ? prompt : prompt.text}
-                        </p>
-                        <button
-                          onClick={async () => {
-                            if (typeof prompt === 'object' && prompt.id) {
-                              await fetch(`/api/prompts/${prompt.id}`, { method: 'DELETE' });
-                              queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
-                            }
-                            setGeneratedTopics(prev => prev.map((t, i) =>
-                              i === topicIndex
-                                ? { ...t, prompts: t.prompts.filter((_, pi) => pi !== pIndex) }
-                                : t
-                            ));
+                    {topic.prompts.map((prompt, pIndex) => {
+                      const promptObj = typeof prompt === 'string' ? { text: prompt } : prompt;
+                      const canDrag = typeof promptObj.id === 'number';
+                      return (
+                        <div
+                          key={promptObj.id || pIndex}
+                          draggable={canDrag}
+                          onDragStart={(e) => {
+                            if (!canDrag) return;
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('promptId', String(promptObj.id));
+                            e.dataTransfer.setData('fromTopicIndex', String(topicIndex));
+                            e.dataTransfer.setData('fromPromptIndex', String(pIndex));
                           }}
-                          className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-1 shrink-0"
+                          className="flex items-start gap-1 group"
                         >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
+                          <span
+                            className={`text-gray-300 group-hover:text-gray-500 mt-2 shrink-0 ${canDrag ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed'}`}
+                            title={canDrag ? 'Drag to another topic' : 'Save prompt before moving'}
+                          >
+                            <GripVertical className="h-4 w-4" />
+                          </span>
+                          <p className="text-sm text-gray-700 p-2 bg-gray-50 rounded flex-1">
+                            {promptObj.text}
+                          </p>
+                          <button
+                            onClick={async () => {
+                              if (promptObj.id) {
+                                await fetch(`/api/prompts/${promptObj.id}`, { method: 'DELETE' });
+                                queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
+                              }
+                              setGeneratedTopics(prev => prev.map((t, i) =>
+                                i === topicIndex
+                                  ? { ...t, prompts: t.prompts.filter((_, pi) => pi !== pIndex) }
+                                  : t
+                              ));
+                            }}
+                            className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-1 shrink-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <WriteInPrompt topicId={topic.id} topicName={topic.name} topicDescription={topic.description} onAdd={(prompt) => {
-                    setGeneratedTopics(prev => prev.map((t, i) =>
-                      i === topicIndex
-                        ? { ...t, prompts: [...t.prompts, prompt] }
-                        : t
-                    ));
-                  }} />
+                  <WriteInPrompt
+                    topicId={topic.id}
+                    topicName={topic.name}
+                    topicDescription={topic.description}
+                    onAdd={(prompt) => {
+                      setGeneratedTopics(prev => prev.map((t, i) =>
+                        i === topicIndex
+                          ? { ...t, prompts: [...t.prompts, prompt] }
+                          : t
+                      ));
+                    }}
+                    onTopicCreated={(id) => {
+                      setGeneratedTopics(prev => prev.map((t, i) =>
+                        i === topicIndex ? { ...t, id } : t
+                      ));
+                    }}
+                  />
                 </CardContent>
               </Card>
             ))}
@@ -794,12 +892,14 @@ export default function PromptGeneratorPage() {
   );
 }
 
-function WriteInPrompt({ topicId, topicName, topicDescription, onAdd }: {
+function WriteInPrompt({ topicId, topicName, topicDescription, onAdd, onTopicCreated }: {
   topicId?: number;
   topicName: string;
   topicDescription: string;
   onAdd: (prompt: PromptItem) => void;
+  onTopicCreated?: (id: number) => void;
 }) {
+  const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [text, setText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -809,31 +909,30 @@ function WriteInPrompt({ topicId, topicName, topicDescription, onAdd }: {
     if (!trimmed) return;
     setIsSaving(true);
     try {
-      // Ensure topic exists in DB
       let resolvedTopicId = topicId;
       if (!resolvedTopicId) {
-        const topicsRes = await fetch('/api/topics');
-        const topics = await topicsRes.json();
-        const existing = topics.find((t: any) => t.name === topicName);
-        if (existing) {
-          resolvedTopicId = existing.id;
-        } else {
-          const createRes = await apiRequest('POST', '/api/prompts/test', { text: trimmed, topicId: null });
-          // Topic will be created by save-and-analyze, just create the prompt directly
-        }
+        const topicRes = await apiRequest('POST', '/api/topics', {
+          name: topicName,
+          description: topicDescription,
+        });
+        const topic = await topicRes.json();
+        resolvedTopicId = topic.id;
+        onTopicCreated?.(topic.id);
       }
-      // Create prompt in DB
-      const res = await apiRequest('POST', '/api/prompts/test', { text: trimmed, topicId: resolvedTopicId || null });
+
+      const res = await apiRequest('POST', '/api/prompts/test', { text: trimmed, topicId: resolvedTopicId });
       const data = await res.json();
       onAdd({ id: data.prompt?.id, text: trimmed });
       setText('');
       setIsOpen(false);
       queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
-    } catch {
-      // Fallback: add to local state only
-      onAdd({ text: trimmed });
-      setText('');
-      setIsOpen(false);
+    } catch (error) {
+      console.error('Failed to add prompt:', error);
+      toast({
+        title: "Failed to add prompt",
+        description: "Unable to save prompt to database",
+        variant: "destructive",
+      });
     } finally {
       setIsSaving(false);
     }

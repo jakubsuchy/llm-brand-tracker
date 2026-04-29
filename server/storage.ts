@@ -49,6 +49,7 @@ export interface IStorage {
   getPromptsWithTopics(): Promise<PromptWithTopic[]>;
   getPromptsByTopic(topicId: number): Promise<Prompt[]>;
   softDeletePrompt(id: number): Promise<void>;
+  updatePromptTopic(id: number, topicId: number): Promise<void>;
   updateCompetitorDomain(id: number, domain: string): Promise<void>;
 
   // Responses
@@ -212,6 +213,11 @@ export class MemStorage implements IStorage {
   async softDeletePrompt(id: number): Promise<void> {
     const prompt = this.prompts.get(id);
     if (prompt) prompt.deleted = true;
+  }
+
+  async updatePromptTopic(id: number, topicId: number): Promise<void> {
+    const prompt = this.prompts.get(id);
+    if (prompt) prompt.topicId = topicId;
   }
 
   async updateCompetitorDomain(id: number, domain: string): Promise<void> {
