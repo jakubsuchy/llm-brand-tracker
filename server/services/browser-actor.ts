@@ -37,6 +37,7 @@ function buildRequestBody(question: string, model: BrowserModel) {
     prompts: [question],
     provider: model,
     screenshots: true,
+    captureDom: true,
   };
   if (creds.email) body.chatgptEmail = creds.email;
   if (creds.password) body.chatgptPassword = creds.password;

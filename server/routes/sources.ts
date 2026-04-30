@@ -280,12 +280,19 @@ export function registerSourceRoutes(app: Express) {
     // #swagger.parameters['runId'] = { in: 'query', type: 'integer' }
     // #swagger.parameters['model'] = { in: 'query', type: 'string' }
     // #swagger.parameters['topicId'] = { in: 'query', type: 'integer' }
+    // #swagger.parameters['q'] = { in: 'query', type: 'string', description: 'Case-insensitive substring filter on the page URL. Applied before sorting/pagination so search spans all pages.' }
+    // #swagger.parameters['types'] = { in: 'query', type: 'string', description: 'Comma-separated subset of brand,competitor,neutral. Omit to return all types; empty string returns none.' }
     // #swagger.parameters['seekUrl'] = { in: 'query', type: 'string', description: 'If set, returns the page containing this URL (overridden by an explicit page= param). Used by deep-links to land on the right page.' }
     try {
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       const topicId = req.query.topicId ? parseInt(req.query.topicId as string) : undefined;
       const seekUrl = typeof req.query.seekUrl === 'string' ? req.query.seekUrl : undefined;
+      const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+      const typesRaw = typeof req.query.types === 'string' ? req.query.types : null;
+      const allowedTypes = typesRaw === null
+        ? null
+        : new Set(typesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s === 'brand' || s === 'competitor' || s === 'neutral'));
       const { from, to } = parseDateRange(req);
 
       const explicitPage = req.query.page !== undefined;
@@ -317,13 +324,15 @@ export function registerSourceRoutes(app: Express) {
 
       const { classifyDomain } = await buildSourceClassifier();
       const all = Array.from(counts.values())
-        .sort((a, b) => b.count - a.count)
+        .filter(p => !q || p.url.toLowerCase().includes(q))
         .map(p => ({
           url: p.url,
           domain: p.domain,
           sourceType: classifyDomain(p.domain),
           citationCount: p.count,
-        }));
+        }))
+        .filter(p => !allowedTypes || allowedTypes.has(p.sourceType))
+        .sort((a, b) => b.citationCount - a.citationCount);
       const total = all.length;
       // Resolve seekUrl → containing page, but only when no explicit page= was
       // supplied. Once the user clicks Prev/Next they're driving pagination

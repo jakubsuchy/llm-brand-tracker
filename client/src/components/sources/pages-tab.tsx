@@ -59,6 +59,7 @@ export function PagesTab() {
   const [showCompetitor, setShowCompetitor] = useState(true);
   const [showNeutral, setShowNeutral] = useState(true);
   const [pageSearch, setPageSearch] = useState('');
+  const [debouncedPageSearch, setDebouncedPageSearch] = useState('');
   const [selectedRun, setSelectedRun] = useState<string>('all');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
   const [selectedModel, setSelectedModel] = useState<string>('all');
@@ -89,10 +90,20 @@ export function PagesTab() {
     queryKey: ['/api/settings/models'],
   });
 
+  const selectedTypes = [
+    showBrand ? 'brand' : null,
+    showCompetitor ? 'competitor' : null,
+    showNeutral ? 'neutral' : null,
+  ].filter(Boolean) as string[];
+
   const params = new URLSearchParams();
   if (selectedRun !== 'all') params.set('runId', selectedRun);
   if (selectedModel !== 'all') params.set('model', selectedModel);
   if (selectedTopic !== 'all') params.set('topicId', selectedTopic);
+  if (debouncedPageSearch.trim()) params.set('q', debouncedPageSearch.trim());
+  // Only send types when the user has narrowed below the default (all 3).
+  // Empty string = none — server returns zero rows.
+  if (selectedTypes.length < 3) params.set('types', selectedTypes.join(','));
   if (explicitPageNum !== null) {
     params.set('page', explicitPageNum.toString());
   } else if (selectedPage) {
@@ -113,21 +124,27 @@ export function PagesTab() {
   // requests this echoes the input; for seekUrl requests it's the resolved page.
   const pageNum = data?.page ?? explicitPageNum ?? 1;
 
-  // Server returns rows already sorted by citationCount desc and paginated.
-  // Client-side filters (search/source type) operate on the current page only.
+  // Server returns rows already sorted by citationCount desc, filtered by q
+  // and types, and paginated.
   const totalCitationsOnPage = pages.reduce((sum, p) => sum + (p.citationCount || 0), 0);
-  const filteredPages = pages
-    .filter(p => {
-      if (pageSearch && !p.url.toLowerCase().includes(pageSearch.toLowerCase())) return false;
-      if (p.sourceType === 'brand' && !showBrand) return false;
-      if (p.sourceType === 'competitor' && !showCompetitor) return false;
-      if (p.sourceType === 'neutral' && !showNeutral) return false;
-      return true;
-    })
-    .map(p => ({
-      ...p,
-      impact: totalCitationsOnPage > 0 ? (p.citationCount / totalCitationsOnPage) * 100 : 0,
-    }));
+  const filteredPages = pages.map(p => ({
+    ...p,
+    impact: totalCitationsOnPage > 0 ? (p.citationCount / totalCitationsOnPage) * 100 : 0,
+  }));
+
+  const resetPageNum = () => {
+    if (!urlParams.has('p')) return;
+    const p = new URLSearchParams(searchString);
+    p.delete('p');
+    const s = p.toString();
+    setLocation(`/sources${s ? `?${s}` : ''}#pages`);
+  };
+
+  // Debounce the search input so we don't re-query on every keystroke.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedPageSearch(pageSearch), 300);
+    return () => clearTimeout(id);
+  }, [pageSearch]);
 
   // Auto-scroll the deep-linked page into view when arriving via shared URL.
   useEffect(() => {
@@ -178,15 +195,15 @@ export function PagesTab() {
         <div className="flex flex-wrap items-center gap-3 sm:gap-6 mb-6 p-3 bg-gray-50 rounded-lg">
           <span className="text-sm font-medium text-gray-700 w-full sm:w-auto">Show citations from:</span>
           <div className="flex items-center gap-2">
-            <Checkbox id="page-show-brand" checked={showBrand} onCheckedChange={(v) => setShowBrand(!!v)} />
+            <Checkbox id="page-show-brand" checked={showBrand} onCheckedChange={(v) => { setShowBrand(!!v); resetPageNum(); }} />
             <Label htmlFor="page-show-brand" className="text-sm text-green-700 font-medium cursor-pointer">Your brand</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Checkbox id="page-show-competitor" checked={showCompetitor} onCheckedChange={(v) => setShowCompetitor(!!v)} />
+            <Checkbox id="page-show-competitor" checked={showCompetitor} onCheckedChange={(v) => { setShowCompetitor(!!v); resetPageNum(); }} />
             <Label htmlFor="page-show-competitor" className="text-sm text-red-700 font-medium cursor-pointer">Competitors</Label>
           </div>
           <div className="flex items-center gap-2">
-            <Checkbox id="page-show-neutral" checked={showNeutral} onCheckedChange={(v) => setShowNeutral(!!v)} />
+            <Checkbox id="page-show-neutral" checked={showNeutral} onCheckedChange={(v) => { setShowNeutral(!!v); resetPageNum(); }} />
             <Label htmlFor="page-show-neutral" className="text-sm text-gray-700 font-medium cursor-pointer">Other</Label>
           </div>
         </div>
@@ -197,7 +214,7 @@ export function PagesTab() {
             <Input
               placeholder="Search page URLs..."
               value={pageSearch}
-              onChange={(e) => setPageSearch(e.target.value)}
+              onChange={(e) => { setPageSearch(e.target.value); resetPageNum(); }}
               className="pl-10"
             />
           </div>

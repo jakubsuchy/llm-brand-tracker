@@ -11,6 +11,7 @@ import PromptGeneratorPage from "@/pages/prompt-generator";
 import ResponsesPage from "@/pages/responses";
 import PromptsListPage from "@/pages/prompts-list";
 import PromptAnalyticsPage from "@/pages/prompt-analytics";
+import HistogramsPage from "@/pages/histograms";
 import CompetitorsPage from "@/pages/competitors";
 import ComparePage from "@/pages/compare";
 import SourcesPage from "@/pages/sources";
@@ -76,6 +77,7 @@ function Router() {
               <Route path="/" component={Dashboard} />
               <Route path="/prompts" component={PromptsListPage} />
               <Route path="/prompts/:id" component={PromptAnalyticsPage} />
+              <Route path="/histograms">{() => <RequireRole role="analyst"><HistogramsPage /></RequireRole>}</Route>
               <Route path="/responses" component={ResponsesPage} />
               <Route path="/competitors" component={CompetitorsPage} />
               <Route path="/compare" component={ComparePage} />

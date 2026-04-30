@@ -120,53 +120,58 @@ export default function PromptsListPage() {
           />
         </div>
 
-        <div className="rounded-lg border bg-white p-4 mb-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-700">Minimum responses</label>
-              <span className="text-xs text-slate-500 tabular-nums">≥ {minResponses}</span>
+        <div className="rounded-lg border bg-white p-4 mb-2">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Filters</span>
+            {/* Reserve the slot regardless of state so the page never reflows
+                when the user crosses default → dirty. */}
+            <button
+              onClick={() => setLocation(buildUrl(p => { p.delete('minResponses'); p.delete('rate'); }))}
+              className={`text-xs text-indigo-600 hover:underline ${slidersDirty ? '' : 'invisible pointer-events-none'}`}
+              aria-hidden={!slidersDirty}
+              tabIndex={slidersDirty ? 0 : -1}
+            >
+              Reset sliders
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-700">Minimum responses</label>
+                <span className="text-xs text-slate-500 tabular-nums">≥ {minResponses}</span>
+              </div>
+              <Slider
+                value={[minResponses]}
+                min={1}
+                max={maxResponses}
+                step={1}
+                onValueChange={(v) => setMinResponses(v[0])}
+                aria-label="Minimum response count"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400 mt-1 tabular-nums">
+                <span>1</span>
+                <span>{maxResponses}</span>
+              </div>
             </div>
-            <Slider
-              value={[minResponses]}
-              min={1}
-              max={maxResponses}
-              step={1}
-              onValueChange={(v) => setMinResponses(v[0])}
-              aria-label="Minimum response count"
-            />
-            <div className="flex justify-between text-[10px] text-slate-400 mt-1 tabular-nums">
-              <span>1</span>
-              <span>{maxResponses}</span>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-slate-700">Mention rate</label>
+                <span className="text-xs text-slate-500 tabular-nums">{rateMin}% – {rateMax}%</span>
+              </div>
+              <Slider
+                value={[rateMin, rateMax]}
+                min={0}
+                max={100}
+                step={1}
+                onValueChange={(v) => setRateRange(v[0], v[1])}
+                aria-label="Mention rate range"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400 mt-1 tabular-nums">
+                <span>0%</span>
+                <span>100%</span>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-700">Mention rate</label>
-              <span className="text-xs text-slate-500 tabular-nums">{rateMin}% – {rateMax}%</span>
-            </div>
-            <Slider
-              value={[rateMin, rateMax]}
-              min={0}
-              max={100}
-              step={1}
-              onValueChange={(v) => setRateRange(v[0], v[1])}
-              aria-label="Mention rate range"
-            />
-            <div className="flex justify-between text-[10px] text-slate-400 mt-1 tabular-nums">
-              <span>0%</span>
-              <span>100%</span>
-            </div>
-          </div>
-          {slidersDirty && (
-            <div className="md:col-span-2 -mt-2">
-              <button
-                onClick={() => setLocation(buildUrl(p => { p.delete('minResponses'); p.delete('rate'); }))}
-                className="text-xs text-indigo-600 hover:underline"
-              >
-                Reset sliders
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
