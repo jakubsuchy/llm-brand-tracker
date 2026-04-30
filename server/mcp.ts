@@ -591,9 +591,271 @@ async function createMcpServer(): Promise<McpServer> {
     },
   );
 
+  // ---- list-prompts-ranked ----
+  server.tool(
+    'list-prompts-ranked',
+    'Rank every prompt by brand mention rate. Use to find weak spots ("which prompts ignore us?") or strong points ("which prompts always mention us?"). Each row keys by promptId so you can hand the id straight to get-prompt-analytics. Per-model breakdown is included. Default sort is descending; pass sort:"asc" for the worst-performing first.',
+    {
+      runId: z.number().optional().describe('Filter by analysis run ID'),
+      model: z
+        .string()
+        .optional()
+        .describe('Filter by model (perplexity, chatgpt, gemini, google-aimode, openai-api, anthropic-api)'),
+      topicId: z.number().optional().describe('Filter by topic id'),
+      sort: z.enum(['asc', 'desc']).optional().describe('Sort by mentionRate (default: desc)'),
+      limit: z.number().int().positive().optional().describe('Max rows (omit for all)'),
+    },
+    async ({ runId, model, topicId, sort, limit }) => {
+      let responses = await storage.getResponsesWithPrompts(runId);
+      responses = filterByModel(responses, model);
+      if (topicId !== undefined) {
+        responses = responses.filter((r) => r.prompt?.topicId === topicId);
+      }
+
+      type Bucket = {
+        id: number;
+        text: string;
+        topicId: number | null;
+        topicName: string;
+        totalResponses: number;
+        brandMentions: number;
+        byModel: Map<string, { total: number; mentioned: number }>;
+      };
+      const map = new Map<number, Bucket>();
+      for (const r of responses) {
+        if (!r.prompt) continue;
+        const id = r.prompt.id;
+        if (!map.has(id)) {
+          map.set(id, {
+            id,
+            text: r.prompt.text,
+            topicId: r.prompt.topicId ?? null,
+            topicName: r.prompt.topic?.name || 'Uncategorized',
+            totalResponses: 0,
+            brandMentions: 0,
+            byModel: new Map(),
+          });
+        }
+        const b = map.get(id)!;
+        b.totalResponses++;
+        if (r.brandMentioned) b.brandMentions++;
+        const mdl = r.model || 'unknown';
+        if (!b.byModel.has(mdl)) b.byModel.set(mdl, { total: 0, mentioned: 0 });
+        const pm = b.byModel.get(mdl)!;
+        pm.total++;
+        if (r.brandMentioned) pm.mentioned++;
+      }
+
+      const rows = [...map.values()].map((b) => ({
+        promptId: b.id,
+        text: b.text,
+        topicId: b.topicId,
+        topicName: b.topicName,
+        totalResponses: b.totalResponses,
+        brandMentions: b.brandMentions,
+        mentionRate:
+          b.totalResponses > 0
+            ? Math.round((b.brandMentions / b.totalResponses) * 1000) / 10
+            : 0,
+        byModel: [...b.byModel.entries()].map(([mdl, pm]) => ({
+          model: mdl,
+          label: MODEL_META[mdl]?.label || mdl,
+          total: pm.total,
+          mentioned: pm.mentioned,
+          rate: pm.total > 0 ? Math.round((pm.mentioned / pm.total) * 1000) / 10 : 0,
+        })),
+      }));
+
+      const dir = sort === 'asc' ? 1 : -1;
+      rows.sort((a, b) => (a.mentionRate - b.mentionRate) * dir || a.promptId - b.promptId);
+
+      return textResult({
+        total: rows.length,
+        prompts: limit ? rows.slice(0, limit) : rows,
+        filters: { runId: runId || 'all', model: model || 'all', topicId: topicId || 'all' },
+      });
+    },
+  );
+
   // =========================================================================
   // 3. DETAIL / DRILL-DOWN
   // =========================================================================
+
+  // ---- get-prompt-analytics ----
+  server.tool(
+    'get-prompt-analytics',
+    'Per-prompt drill-down. Returns the prompt text, totals, per-model rates, run-by-run trend, top competitors that appeared alongside it, and top cited domains. Use for "how is my brand doing on prompt X?" or "which models miss prompt X?". Pair with list-prompts-ranked to find candidates first.',
+    {
+      promptId: z.number().describe('Prompt id (from list-prompts-ranked or search-prompts)'),
+      runId: z.number().optional().describe('Filter to a single run'),
+    },
+    async ({ promptId, runId }) => {
+      const prompt = await storage.getPromptById(promptId);
+      if (!prompt) {
+        return textResult({ error: 'Prompt not found', promptId });
+      }
+      const topic = prompt.topicId ? await storage.getTopicById(prompt.topicId) : null;
+
+      const all = await storage.getResponsesWithPrompts(runId);
+      const responses = all.filter((r) => r.promptId === promptId);
+
+      const tallies = new Map<string, { total: number; mentioned: number }>();
+      for (const r of responses) {
+        const mdl = r.model || 'unknown';
+        if (!tallies.has(mdl)) tallies.set(mdl, { total: 0, mentioned: 0 });
+        const pm = tallies.get(mdl)!;
+        pm.total++;
+        if (r.brandMentioned) pm.mentioned++;
+      }
+      const byModel = [...tallies.entries()]
+        .map(([mdl, pm]) => ({
+          model: mdl,
+          label: MODEL_META[mdl]?.label || mdl,
+          total: pm.total,
+          mentioned: pm.mentioned,
+          rate: pm.total > 0 ? Math.round((pm.mentioned / pm.total) * 1000) / 10 : 0,
+        }))
+        .sort((a, b) => b.rate - a.rate);
+
+      const runIds = new Set<number>();
+      for (const r of responses) {
+        if (r.analysisRunId != null) runIds.add(r.analysisRunId);
+      }
+      const totalsResponses = responses.length;
+      const totalsMentions = responses.filter((r) => r.brandMentioned).length;
+      const totals = {
+        runs: runIds.size,
+        responses: totalsResponses,
+        brandMentions: totalsMentions,
+        brandMentionRate:
+          totalsResponses > 0
+            ? Math.round((totalsMentions / totalsResponses) * 1000) / 10
+            : 0,
+      };
+
+      const allRuns = await storage.getAnalysisRuns();
+      const runMeta = new Map<number, { startedAt: Date | null }>();
+      for (const run of allRuns) {
+        runMeta.set(run.id, { startedAt: run.startedAt });
+      }
+      const trendMap = new Map<
+        number,
+        { runId: number; runStartedAt: Date | null; perModel: Record<string, number>; anyMentioned: boolean }
+      >();
+      for (const r of responses) {
+        const rid = r.analysisRunId;
+        if (rid == null) continue;
+        if (!trendMap.has(rid)) {
+          trendMap.set(rid, {
+            runId: rid,
+            runStartedAt: runMeta.get(rid)?.startedAt || null,
+            perModel: {},
+            anyMentioned: false,
+          });
+        }
+        const t = trendMap.get(rid)!;
+        const mdl = r.model || 'unknown';
+        t.perModel[mdl] = r.brandMentioned ? 1 : (t.perModel[mdl] || 0);
+        if (r.brandMentioned) t.anyMentioned = true;
+      }
+      const trend = [...trendMap.values()].sort(
+        (a, b) => (a.runStartedAt?.getTime() ?? 0) - (b.runStartedAt?.getTime() ?? 0),
+      );
+
+      // Top competitors that co-appear with this prompt — resolve to ids so
+      // the caller can pass them to get-competitor. Skip blocked
+      // (self-merged) records and route merged-out names to their canonical.
+      const allCompetitors = await storage.getAllCompetitorsIncludingMerged();
+      const canonicalById = new Map<number, { id: number; name: string }>();
+      for (const c of allCompetitors) {
+        if (c.mergedInto != null) continue;
+        canonicalById.set(c.id, { id: c.id, name: c.name });
+      }
+      const competitorByName = new Map<string, { id: number; name: string }>();
+      for (const c of allCompetitors) {
+        if (c.mergedInto === c.id) continue;
+        const target = c.mergedInto != null
+          ? canonicalById.get(c.mergedInto)
+          : { id: c.id, name: c.name };
+        if (!target) continue;
+        competitorByName.set(c.name.toLowerCase(), target);
+      }
+      const competitorCounts = new Map<number, { id: number; name: string; count: number }>();
+      for (const r of responses) {
+        const seen = new Set<number>();
+        for (const raw of r.competitorsMentioned || []) {
+          const match = competitorByName.get((raw || '').trim().toLowerCase());
+          if (!match) continue;
+          if (seen.has(match.id)) continue;
+          seen.add(match.id);
+          const entry = competitorCounts.get(match.id) || {
+            id: match.id,
+            name: match.name,
+            count: 0,
+          };
+          entry.count++;
+          competitorCounts.set(match.id, entry);
+        }
+      }
+      const topCompetitors = [...competitorCounts.values()]
+        .map((c) => ({
+          competitorId: c.id,
+          name: c.name,
+          count: c.count,
+          rate:
+            totalsResponses > 0
+              ? Math.round((c.count / totalsResponses) * 1000) / 10
+              : 0,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      // Top cited domains for this prompt — same dedupe-per-response logic.
+      const sourceCounts = new Map<string, number>();
+      for (const r of responses) {
+        if (!r.sources) continue;
+        const seen = new Set<string>();
+        for (const raw of r.sources) {
+          const parsed = parseHttpUrl(raw);
+          if (!parsed) continue;
+          const domain = parsed.hostname.replace(/^www\./, '').toLowerCase();
+          if (seen.has(domain)) continue;
+          seen.add(domain);
+          sourceCounts.set(domain, (sourceCounts.get(domain) || 0) + 1);
+        }
+      }
+      const allSourceRows = await storage.getSources();
+      const sourceByDomain = new Map<string, { id: number }>();
+      for (const s of allSourceRows) {
+        sourceByDomain.set(s.domain.toLowerCase(), { id: s.id });
+      }
+      const classify = await classifySources();
+      const topSources = [...sourceCounts.entries()]
+        .map(([domain, count]) => ({
+          sourceId: sourceByDomain.get(domain)?.id ?? null,
+          domain,
+          count,
+          classification: classify(domain),
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      return textResult({
+        prompt: {
+          id: prompt.id,
+          text: prompt.text,
+          topicId: prompt.topicId,
+          topicName: topic?.name || 'Uncategorized',
+        },
+        totals,
+        byModel,
+        trend,
+        topCompetitors,
+        topSources,
+        filters: { runId: runId || 'all' },
+      });
+    },
+  );
 
   // ---- get-competitor ----
   server.tool(
@@ -783,6 +1045,7 @@ async function createMcpServer(): Promise<McpServer> {
 
       const result = responses.map((r) => ({
         responseId: r.id,
+        promptId: r.prompt?.id ?? null,
         promptText: r.prompt?.text || '',
         model: r.model,
         brandMentioned: !!r.brandMentioned,

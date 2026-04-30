@@ -42,12 +42,12 @@ server/routes/topics.ts     # Topics + prompts + topic analysis
 server/routes/competitors.ts # Competitor CRUD, merge, analysis, blocking
 server/routes/sources.ts    # Source analysis + reclassification
 server/routes/watched-urls.ts # Source Watchlist CRUD + new-citations polling
-server/routes/responses.ts  # Responses, prompts list, data clear
+server/routes/responses.ts  # Responses, prompts list, per-prompt analytics, data clear
 server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
 server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
 server/routes/docs.ts       # Swagger UI at /api-docs (authenticated)
 server/routes/export.ts     # Data export: README.md + CSVs streamed as zip
-server/mcp.ts               # MCP server with 17 tools for Claude AI integration
+server/mcp.ts               # MCP server with 20 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
 server/services/settings.ts # DB-stored settings (override env vars)
@@ -65,6 +65,7 @@ client/src/components/      # Shared UI components (metrics, charts, topic analy
 client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
 client/src/components/sources/  # Sources page tab components (e.g. watchlist-tab.tsx)
 client/src/components/model-logos.tsx  # Inline SVG brand logos (OpenAiLogo, ClaudeLogo, etc.) + ModelLogo dispatcher
+client/src/components/prompt-ranking-table.tsx  # Shared per-prompt list (used on /prompts and dashboard widget)
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
 docs/                       # Documentation markdown source files
 scripts/build-docs.ts       # Builds docs/ → public/docs/ static HTML (markdown-it)
@@ -72,7 +73,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (73 total)
+## API Routes (75 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -114,8 +115,9 @@ WATCHED URLS (6) server/routes/watched-urls.ts
 EXPORT (1)      server/routes/export.ts
   GET       /api/export/bundle
 
-RESPONSES (5)   server/routes/responses.ts
-  GET       /api/prompts, /api/responses, /api/responses/:id
+RESPONSES (7)   server/routes/responses.ts
+  GET       /api/prompts, /api/prompts/ranked, /api/prompts/:id/analytics,
+            /api/responses, /api/responses/:id
   POST      /api/prompts/test, /api/data/clear
 
 ANALYSIS (15)   server/routes/analysis.ts
@@ -238,7 +240,7 @@ All API routes protected by PassportJS session auth. The guard in `server/routes
 
 Integrated at `/mcp` inside the Express app (not a separate process). Uses `@modelcontextprotocol/sdk` with Streamable HTTP transport.
 
-- 17 tools for querying brand data (see `server/mcp.ts`)
+- 20 tools for querying brand data (see `server/mcp.ts`)
 - Authenticated via per-user API key (`Authorization: Bearer <key>`)
 - API keys auto-generated on user creation, stored in `users.api_key`
 - Legacy users get keys backfilled at startup (`backfillApiKeys()`)

@@ -106,7 +106,7 @@ export default function RecentResults({ runId, model }: { runId?: string; model?
     <Card className="bg-white border-slate-200">
       <CardContent className="p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-          <h3 className="text-lg font-semibold text-slate-900">Recent Prompt Results</h3>
+          <h3 className="text-lg font-semibold text-slate-900">Recent Responses</h3>
           <div className="flex flex-wrap items-center gap-1">
             <Button
               variant={filter === 'all' ? 'default' : 'ghost'}
@@ -178,7 +178,7 @@ export default function RecentResults({ runId, model }: { runId?: string; model?
                   <div className="flex items-center space-x-3 text-xs text-slate-500">
                     <span>Competitors: {result.competitorsMentioned?.length || 0}</span>
                   </div>
-                  <Link href={`/prompt-results?promptId=${result.id}${runId ? `&runId=${runId}` : ''}`}>
+                  <Link href={`/responses?promptId=${result.id}${runId ? `&runId=${runId}` : ''}`}>
                     <span className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer">
                       View details <ExternalLink className="h-3 w-3" />
                     </span>

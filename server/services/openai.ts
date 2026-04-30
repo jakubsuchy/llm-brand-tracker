@@ -40,7 +40,7 @@ export async function extractCompetitorsFromResponse(
       },
       {
         role: "user",
-        content: `Extract competitor mentions from this AI response.
+        content: `Extract competitor brand and product names from this AI response.
 
 Response to analyze: "${responseText}"
 ${brandContext}${competitorContext}
@@ -50,12 +50,26 @@ Return JSON:
   "competitors": string[]
 }
 
-Rules:
-- "competitors": list ALL companies, products, or services mentioned that compete in the same space as our brand. Include both company names (e.g. "Square") and product names (e.g. "Square Payments"). Be thorough — if it's mentioned as an alternative or option, include it.
-- Do NOT include platforms where content is hosted or discussed (e.g. Reddit, GitHub, Stack Overflow, YouTube, Medium, Wikipedia, etc.)
-- For cloud providers, prefer their specific product name if mentioned (e.g. "AWS Elastic Load Balancing" over just "AWS"), but include the cloud provider name if no specific product is named
-- IMPORTANT: If a competitor matches one already in the known competitors list, use the EXACT full name from that list
-- Do NOT include URLs in this response`,
+What COUNTS as a competitor (include):
+- A specific, named company or product that competes with our brand. It must be a proper noun a user could search for and find a company or product page.
+- Valid examples: "Stripe", "Square Payments", "AWS Elastic Load Balancing", "Cloudflare", "F5 BIG-IP", "Kong", "HAProxy", "NGINX".
+
+What does NOT count (exclude — when unsure, exclude):
+- Generic technology categories or product types: "hardware", "software", "load balancer", "reverse proxy", "API gateway", "WAF", "CDN", "firewall", "database", "the cloud", "DNS", "service mesh", "ingress controller".
+- Standards, protocols, file formats, technical concepts: "TLS", "SSL", "HTTP", "JSON", "OAuth", "REST", "gRPC", "TCP", "TLS termination", "service discovery".
+- Platforms where content is hosted or discussed: Reddit, GitHub, Stack Overflow, YouTube, Medium, Wikipedia, Twitter/X, LinkedIn.
+- Adjectives and descriptors: "open source", "enterprise", "managed service", "self-hosted", "commercial".
+
+Other rules:
+- Prefer precision over recall. Skip anything that isn't unambiguously a real, specific product or company.
+- If a name matches one in the known competitors list, use the EXACT full name from that list.
+- For cloud providers, prefer the specific product name if mentioned (e.g. "AWS Elastic Load Balancing" over "AWS"); include the parent name only if no specific product is named.
+- Do NOT include URLs.
+- Do NOT include our brand or its variations.
+
+Examples:
+- "You can use HAProxy, NGINX, or AWS Application Load Balancer for hardware-grade performance." → ["HAProxy", "NGINX", "AWS Application Load Balancer"]. ("hardware" is a category — exclude.)
+- "Modern API gateways like Kong, Apigee, and Tyk handle TLS termination." → ["Kong", "Apigee", "Tyk"]. ("API gateway" and "TLS termination" are concepts — exclude.)`,
       },
     ],
     max_completion_tokens: 512,

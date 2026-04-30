@@ -16,21 +16,29 @@ interface ModelMetric {
 interface Props {
   runId?: string;
   brandMentionRate?: number;
+  /** When provided, skip the auto-fetch and render this data directly. */
+  data?: ModelMetric[];
+  /** Override the card title. */
+  title?: string;
 }
 
-export default function ModelComparisonChart({ runId, brandMentionRate }: Props) {
+export default function ModelComparisonChart({ runId, brandMentionRate, data: dataProp, title }: Props) {
   const params = new URLSearchParams();
   if (runId) params.set("runId", runId);
   const paramStr = params.toString() ? `?${params.toString()}` : "";
 
-  const { data, isLoading } = useQuery<ModelMetric[]>({
+  const { data: fetchedData, isLoading } = useQuery<ModelMetric[]>({
     queryKey: [`/api/metrics/by-model${paramStr}`],
+    enabled: dataProp === undefined,
   });
+  const data = dataProp ?? fetchedData;
+  const cardTitle = title ?? "Model Comparison";
+  const showLoading = dataProp === undefined && isLoading;
 
-  if (isLoading) {
+  if (showLoading) {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-base">Model Comparison</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{cardTitle}</CardTitle></CardHeader>
         <CardContent><Skeleton className="h-[240px] w-full" /></CardContent>
       </Card>
     );
@@ -39,7 +47,7 @@ export default function ModelComparisonChart({ runId, brandMentionRate }: Props)
   if (!data || data.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle className="text-base">Model Comparison</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{cardTitle}</CardTitle></CardHeader>
         <CardContent>
           <div className="h-[240px] flex items-center justify-center text-sm text-slate-400">
             No model data available
@@ -71,7 +79,7 @@ export default function ModelComparisonChart({ runId, brandMentionRate }: Props)
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Model Comparison</CardTitle>
+        <CardTitle className="text-base">{cardTitle}</CardTitle>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="w-full" style={{ height: chartHeight }}>

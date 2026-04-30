@@ -8,7 +8,7 @@ import { parseHttpUrl } from "../services/analysis";
 // Centralizes the lookup tables (brand domains, blocklist, competitor names,
 // recognized subdomain prefixes) so both `/sources/analysis` (per-domain)
 // and `/sources/pages/analysis` (per-URL) classify identically.
-async function buildSourceClassifier() {
+export async function buildSourceClassifier() {
   const brandName = (getCurrentBrandName() || (await storage.getSetting('brandName')) || '').toLowerCase();
 
   const subdomainSetting = await storage.getSetting('competitorSubdomains');

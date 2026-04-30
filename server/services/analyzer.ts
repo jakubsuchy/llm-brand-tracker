@@ -1,7 +1,7 @@
 import { storage } from "../storage";
 import { scrapeBrandWebsite, generateTopicsFromContent, extractDomainFromUrl, extractUrlsFromText } from "./scraper";
 import { setCurrentRunId } from "./llm";
-import { stripTrackingParams } from "./analysis";
+import { stripTrackingParams, parseHttpUrl } from "./analysis";
 
 // Dynamic LLM module resolver — reads analysisLlm setting to pick openai or anthropic
 async function getLlmModule() {
@@ -399,6 +399,15 @@ export class BrandAnalyzer {
     const llm = await getLlmModule();
     const analysis = await llm.analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id });
 
+    // Empty response text = scraping/API failure, not a valid "brand not
+    // mentioned" outcome. Treat it as a job failure so the existing retry
+    // chain re-runs the prompt instead of persisting a misleading 0% data
+    // point. Browser models (chatgpt, perplexity) drop responses
+    // intermittently — historically ~18% of chatgpt rows were empty.
+    if (!analysis.response || analysis.response.trim().length === 0) {
+      throw new Error(`Empty response from ${model || 'unknown model'} — treating as failure so the job retries`);
+    }
+
     // Process competitors
     const brandLower = (this.brandName || '').toLowerCase();
     const knownCompetitorRecords = await storage.getCompetitors();
@@ -453,8 +462,12 @@ export class BrandAnalyzer {
     // Process sources. Strip utm/click-tracking params at the storage boundary
     // so display URLs in sources.urls and responses.sources stay clean and
     // collapse correctly across runs (e.g. ?utm_source=openai variants).
-    const responseUrls = extractUrlsFromText(analysis.response).map(stripTrackingParams);
-    const analysisSources = (analysis.sources || []).map(stripTrackingParams);
+    // Also drop anything that isn't http(s) — `responses.sources` is later
+    // rendered as `<a href>`, and a `javascript:` URL there is a stored-XSS
+    // sink. The client side has a matching guard (`safeHttpHref`).
+    const isHttp = (u: string) => parseHttpUrl(u) !== null;
+    const responseUrls = extractUrlsFromText(analysis.response).map(stripTrackingParams).filter(isHttp);
+    const analysisSources = (analysis.sources || []).map(stripTrackingParams).filter(isHttp);
     const allUrls = Array.from(new Set([...responseUrls, ...analysisSources]));
 
     const urlsByDomain = new Map<string, string[]>();

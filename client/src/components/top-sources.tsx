@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Globe, Download, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { SiReddit, SiGithub, SiMedium } from "react-icons/si";
 import { apiRequest } from "@/lib/queryClient";
+import { safeHttpHref } from "@/lib/safe-url";
 import { useToast } from "@/hooks/use-toast";
 
 interface SourceAnalysis {
@@ -208,19 +209,27 @@ export default function TopSources({ runId, model }: { runId?: string; model?: s
                   </CollapsibleTrigger>
                   <CollapsibleContent className="mt-1">
                     <div className="pl-3 sm:pl-9 pr-3 space-y-1">
-                      {source.urls.slice(0, 5).map((url: string, index: number) => (
-                        <div key={index} className="flex items-center justify-between py-1 px-2 bg-slate-50 rounded text-xs">
-                          <a 
-                            href={url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-slate-600 hover:text-indigo-600 truncate flex-1 mr-2"
-                          >
-                            {url.replace(/^https?:\/\//, '').slice(0, 40)}...
-                          </a>
-                          <ExternalLink className="w-3 h-3 text-slate-400 hover:text-indigo-600 cursor-pointer" />
-                        </div>
-                      ))}
+                      {source.urls.slice(0, 5).map((url: string, index: number) => {
+                        const href = safeHttpHref(url);
+                        const display = `${url.replace(/^https?:\/\//, '').slice(0, 40)}...`;
+                        return (
+                          <div key={index} className="flex items-center justify-between py-1 px-2 bg-slate-50 rounded text-xs">
+                            {href ? (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-slate-600 hover:text-indigo-600 truncate flex-1 mr-2"
+                              >
+                                {display}
+                              </a>
+                            ) : (
+                              <span className="text-slate-500 truncate flex-1 mr-2" title="Non-http(s) URL — link disabled">{display}</span>
+                            )}
+                            <ExternalLink className="w-3 h-3 text-slate-400 hover:text-indigo-600 cursor-pointer" />
+                          </div>
+                        );
+                      })}
                       {source.urls.length > 5 && (
                         <div className="text-xs text-slate-500 px-2 py-1">
                           +{source.urls.length - 5} more links

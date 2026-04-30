@@ -1,17 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearch } from "wouter";
+import { useSearch, Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle, XCircle } from "lucide-react";
+import { CheckCircle, XCircle, BarChart3 } from "lucide-react";
 import { ResponseFilters, RunSelector, type ResponseFilterValues } from "@/components/response-filters";
+import { safeHttpHref } from "@/lib/safe-url";
 import type { ResponseWithPrompt } from "@shared/schema";
 
 type FilterType = 'all' | 'mentioned' | 'not-mentioned';
 const PAGE_SIZE = 20;
 
-export default function PromptResultsPage() {
+export default function ResponsesPage() {
   const searchString = useSearch();
   const params = new URLSearchParams(searchString);
   const urlRunId = params.get('runId');
@@ -51,7 +52,9 @@ export default function PromptResultsPage() {
   const mentionedCount = allPrompts.filter(p => p.brandMentioned).length;
   const notMentionedCount = allPrompts.filter(p => !p.brandMentioned).length;
 
+  const promptIdFilter = urlPromptId ? parseInt(urlPromptId) : null;
   const filteredPrompts = allPrompts.filter(prompt => {
+    if (promptIdFilter !== null && prompt.prompt.id !== promptIdFilter) return false;
     if (filter === 'mentioned' && !prompt.brandMentioned) return false;
     if (filter === 'not-mentioned' && prompt.brandMentioned) return false;
     if (filters.topic !== 'all' && prompt.prompt.topicId !== parseInt(filters.topic)) return false;
@@ -106,17 +109,38 @@ export default function PromptResultsPage() {
     );
   }
 
+  const filteredPromptText = promptIdFilter !== null
+    ? allPrompts.find(p => p.prompt.id === promptIdFilter)?.prompt.text
+    : null;
+
   return (
     <div className="p-4 sm:p-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Prompt Results</h1>
-            <p className="text-gray-600 mt-1">Results from prompts where your brand should be mentioned</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Responses</h1>
+            <p className="text-gray-600 mt-1">Raw model responses — search the corpus, filter by mention status, drill into any prompt.</p>
           </div>
           <RunSelector value={filters.run} onChange={(r) => updateFilters({ ...filters, run: r })} />
         </div>
+
+        {promptIdFilter !== null && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+            <div className="text-sm text-indigo-900 truncate">
+              <span className="font-medium">Filtered to one prompt:</span>{' '}
+              <span className="text-indigo-700">{filteredPromptText || `#${promptIdFilter}`}</span>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Link href={`/prompts/${promptIdFilter}`} className="text-xs text-indigo-600 hover:underline">
+                Back to analytics
+              </Link>
+              <Link href="/responses" className="text-xs text-indigo-600 hover:underline">
+                Clear filter
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Filter Pills */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
@@ -161,9 +185,16 @@ export default function PromptResultsPage() {
               className={`p-3 border rounded-lg bg-white cursor-pointer ${expandedPrompt === prompt.id ? 'ring-2 ring-blue-200' : ''}`}
               onClick={() => setExpandedPrompt(expandedPrompt === prompt.id ? null : prompt.id)}
             >
-              <p className="text-sm font-medium text-gray-900 leading-relaxed mb-2">
-                {prompt.prompt.text}
-              </p>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <p className="text-sm font-medium text-gray-900 leading-relaxed flex-1">
+                  {prompt.prompt.text}
+                </p>
+                <Link href={`/prompts/${prompt.prompt.id}`} onClick={(e) => e.stopPropagation()}>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0" title="View prompt analytics">
+                    <BarChart3 className="w-4 h-4" />
+                  </Button>
+                </Link>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="text-xs">{prompt.model || 'api'}</Badge>
                 {prompt.brandMentioned ? (
@@ -206,9 +237,14 @@ export default function PromptResultsPage() {
                     <div>
                       <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
                       <div className="flex flex-wrap gap-1">
-                        {prompt.sources.map((s, i) => (
-                          <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
-                        ))}
+                        {prompt.sources.map((s, i) => {
+                          const href = safeHttpHref(s);
+                          return href ? (
+                            <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
+                          ) : (
+                            <span key={i} className="text-xs text-gray-500 break-all" title="Non-http(s) URL — link disabled">{s}</span>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -229,12 +265,13 @@ export default function PromptResultsPage() {
               <TableHead className="w-48">IS BRAND MENTIONED?</TableHead>
               <TableHead className="w-32">TOPIC</TableHead>
               {filters.run === 'all' && <TableHead className="w-36">RUN</TableHead>}
+              <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {paginatedPrompts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={filters.run === 'all' ? 5 : 4} className="text-center py-8 text-gray-500">
+                <TableCell colSpan={filters.run === 'all' ? 6 : 5} className="text-center py-8 text-gray-500">
                   No queries found matching your filters
                 </TableCell>
               </TableRow>
@@ -282,10 +319,17 @@ export default function PromptResultsPage() {
                         </span>
                       </TableCell>
                     )}
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Link href={`/prompts/${prompt.prompt.id}`}>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="View prompt analytics">
+                          <BarChart3 className="w-4 h-4" />
+                        </Button>
+                      </Link>
+                    </TableCell>
                   </TableRow>
                   {expandedPrompt === prompt.id && (
                     <TableRow key={`${prompt.id}-detail`}>
-                      <TableCell colSpan={filters.run === 'all' ? 5 : 4} className="bg-gray-50 p-0">
+                      <TableCell colSpan={filters.run === 'all' ? 6 : 5} className="bg-gray-50 p-0">
                         <div className="p-4 space-y-3">
                           <div>
                             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">{prompt.model || 'API'} Response</h4>
@@ -307,9 +351,14 @@ export default function PromptResultsPage() {
                             <div>
                               <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
                               <div className="flex flex-wrap gap-1">
-                                {prompt.sources.map((s, i) => (
-                                  <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline">{s}</a>
-                                ))}
+                                {prompt.sources.map((s, i) => {
+                                  const href = safeHttpHref(s);
+                                  return href ? (
+                                    <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline">{s}</a>
+                                  ) : (
+                                    <span key={i} className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">{s}</span>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}

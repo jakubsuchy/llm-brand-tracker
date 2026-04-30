@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { ChevronDown, ChevronUp, CheckCircle, XCircle, Scale, ExternalLink } from "lucide-react";
 import { ResponseFilters, RunSelector, type ResponseFilterValues } from "@/components/response-filters";
+import { safeHttpHref } from "@/lib/safe-url";
 import type { CompetitorAnalysis, ResponseWithPrompt, Topic, MergeHistoryEntry } from "@shared/schema";
 
 interface AnalysisRun {
@@ -468,9 +469,14 @@ export default function ComparePage() {
                             <div>
                               <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
                               <div className="flex flex-wrap gap-1">
-                                {response.sources.map((s, i) => (
-                                  <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
-                                ))}
+                                {response.sources.map((s, i) => {
+                                  const href = safeHttpHref(s);
+                                  return href ? (
+                                    <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline break-all">{s}</a>
+                                  ) : (
+                                    <span key={i} className="text-xs text-gray-500 break-all" title="Non-http(s) URL — link disabled">{s}</span>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
@@ -590,9 +596,14 @@ export default function ComparePage() {
                                     <div>
                                       <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Sources Cited</h4>
                                       <div className="flex flex-wrap gap-1">
-                                        {response.sources.map((s, i) => (
-                                          <a key={i} href={s} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline">{s}</a>
-                                        ))}
+                                        {response.sources.map((s, i) => {
+                                          const href = safeHttpHref(s);
+                                          return href ? (
+                                            <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 underline">{s}</a>
+                                          ) : (
+                                            <span key={i} className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">{s}</span>
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   )}

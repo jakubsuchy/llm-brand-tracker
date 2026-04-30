@@ -19,6 +19,7 @@ import {
   Check,
   Download,
   Archive,
+  ListChecks,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -64,7 +65,8 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigationItems = [
     ...(isAdminOrAnalyst ? [{ id: "prompt-generator", label: "Prompt Generator", icon: Zap, path: "/prompt-generator" }] : []),
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
-    { id: "prompt-results", label: "Prompt Results", icon: MessageSquare, path: "/prompt-results" },
+    { id: "prompts", label: "Prompts", icon: ListChecks, path: "/prompts" },
+    { id: "responses", label: "Responses", icon: MessageSquare, path: "/responses" },
     { id: "competitors", label: "Competitors", icon: Users, path: "/competitors" },
     { id: "compare", label: "Compare", icon: Scale, path: "/compare" },
     { id: "sources", label: "Sources", icon: ExternalLink, path: "/sources" },

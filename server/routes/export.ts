@@ -131,6 +131,44 @@ export async function buildSummary(): Promise<string> {
     };
   });
 
+  // Per-prompt aggregates — match the dashboard's "Worst-Performing Prompts"
+  // widget and the /prompts ranking page. Group by prompt id so two prompts
+  // with identical text stay separate (they have different ids and may be in
+  // different topics).
+  type PromptAgg = {
+    id: number;
+    text: string;
+    topicName: string;
+    total: number;
+    mentions: number;
+  };
+  const promptAggMap = new Map<number, PromptAgg>();
+  for (const r of allRunResponses) {
+    const p = r.prompt;
+    if (!p) continue;
+    if (!promptAggMap.has(p.id)) {
+      promptAggMap.set(p.id, {
+        id: p.id,
+        text: p.text,
+        topicName: p.topic?.name || 'Uncategorized',
+        total: 0,
+        mentions: 0,
+      });
+    }
+    const agg = promptAggMap.get(p.id)!;
+    agg.total++;
+    if (r.brandMentioned) agg.mentions++;
+  }
+  const promptsWithRate = [...promptAggMap.values()]
+    .filter((p) => p.total > 0)
+    .map((p) => ({ ...p, rate: (p.mentions / p.total) * 100 }));
+  const worstPrompts = [...promptsWithRate]
+    .sort((a, b) => a.rate - b.rate || b.total - a.total)
+    .slice(0, 10);
+  const bestPrompts = [...promptsWithRate]
+    .sort((a, b) => b.rate - a.rate || b.total - a.total)
+    .slice(0, 5);
+
   // Top competitors by unique-prompt rate across all completed runs
   const competitorCounts = new Map<string, Set<string>>();
   for (const r of allRunResponses) {
@@ -203,6 +241,32 @@ export async function buildSummary(): Promise<string> {
       const date = t.date ? new Date(t.date).toISOString().slice(0, 10) : '—';
       lines.push(`| #${t.runId} | ${date} | ${t.uniquePrompts} | ${pct(t.visibilityScore)} | ${pct(t.uniquePromptRate)} |`);
     }
+    lines.push('');
+  }
+
+  if (worstPrompts.length > 0) {
+    lines.push(`## Worst-performing prompts`);
+    lines.push('');
+    lines.push(`Prompts where your brand is mentioned least often, across all completed runs. Each prompt id is the same id used by \`/prompts/:id\` in the UI and the \`get-prompt-analytics\` MCP tool. Mention rate = brandMentions / totalResponses for that prompt id, NOT deduplicated by text.`);
+    lines.push('');
+    lines.push(`| # | Prompt id | Topic | Responses | Mentions | Rate |`);
+    lines.push(`|---|-----------|-------|-----------|----------|------|`);
+    worstPrompts.forEach((p, i) => {
+      const text = p.text.length > 80 ? `${p.text.slice(0, 80)}…` : p.text;
+      lines.push(`| ${i + 1} | ${p.id} — "${text.replace(/\|/g, '\\|')}" | ${p.topicName} | ${p.total} | ${p.mentions} | ${pct(p.rate)} |`);
+    });
+    lines.push('');
+  }
+
+  if (bestPrompts.length > 0) {
+    lines.push(`## Best-performing prompts`);
+    lines.push('');
+    lines.push(`| # | Prompt id | Topic | Responses | Mentions | Rate |`);
+    lines.push(`|---|-----------|-------|-----------|----------|------|`);
+    bestPrompts.forEach((p, i) => {
+      const text = p.text.length > 80 ? `${p.text.slice(0, 80)}…` : p.text;
+      lines.push(`| ${i + 1} | ${p.id} — "${text.replace(/\|/g, '\\|')}" | ${p.topicName} | ${p.total} | ${p.mentions} | ${pct(p.rate)} |`);
+    });
     lines.push('');
   }
 
@@ -421,6 +485,14 @@ These numbers will often disagree and that is expected. Example:
   times across 226 responses (a few responses cited multiple pages from the
   domain at once). None of these numbers is stale; they measure different
   things.
+
+### Per-prompt mention rate
+For "how is the brand doing on prompt X" questions, group \`responses\` by
+\`prompt_id\` (NOT by \`prompts.text\` — two prompts with identical text in
+different topics are still distinct rows you may want to keep separate). Per
+prompt id: \`mentions = COUNT(*) WHERE brand_mentioned\`,
+\`total = COUNT(*)\`, \`rate = mentions / total\`. \`summary.md\` already
+contains the bottom 10 / top 5 of this list — prefer those numbers.
 
 ### Source type (brand / competitor / neutral)
 Not stored — it is **derived at query time** by matching \`sources.domain\`

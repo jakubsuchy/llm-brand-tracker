@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useSearch, Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { Search, ExternalLink, Download, MessageSquare, FileText, ChevronDown, C
 import type { SourceAnalysis, Topic } from "@shared/schema";
 import { WatchlistTab } from "@/components/sources/watchlist-tab";
 import { PagesTab } from "@/components/sources/pages-tab";
+import { safeHttpHref } from "@/lib/safe-url";
 
 const SOURCE_TABS = ['domains', 'pages', 'watchlist'] as const;
 
@@ -39,13 +40,17 @@ interface DomainData {
 }
 
 export default function SourcesPage() {
+  const searchString = useSearch();
+  const urlSourceIdRaw = new URLSearchParams(searchString).get('sourceId');
+  const urlSourceId = urlSourceIdRaw ? parseInt(urlSourceIdRaw) : null;
   // ?page=... in the query string means a deep-link to a specific page detail —
   // force the "By Page" tab even if the user shared the URL without #pages.
   const hasPageDeepLink = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('page');
   const hashTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
     ? window.location.hash.slice(1)
     : null;
-  const initialTab = hasPageDeepLink ? 'pages' : (hashTab || 'domains');
+  // ?sourceId=<id> deep-link takes us to the Domains tab (where the filter applies).
+  const initialTab = hasPageDeepLink ? 'pages' : (urlSourceId ? 'domains' : (hashTab || 'domains'));
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [, setLocation] = useLocation();
   const handleTabChange = (tab: string) => {
@@ -129,15 +134,31 @@ export default function SourcesPage() {
     };
   });
 
-  // Filter domains by category, source type, and search
-  const filteredDomains = domains.filter(domain => {
-    if (categoryFilter !== 'all' && domain.category !== categoryFilter) return false;
-    if (domainSearch && !domain.domain.toLowerCase().includes(domainSearch.toLowerCase())) return false;
-    if (domain.sourceType === 'brand' && !showBrand) return false;
-    if (domain.sourceType === 'competitor' && !showCompetitor) return false;
-    if (domain.sourceType === 'neutral' && !showNeutral) return false;
-    return true;
-  }).sort((a, b) => b.impact - a.impact); // Sort by impact descending
+  // Filter domains by category, source type, and search.
+  // ?sourceId=<id> takes precedence — when present we restrict the list to a
+  // single domain and skip the other filters entirely so the deep-link is never
+  // hidden by an inherited filter state.
+  const filteredDomains = (urlSourceId
+    ? domains.filter(d => d.id === urlSourceId)
+    : domains.filter(domain => {
+        if (categoryFilter !== 'all' && domain.category !== categoryFilter) return false;
+        if (domainSearch && !domain.domain.toLowerCase().includes(domainSearch.toLowerCase())) return false;
+        if (domain.sourceType === 'brand' && !showBrand) return false;
+        if (domain.sourceType === 'competitor' && !showCompetitor) return false;
+        if (domain.sourceType === 'neutral' && !showNeutral) return false;
+        return true;
+      })
+  ).sort((a, b) => b.impact - a.impact); // Sort by impact descending
+
+  const filteredDomain = urlSourceId ? domains.find(d => d.id === urlSourceId) : null;
+
+  // Auto-expand the single filtered domain so a deep-link lands on its detail
+  // panel without an extra click.
+  useEffect(() => {
+    if (filteredDomain && expandedDomain !== filteredDomain.domain) {
+      setExpandedDomain(filteredDomain.domain);
+    }
+  }, [filteredDomain?.domain]);
 
   function getDomainCategory(domain: string): string {
     if (domain.includes('twitter') || domain.includes('linkedin') || domain.includes('reddit')) return 'social';
@@ -190,6 +211,17 @@ export default function SourcesPage() {
       ) : (
       /* Source Domains Section */
       <div>
+        {urlSourceId !== null && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+            <div className="text-sm text-indigo-900 truncate">
+              <span className="font-medium">Filtered to one source:</span>{' '}
+              <span className="text-indigo-700">{filteredDomain?.domain || `#${urlSourceId}`}</span>
+            </div>
+            <Link href="/sources" className="text-xs text-indigo-600 hover:underline shrink-0">
+              Clear filter
+            </Link>
+          </div>
+        )}
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Source Domains</h1>
@@ -662,14 +694,6 @@ function DomainResponses({ domain, runId, model, topicId, onFilterByRun }: { dom
       ))}
     </div>
   );
-}
-
-// Defense-in-depth: stored URLs come from raw LLM output (responses.sources).
-// Strip any non-http(s) URL before it lands in an `href` sink. The server
-// boundary is also guarded via parseHttpUrl, but we re-check here in case a
-// junk URL slipped in from a prior run before the filter existed.
-function safeHttpHref(url: string): string | null {
-  return /^https?:\/\//i.test(url) ? url : null;
 }
 
 function DomainPages({ urls, domain, onShowPageDetail }: { urls: string[]; domain: string; onShowPageDetail: (url: string) => void }) {

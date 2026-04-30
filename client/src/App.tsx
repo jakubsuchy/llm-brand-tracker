@@ -8,7 +8,9 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import Layout from "@/components/layout";
 import Dashboard from "@/pages/dashboard";
 import PromptGeneratorPage from "@/pages/prompt-generator";
-import PromptResultsPage from "@/pages/prompts";
+import ResponsesPage from "@/pages/responses";
+import PromptsListPage from "@/pages/prompts-list";
+import PromptAnalyticsPage from "@/pages/prompt-analytics";
 import CompetitorsPage from "@/pages/competitors";
 import ComparePage from "@/pages/compare";
 import SourcesPage from "@/pages/sources";
@@ -72,7 +74,9 @@ function Router() {
             <Switch>
               <Route path="/prompt-generator">{() => <RequireRole role="analyst"><PromptGeneratorPage /></RequireRole>}</Route>
               <Route path="/" component={Dashboard} />
-              <Route path="/prompt-results" component={PromptResultsPage} />
+              <Route path="/prompts" component={PromptsListPage} />
+              <Route path="/prompts/:id" component={PromptAnalyticsPage} />
+              <Route path="/responses" component={ResponsesPage} />
               <Route path="/competitors" component={CompetitorsPage} />
               <Route path="/compare" component={ComparePage} />
               <Route path="/sources" component={SourcesPage} />

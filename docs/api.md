@@ -36,6 +36,16 @@ All metrics endpoints support `?runId=`, `?model=`, `?from=`, `?to=` query param
 
 Valid `model` values: `chatgpt`, `perplexity`, `gemini`, `google-ai-mode`, `openai-api`, `anthropic-api`.
 
+### Prompts
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/prompts` | List prompts from the latest analysis (with topic) |
+| GET | `/api/prompts/ranked` | Every prompt ranked by brand mention rate with per-model breakdown |
+| GET | `/api/prompts/:id/analytics` | Per-prompt drill-down: totals, per-model rates, run trend, top competitors, top sources |
+
+`ranked` accepts `?runId=`, `?model=`, `?topicId=`, `?from=`, `?to=`, `?sort=asc|desc`, `?limit=`, `?offset=`.
+`:id/analytics` accepts `?runId=`, `?from=`, `?to=`.
+
 ### Analysis
 | Method | Path | Description |
 |--------|------|-------------|

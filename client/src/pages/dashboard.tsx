@@ -6,9 +6,12 @@ import CompetitorLandscapeChart from "@/components/competitor-landscape-chart";
 import TopicAnalysis from "@/components/topic-analysis";
 import RecentResults from "@/components/recent-results";
 import TopSources from "@/components/top-sources";
+import PromptRankingTable, { type RankedPrompt } from "@/components/prompt-ranking-table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useEffect, useCallback } from "react";
-import { useSearch, useLocation } from "wouter";
+import { useSearch, useLocation, Link } from "wouter";
 
 interface AnalysisRun {
   id: number;
@@ -167,8 +170,47 @@ export default function Dashboard() {
         <RecentResults runId={runIdValue} model={modelValue} />
       </div>
 
+      {/* Worst-performing prompts */}
+      <WorstPerformingPrompts runId={runIdValue} model={modelValue} />
+
       {/* Sources */}
       <TopSources runId={runIdValue} model={modelValue} />
     </div>
+  );
+}
+
+function WorstPerformingPrompts({ runId, model }: { runId?: string; model?: string }) {
+  const params = new URLSearchParams();
+  if (runId) params.set('runId', runId);
+  if (model) params.set('model', model);
+  params.set('sort', 'asc');
+  params.set('limit', '5');
+  const queryUrl = `/api/prompts/ranked?${params.toString()}`;
+
+  const { data, isLoading } = useQuery<{ total: number; prompts: RankedPrompt[] }>({
+    queryKey: [queryUrl],
+  });
+
+  return (
+    <Card className="bg-white border-slate-200">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+        <CardTitle className="text-base">Worst-Performing Prompts</CardTitle>
+        <Link href="/prompts" className="text-xs text-indigo-600 hover:underline">
+          View all prompts →
+        </Link>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-32 w-full" />
+        ) : (
+          <PromptRankingTable
+            prompts={data?.prompts || []}
+            showPagination={false}
+            showModelBreakdown
+            emptyState="Run an analysis to see prompts ranked by brand mention rate."
+          />
+        )}
+      </CardContent>
+    </Card>
   );
 }

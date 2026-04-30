@@ -39,7 +39,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 ## Available Tools
 
-TraceAIO exposes 18 MCP tools. Claude automatically picks the right tool based on your question.
+TraceAIO exposes 20 MCP tools. Claude automatically picks the right tool based on your question.
 
 ### Overview
 
@@ -58,6 +58,7 @@ TraceAIO exposes 18 MCP tools. Claude automatically picks the right tool based o
 | `list-topics` | Topic-level mention rates |
 | `list-sources` | Top source domains with citation counts and type (brand/competitor/neutral) |
 | `list-pages` | Top individual page URLs cited across responses, with citation counts and source classification. Paginated. |
+| `list-prompts-ranked` | Every prompt ranked by brand mention rate, with per-model breakdown |
 | `list-runs` | All analysis runs with status and progress |
 
 ### Deep Dives
@@ -65,6 +66,7 @@ TraceAIO exposes 18 MCP tools. Claude automatically picks the right tool based o
 | Tool | Description |
 |------|-------------|
 | `get-competitor` | Single competitor deep dive — mention rate + prompts where they appeared |
+| `get-prompt-analytics` | Per-prompt drill-down — totals, per-model rates, run trend, top competitors and sources for one prompt |
 | `get-source` | Single source deep dive — citations, URLs, and responses citing the domain |
 | `get-response` | Full response by ID — prompt text, model, brand mention, competitors, sources |
 | `search-prompts` | Search prompts/responses by keyword, with mention status and model filters |

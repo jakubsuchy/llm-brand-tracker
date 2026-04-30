@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Search, ExternalLink, ChevronDown, ChevronUp, ArrowRightLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { safeHttpHref } from "@/lib/safe-url";
 import type { PageAnalysis, Topic } from "@shared/schema";
 
 const PAGE_SIZE = 50;
@@ -276,9 +277,16 @@ export function PagesTab() {
                 {isExpanded && (
                   <div className="mt-3 pt-3 border-t">
                     <div className="flex items-center gap-2 mb-3 flex-wrap">
-                      <a href={page.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
-                        Open page <ExternalLink className="h-3 w-3" />
-                      </a>
+                      {(() => {
+                        const href = safeHttpHref(page.url);
+                        return href ? (
+                          <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                            Open page <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">Open page (disabled)</span>
+                        );
+                      })()}
                       <div className="flex items-center gap-2 ml-auto">
                         <span className="text-xs text-gray-400">Mark domain {page.domain} as:</span>
                         {page.sourceType !== 'brand' && (
@@ -377,9 +385,16 @@ export function PagesTab() {
                       <TableRow key={`${page.url}-detail`}>
                         <TableCell colSpan={6} className="bg-gray-50 p-0">
                           <div className="border-b px-4 py-2 flex items-center gap-2 flex-wrap">
-                            <a href={page.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                              Open page <ExternalLink className="h-3 w-3" />
-                            </a>
+                            {(() => {
+                              const href = safeHttpHref(page.url);
+                              return href ? (
+                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                  Open page <ExternalLink className="h-3 w-3" />
+                                </a>
+                              ) : (
+                                <span className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">Open page (disabled)</span>
+                              );
+                            })()}
                             <div className="ml-auto flex items-center gap-2">
                               <span className="text-xs text-gray-400">Mark domain {page.domain} as:</span>
                               {page.sourceType !== 'brand' && (
