@@ -14,6 +14,7 @@ import { ApifyTokenCard, type ApifyTokenCardRef } from "@/components/settings/ap
 import { BrandDomainsCard } from "@/components/settings/brand-domains-card";
 import { CompetitorSubdomainsCard } from "@/components/settings/competitor-subdomains-card";
 import { CompetitorExclusionsCard } from "@/components/settings/competitor-exclusions-card";
+import { UrlBlacklistCard } from "@/components/settings/url-blacklist-card";
 import { DangerZoneCard } from "@/components/settings/danger-zone-card";
 import { WebhookCard } from "@/components/settings/webhook-card";
 import { IntegrationsFlowDiagram } from "@/components/integrations-flow-diagram";
@@ -119,6 +120,7 @@ export default function SettingsPage({ wizardMode = false }: { wizardMode?: bool
             <BrandDomainsCard />
             <CompetitorSubdomainsCard />
             <CompetitorExclusionsCard />
+            <UrlBlacklistCard />
           </TabsContent>
         )}
 

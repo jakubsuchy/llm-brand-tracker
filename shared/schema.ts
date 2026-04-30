@@ -49,9 +49,23 @@ export const sources = pgTable("sources", {
   lastCited: timestamp("last_cited"),
 });
 
+// One row per distinct citation URL — gives each URL a stable integer id used
+// as the page id in the Source Pages UI. source_urls remains the per-(run,
+// model) citation event log; this table is the deduped lookup. Every
+// addSourceUrls insert upserts here too so the two stay in sync.
+export const sourceUniqueUrls = pgTable("source_unique_urls", {
+  id: serial("id").primaryKey(),
+  url: text("url").notNull().unique(),
+  normalizedUrl: text("normalized_url"),
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
+});
+
 export const sourceUrls = pgTable("source_urls", {
   id: serial("id").primaryKey(),
   sourceId: integer("source_id").references(() => sources.id).notNull(),
+  // FK to source_unique_urls. The page id used in the Source Pages UI is
+  // this column's value — stable per URL, no MIN aggregation needed.
+  sourceUniqueUrlId: integer("source_unique_url_id").references(() => sourceUniqueUrls.id),
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id),
   model: text("model"),
   url: text("url").notNull(),
@@ -65,6 +79,7 @@ export const sourceUrls = pgTable("source_urls", {
 }, (t) => ({
   normalizedUrlIdx: index("source_urls_normalized_url_idx").on(t.normalizedUrl),
   normalizedUrlStrippedIdx: index("source_urls_normalized_url_stripped_idx").on(t.normalizedUrlStripped),
+  sourceUniqueUrlIdIdx: index("source_urls_source_unique_url_id_idx").on(t.sourceUniqueUrlId),
 }));
 
 export const watchedUrls = pgTable("watched_urls", {
@@ -359,10 +374,15 @@ export type SourceAnalysis = {
   domain: string;
   sourceType: string;
   citationCount: number;
-  urls: string[];
+  urls: { url: string; pageId: number | null }[];
 };
 
 export type PageAnalysis = {
+  // pageId = MIN(source_urls.id) for this URL — stable integer used in deep
+  // links and selection state. Avoids the previous URL-as-query-param scheme
+  // where %-encoding round-tripped via URLSearchParams produced %2520-style
+  // double-encoding and broke equality checks.
+  pageId: number | null;
   url: string;
   domain: string;
   sourceType: string;

@@ -13,6 +13,22 @@ export function requireRole(...requiredRoles: string[]) {
   };
 }
 
+// Domains that are always hidden from Sources/Pages views regardless of
+// classification. Used for citation-noise like myactivity.google.com that
+// LLMs occasionally surface as "sources" even though they aren't real
+// references. Editable from Settings → Sources → URL Blacklist.
+export const DEFAULT_SOURCE_BLACKLIST = ['myactivity.google.com'];
+
+// Returns the blacklist as a Set of lowercased domains. Falls back to the
+// default when the setting is unset (fresh install).
+export async function getSourceBlacklist(): Promise<Set<string>> {
+  const raw = await storage.getSetting('sourceBlacklist');
+  const list = raw === null
+    ? DEFAULT_SOURCE_BLACKLIST
+    : raw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+  return new Set(list);
+}
+
 // Parse optional from/to date range from query params
 export function parseDateRange(req: any): { from?: Date; to?: Date } {
   const from = req.query.from ? new Date(req.query.from as string) : undefined;

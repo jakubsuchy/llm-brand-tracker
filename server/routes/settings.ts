@@ -161,6 +161,17 @@ export function registerSettingsRoutes(app: Express) {
           const value = await storage.getSetting('brandDomains');
           return res.json({ domains: value ? value.split(',').map((s: string) => s.trim()).filter(Boolean) : [] });
         }
+        case 'source-blacklist': {
+          // Domains that are hidden from Sources / Source Pages — citation
+          // noise like myactivity.google.com that LLMs surface but never
+          // genuinely "cite". Default applies when the setting was never set.
+          const { DEFAULT_SOURCE_BLACKLIST } = await import("./helpers");
+          const value = await storage.getSetting('sourceBlacklist');
+          const domains = value === null
+            ? DEFAULT_SOURCE_BLACKLIST
+            : value.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+          return res.json({ domains });
+        }
         case 'chatgpt-credentials': {
           const email = await getSetting('chatgptEmail');
           const password = await getSetting('chatgptPassword');
@@ -321,6 +332,16 @@ export function registerSettingsRoutes(app: Express) {
           if (!Array.isArray(domains)) return res.status(400).json({ error: "domains must be an array" });
           const cleaned = domains.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
           await storage.setSetting('brandDomains', cleaned.join(','));
+          return res.json({ success: true, domains: cleaned });
+        }
+        case 'source-blacklist': {
+          const { domains } = req.body;
+          if (!Array.isArray(domains)) return res.status(400).json({ error: "domains must be an array" });
+          const cleaned = domains.map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+          // Empty array stays empty (not the default) — explicit user choice
+          // to allow everything. Default only applies when the setting row
+          // was never written.
+          await storage.setSetting('sourceBlacklist', cleaned.join(','));
           return res.json({ success: true, domains: cleaned });
         }
         case 'chatgpt-credentials': {

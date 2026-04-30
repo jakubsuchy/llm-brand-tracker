@@ -11,11 +11,12 @@ import {
   MergeSuggestion, MergeHistoryEntry,
   JobQueueItem, InsertJobQueueItem, JobQueueProgress,
   WatchedUrl, InsertWatchedUrl, WatchedUrlWithCitations, WatchedUrlCitation,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, sourceUniqueUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls
 } from "@shared/schema";
-import { normalizeUrl, stripTrackingParams } from "./services/analysis";
+import { normalizeUrl, stripTrackingParams, parseHttpUrl } from "./services/analysis";
+import { extractUrlsFromText } from "./services/scraper";
 import { db } from "./db";
-import { eq, desc, count, sql, isNull, and, gte, lte } from "drizzle-orm";
+import { eq, desc, count, sql, isNull, and, gte, lte, inArray } from "drizzle-orm";
 import { IStorage } from "./storage";
 
 export class DatabaseStorage implements IStorage {
@@ -31,15 +32,28 @@ export class DatabaseStorage implements IStorage {
       await this.initializeCompetitors();
       await this.initializeSources();
     }
-    // Fill in any NULL normalized_url rows left over from before that column existed
-    this.backfillNormalizedSourceUrls().catch((err) => {
-      console.error('[backfill] normalized_url backfill failed:', err);
-    });
-    // Strip tracking params (utm_*, gclid, fbclid, etc.) from URLs that were
-    // stored before stripTrackingParams was applied at the analyzer boundary.
-    this.backfillStripTrackingParams().catch((err) => {
-      console.error('[backfill] tracking-param backfill failed:', err);
-    });
+    // Backfills run sequentially because later steps depend on earlier ones:
+    //   1. normalize URLs (no deps)
+    //   2. strip tracking params (clean URL form before dedup/lookup)
+    //   3. populate source_unique_urls + FK on source_urls
+    //   4. merge text-extracted URLs into responses.sources so the GC step
+    //      doesn't delete citations that are about to become valid
+    //   5. GC source_urls/source_unique_urls rows whose originating response
+    //      no longer exists
+    // Wrapped in an IIFE so a failure at any stage is logged but doesn't
+    // crash startup or block the next-best-effort step.
+    (async () => {
+      try { await this.backfillNormalizedSourceUrls(); }
+      catch (err) { console.error('[backfill] normalized_url backfill failed:', err); }
+      try { await this.backfillStripTrackingParams(); }
+      catch (err) { console.error('[backfill] tracking-param backfill failed:', err); }
+      try { await this.backfillSourceUniqueUrls(); }
+      catch (err) { console.error('[backfill] source_unique_urls backfill failed:', err); }
+      try { await this.backfillResponseSourcesFromText(); }
+      catch (err) { console.error('[backfill] response sources merge failed:', err); }
+      try { await this.gcOrphanSourceUrls(); }
+      catch (err) { console.error('[backfill] orphan source_urls GC failed:', err); }
+    })();
   }
 
   /**
@@ -124,6 +138,119 @@ export class DatabaseStorage implements IStorage {
 
     if (urlUpdated > 0 || respUpdated > 0) {
       console.log(`[backfill] Stripped tracking params from ${urlUpdated} source_urls.url and ${respUpdated} responses.sources rows.`);
+    }
+  }
+
+  /**
+   * One-time backfill: ensures every distinct citation URL has a row in
+   * source_unique_urls and that every source_urls row links to it via
+   * source_unique_url_id. Idempotent — safe to call on every startup.
+   */
+  async backfillSourceUniqueUrls(): Promise<void> {
+    // 1. Insert distinct URLs that don't yet have a source_unique_urls row.
+    //    Done in a single SQL so it's fast on first run but cheap afterward
+    //    (the NOT EXISTS prunes already-mapped URLs).
+    const inserted = await db.execute(sql`
+      INSERT INTO source_unique_urls (url, normalized_url, first_seen_at)
+      SELECT su.url, MIN(su.normalized_url), MIN(su.first_seen_at)
+      FROM source_urls su
+      WHERE NOT EXISTS (
+        SELECT 1 FROM source_unique_urls sou WHERE sou.url = su.url
+      )
+      GROUP BY su.url
+      ON CONFLICT (url) DO NOTHING
+      RETURNING id
+    `);
+    const insertedCount = (inserted as any).rowCount ?? (inserted as any).rows?.length ?? 0;
+
+    // 2. Backfill source_urls.source_unique_url_id for any rows still NULL.
+    const linked = await db.execute(sql`
+      UPDATE source_urls su
+      SET source_unique_url_id = sou.id
+      FROM source_unique_urls sou
+      WHERE su.source_unique_url_id IS NULL AND su.url = sou.url
+    `);
+    const linkedCount = (linked as any).rowCount ?? 0;
+
+    if (insertedCount > 0 || linkedCount > 0) {
+      console.log(`[backfill] source_unique_urls: inserted ${insertedCount}, linked ${linkedCount} source_urls rows.`);
+    }
+  }
+
+  /**
+   * One-time backfill: merges URLs extracted from `responses.text` into
+   * `responses.sources`. Older rows only have the structured-citation subset
+   * because the analyzer wrote `analysisSources` instead of the union of
+   * structured + text-extracted URLs. Without this, the Source Pages tab
+   * silently omits inline LLM citations. Idempotent — once a response's
+   * sources match the union, the loop produces a no-op for it.
+   */
+  async backfillResponseSourcesFromText(): Promise<void> {
+    const isHttp = (u: string) => parseHttpUrl(u) !== null;
+    const BATCH = 500;
+    let scanned = 0;
+    let updated = 0;
+    let lastId = 0;
+    while (true) {
+      const rows = await db
+        .select({ id: responses.id, text: responses.text, sources: responses.sources })
+        .from(responses)
+        .where(sql`${responses.id} > ${lastId} AND ${responses.text} ~ 'https?://'`)
+        .orderBy(responses.id)
+        .limit(BATCH);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        lastId = row.id;
+        scanned++;
+        const existing = row.sources || [];
+        const fromText = extractUrlsFromText(row.text || '')
+          .map(stripTrackingParams)
+          .filter(isHttp);
+        if (fromText.length === 0) continue;
+        const merged = Array.from(new Set([...existing, ...fromText]));
+        if (merged.length === existing.length) continue;
+        await db.update(responses).set({ sources: merged }).where(eq(responses.id, row.id));
+        updated++;
+      }
+      if (rows.length < BATCH) break;
+    }
+    if (updated > 0) {
+      console.log(`[backfill] Merged text-extracted URLs into responses.sources for ${updated}/${scanned} rows.`);
+    }
+  }
+
+  /**
+   * Garbage-collects stale source_urls citation rows.
+   *
+   * source_urls has no FK to responses, so when a response is deleted (e.g.
+   * a job-queue retry that replaced it) its citation rows linger forever.
+   * The Source Pages view aggregates from responses.sources so the leftover
+   * source_urls rows don't directly distort counts, but they break pageId
+   * deep-linking — the URL gets a stable id from source_unique_urls but
+   * can't be attributed back to any surviving response.
+   *
+   * Rule: a source_urls row is real iff some surviving response in the same
+   * (analysis_run_id, model) has the URL in its sources array.
+   *
+   * source_unique_urls intentionally NOT garbage-collected — it's an
+   * identity table, not citation data. Keeping URLs there means a re-cited
+   * URL gets the same pageId across analyses (deep links stay stable).
+   *
+   * Idempotent — second run matches nothing.
+   */
+  async gcOrphanSourceUrls(): Promise<void> {
+    const deleted = await db.execute(sql`
+      DELETE FROM source_urls su
+      WHERE NOT EXISTS (
+        SELECT 1 FROM responses r
+        WHERE r.analysis_run_id IS NOT DISTINCT FROM su.analysis_run_id
+          AND r.model IS NOT DISTINCT FROM su.model
+          AND su.url = ANY(r.sources)
+      )
+    `);
+    const count = (deleted as any).rowCount ?? 0;
+    if (count > 0) {
+      console.log(`[gc] Deleted ${count} orphan source_urls rows.`);
     }
   }
 
@@ -347,10 +474,28 @@ export class DatabaseStorage implements IStorage {
     const source = await this.getSourceByDomain(domain);
     if (!source) return;
     for (const url of urls) {
+      const normalized = normalizeUrl(url);
+      // Upsert into source_unique_urls so every distinct citation URL has a
+      // stable id. Insert returns the id when new; on conflict we have to
+      // fetch (Postgres only returns RETURNING for affected rows).
+      const [uniqueRow] = await db
+        .insert(sourceUniqueUrls)
+        .values({ url, normalizedUrl: normalized })
+        .onConflictDoNothing()
+        .returning({ id: sourceUniqueUrls.id });
+      let sourceUniqueUrlId: number | null = uniqueRow?.id ?? null;
+      if (sourceUniqueUrlId === null) {
+        const [existing] = await db
+          .select({ id: sourceUniqueUrls.id })
+          .from(sourceUniqueUrls)
+          .where(eq(sourceUniqueUrls.url, url));
+        sourceUniqueUrlId = existing?.id ?? null;
+      }
       await db.insert(sourceUrls).values({
         sourceId: source.id,
+        sourceUniqueUrlId,
         url,
-        normalizedUrl: normalizeUrl(url),
+        normalizedUrl: normalized,
         normalizedUrlStripped: normalizeUrl(url, { stripAllQuery: true }),
         analysisRunId: analysisRunId || null,
         model: model || null,
@@ -374,6 +519,16 @@ export class DatabaseStorage implements IStorage {
     // Deduplicate
     return [...new Set(rows.map(r => r.url))];
   }
+
+  async getPageIdsForUrls(urls: string[]): Promise<Map<string, number>> {
+    if (urls.length === 0) return new Map();
+    const rows = await db
+      .select({ id: sourceUniqueUrls.id, url: sourceUniqueUrls.url })
+      .from(sourceUniqueUrls)
+      .where(inArray(sourceUniqueUrls.url, urls));
+    return new Map(rows.map(r => [r.url, r.id]));
+  }
+
 
   // Competitor mentions
   async createCompetitorMention(mention: InsertCompetitorMention): Promise<void> {

@@ -15,7 +15,7 @@ interface SourceAnalysis {
   domain: string;
   sourceType: string;
   citationCount: number;
-  urls: string[];
+  urls: { url: string; pageId: number | null }[];
 }
 
 const getDomainIcon = (domain: string) => {
@@ -209,7 +209,8 @@ export default function TopSources({ runId, model }: { runId?: string; model?: s
                   </CollapsibleTrigger>
                   <CollapsibleContent className="mt-1">
                     <div className="pl-3 sm:pl-9 pr-3 space-y-1">
-                      {source.urls.slice(0, 5).map((url: string, index: number) => {
+                      {source.urls.slice(0, 5).map((entry, index: number) => {
+                        const url = entry.url;
                         const href = safeHttpHref(url);
                         const display = `${url.replace(/^https?:\/\//, '').slice(0, 40)}...`;
                         return (

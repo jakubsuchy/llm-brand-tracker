@@ -72,6 +72,9 @@ export interface IStorage {
   updateSourceCitationCount(domain: string, increment: number): Promise<void>;
   addSourceUrls(domain: string, urls: string[], analysisRunId?: number, model?: string): Promise<void>;
   getSourceUrlsBySourceId(sourceId: number, analysisRunId?: number, model?: string): Promise<string[]>;
+  // Returns Map<url, source_unique_urls.id> for the given URL list. Used by
+  // the Source Pages routes to attach a stable pageId to each row/URL.
+  getPageIdsForUrls(urls: string[]): Promise<Map<string, number>>;
 
   // Competitor mentions
   createCompetitorMention(mention: InsertCompetitorMention): Promise<void>;
@@ -378,6 +381,12 @@ export class MemStorage implements IStorage {
     return Array.from(this.sourceUrlsMap.get(sourceId) || []);
   }
 
+  async getPageIdsForUrls(_urls: string[]): Promise<Map<string, number>> {
+    // In-memory storage doesn't track source_unique_urls — return empty map.
+    // Production uses DatabaseStorage; this is exercised only in dev/tests.
+    return new Map();
+  }
+
   private competitorMentionsList: InsertCompetitorMention[] = [];
 
   async createCompetitorMention(mention: InsertCompetitorMention): Promise<void> {
@@ -506,24 +515,25 @@ export class MemStorage implements IStorage {
 
   async getSourceAnalysis(): Promise<SourceAnalysis[]> {
     const sources = await this.getSources();
-    const sourceAnalysis = new Map<string, { sourceId: number; domain: string; citationCount: number; urls: string[] }>();
-    
+    const sourceAnalysis = new Map<string, SourceAnalysis>();
+
     sources.forEach(source => {
       const key = source.domain;
       if (sourceAnalysis.has(key)) {
         const existing = sourceAnalysis.get(key)!;
         existing.citationCount += source.citationCount || 0;
-        existing.urls.push(source.url);
+        existing.urls.push({ url: source.url, pageId: null });
       } else {
         sourceAnalysis.set(key, {
           sourceId: source.id,
           domain: source.domain,
+          sourceType: 'neutral',
           citationCount: source.citationCount || 0,
-          urls: [source.url]
+          urls: [{ url: source.url, pageId: null }],
         });
       }
     });
-    
+
     return Array.from(sourceAnalysis.values())
       .sort((a, b) => b.citationCount - a.citationCount);
   }

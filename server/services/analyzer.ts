@@ -497,12 +497,35 @@ export class BrandAnalyzer {
         await storage.addSourceUrls(domain, urls, analysisRunId || undefined, model);
         await storage.updateSourceCitationCount(domain, 1);
 
-        const domainBase = domain.toLowerCase().split('.')[0];
-        for (const comp of resolvedCompetitors) {
-          if (!comp.name) continue;
-          const compWords = comp.name.toLowerCase().split(/\s+/);
-          if (compWords.some(w => domainBase.includes(w) || w.includes(domainBase))) {
-            await storage.updateCompetitorDomain(comp.id, domain);
+        // Strip well-known subdomain prefixes BEFORE deriving the base label.
+        // Without this, "en.wikipedia.org" yields domainBase="en", which then
+        // substring-matched any competitor name containing "en" — silently
+        // stamping en.wikipedia.org as the website for OpenResty, Telenor,
+        // Cequence, Azure OpenAI, etc. Same pattern blew up cloud.google.com
+        // (domainBase="cloud" matched "Cloudflare X") and others.
+        // Same list as competitorSubdomains default in sources.ts classifier.
+        const KNOWN_SUBDOMAIN_PREFIXES = new Set([
+          'www', 'en', 'fr', 'de', 'es', 'ja', 'zh', 'ru', 'pt', 'it', 'ko',
+          'blog', 'docs', 'doc', 'support', 'learn', 'help', 'developer', 'developers', 'api', 'm',
+        ]);
+        const labels = domain.toLowerCase().split('.');
+        const stripped = labels.length >= 3 && KNOWN_SUBDOMAIN_PREFIXES.has(labels[0]) ? labels.slice(1) : labels;
+        const domainBase = stripped[0];
+        if (domainBase) {
+          for (const comp of resolvedCompetitors) {
+            if (!comp.name) continue;
+            // Exact match only — substring matching here is what caused the
+            // wrong-domain pile-ups above. We accept either: any whitespace-
+            // split name word equals the registrable base ("AWS Application
+            // Load Balancer" → "aws.amazon.com" via "aws"), OR the whole
+            // name with spaces removed equals it ("A10 Networks" →
+            // "a10networks.com" via "a10networks").
+            const nameLower = comp.name.toLowerCase();
+            const compWords = nameLower.split(/\s+/);
+            const nameNoSpace = nameLower.replace(/\s+/g, '');
+            if (compWords.some(w => w === domainBase) || nameNoSpace === domainBase) {
+              await storage.updateCompetitorDomain(comp.id, domain);
+            }
           }
         }
       } catch {}
@@ -519,7 +542,13 @@ export class BrandAnalyzer {
         const resolved = resolvedCompetitors.find(r => r.name.toLowerCase() === name.toLowerCase());
         return resolved?.name || name;
       }),
-      sources: analysisSources,
+      // Persist the union of structured citations (from analysis.sources) and
+      // URLs extracted from the response body. Previously responses.sources
+      // only held the structured set, which made inline-cited URLs invisible
+      // to the Source Pages aggregation (it reads from this array). The
+      // source_urls table already stored the union, so this brings the two
+      // back into agreement.
+      sources: allUrls,
     });
 
     // Create competitor mention records + log identification source

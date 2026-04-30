@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useSearch, useLocation } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -34,18 +34,19 @@ export function PagesTab() {
   const searchString = useSearch();
   const [, setLocation] = useLocation();
   const urlParams = new URLSearchParams(searchString);
-  const selectedPage = urlParams.get('page') || null;
-  // ?p is only set after the user explicitly paginates. If absent and a
-  // selectedPage exists, we let the server resolve which page it falls on.
+  // Two modes keyed off ?expand=<pageId>:
+  //  - Detail mode: ?expand=N renders a focused single-page view (stable
+  //    across runs because it doesn't depend on rank/pagination).
+  //  - List mode (no ?expand): browse + inline expand. Selection lives in
+  //    component state so it never leaks into shareable URLs (page rank
+  //    shifts as new citations come in, so a "row 5 of page 3" link is
+  //    fragile). ?p=N still drives Prev/Next pagination — that's separate.
+  const expandParam = urlParams.get('expand');
+  const detailPageId = expandParam ? parseInt(expandParam) || null : null;
   const explicitPageNum = urlParams.has('p') ? Math.max(1, parseInt(urlParams.get('p') || '1') || 1) : null;
 
-  const setSelectedPage = (url: string | null) => {
-    const p = new URLSearchParams(searchString);
-    if (url) p.set('page', url);
-    else p.delete('page');
-    const s = p.toString();
-    setLocation(`/sources${s ? `?${s}` : ''}#pages`);
-  };
+  // Inline expansion (list mode only) — purely component state.
+  const [inlineExpandedId, setInlineExpandedId] = useState<number | null>(null);
 
   const setPageNum = (n: number) => {
     const p = new URLSearchParams(searchString);
@@ -53,6 +54,14 @@ export function PagesTab() {
     else p.delete('p');
     const s = p.toString();
     setLocation(`/sources${s ? `?${s}` : ''}#pages`);
+  };
+
+  const goToDetail = (pageId: number) => {
+    setLocation(`/sources?expand=${pageId}#pages`);
+  };
+
+  const backToList = () => {
+    setLocation('/sources#pages');
   };
 
   const [showBrand, setShowBrand] = useState(true);
@@ -104,17 +113,17 @@ export function PagesTab() {
   // Only send types when the user has narrowed below the default (all 3).
   // Empty string = none — server returns zero rows.
   if (selectedTypes.length < 3) params.set('types', selectedTypes.join(','));
-  if (explicitPageNum !== null) {
-    params.set('page', explicitPageNum.toString());
-  } else if (selectedPage) {
-    // Deep-link arrived; server resolves which page contains the URL.
-    params.set('seekUrl', selectedPage);
-  }
+  if (explicitPageNum !== null) params.set('page', explicitPageNum.toString());
   params.set('pageSize', PAGE_SIZE.toString());
   const queryStr = `?${params.toString()}`;
 
-  const { data, isLoading } = useQuery<PageAnalysisResponse>({
+  // placeholderData: keepPreviousData stops the table from being torn down
+  // and replaced with a skeleton on every refetch. Without it, typing in the
+  // search box or expanding a row caused a full visual reload because the
+  // query key changed → isLoading flipped to true → the skeleton branch fired.
+  const { data, isLoading, isFetching } = useQuery<PageAnalysisResponse>({
     queryKey: [`/api/sources/pages/analysis${queryStr}`],
+    placeholderData: keepPreviousData,
   });
 
   const pages = data?.rows || [];
@@ -146,15 +155,35 @@ export function PagesTab() {
     return () => clearTimeout(id);
   }, [pageSearch]);
 
-  // Auto-scroll the deep-linked page into view when arriving via shared URL.
-  useEffect(() => {
-    if (!selectedPage || !pages.length) return;
-    const el = document.getElementById(`page-row-${encodeURIComponent(selectedPage)}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [selectedPage, pages]);
 
   function getFavicon(domain: string) {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+  }
+
+  // Detail mode — focused single-page view, decoupled from the list query.
+  // Stable across analysis runs because the page is identified by pageId,
+  // not by its position in the sorted/paginated list.
+  if (detailPageId !== null) {
+    return (
+      <PageDetailView
+        pageId={detailPageId}
+        runId={selectedRun !== 'all' ? selectedRun : undefined}
+        model={selectedModel !== 'all' ? selectedModel : undefined}
+        topicId={selectedTopic !== 'all' ? selectedTopic : undefined}
+        analysisRuns={analysisRuns}
+        topics={topics}
+        modelsConfig={modelsConfig}
+        selectedRun={selectedRun}
+        setSelectedRun={setSelectedRun}
+        selectedTopic={selectedTopic}
+        setSelectedTopic={setSelectedTopic}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
+        onBack={backToList}
+        reclassifySource={reclassifySource}
+        getFavicon={getFavicon}
+      />
+    );
   }
 
   if (isLoading) {
@@ -251,12 +280,11 @@ export function PagesTab() {
           </div>
         ) : (
           filteredPages.map((page, index) => {
-            const isExpanded = selectedPage === page.url;
-            const toggleExpand = () => setSelectedPage(isExpanded ? null : page.url);
+            const isExpanded = page.pageId != null && inlineExpandedId === page.pageId;
+            const toggleExpand = () => setInlineExpandedId(isExpanded ? null : page.pageId);
             return (
               <div
-                key={page.url}
-                id={`page-row-${encodeURIComponent(page.url)}`}
+                key={page.pageId ?? page.url}
                 className="p-3 border rounded-lg bg-white"
               >
                 <div className="cursor-pointer" onClick={toggleExpand}>
@@ -304,6 +332,16 @@ export function PagesTab() {
                           <span className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">Open page (disabled)</span>
                         );
                       })()}
+                      {page.pageId != null && (
+                        <a
+                          href={`/sources?expand=${page.pageId}#pages`}
+                          onClick={(e) => { e.preventDefault(); goToDetail(page.pageId!); }}
+                          className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+                          title="Open this page in detail view (shareable link, stable across runs)"
+                        >
+                          Permalink →
+                        </a>
+                      )}
                       <div className="flex items-center gap-2 ml-auto">
                         <span className="text-xs text-gray-400">Mark domain {page.domain} as:</span>
                         {page.sourceType !== 'brand' && (
@@ -354,13 +392,12 @@ export function PagesTab() {
               </TableRow>
             ) : (
               filteredPages.map((page, index) => {
-                const isExpanded = selectedPage === page.url;
-                const toggleExpand = () => setSelectedPage(isExpanded ? null : page.url);
+                const isExpanded = page.pageId != null && inlineExpandedId === page.pageId;
+                const toggleExpand = () => setInlineExpandedId(isExpanded ? null : page.pageId);
                 return (
                   <>
                     <TableRow
-                      key={page.url}
-                      id={`page-row-${encodeURIComponent(page.url)}`}
+                      key={page.pageId ?? page.url}
                       className="cursor-pointer hover:bg-gray-50"
                       onClick={toggleExpand}
                     >
@@ -412,6 +449,16 @@ export function PagesTab() {
                                 <span className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">Open page (disabled)</span>
                               );
                             })()}
+                            {page.pageId != null && (
+                              <a
+                                href={`/sources?expand=${page.pageId}#pages`}
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); goToDetail(page.pageId!); }}
+                                className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+                                title="Open this page in detail view (shareable link, stable across runs)"
+                              >
+                                Permalink →
+                              </a>
+                            )}
                             <div className="ml-auto flex items-center gap-2">
                               <span className="text-xs text-gray-400">Mark domain {page.domain} as:</span>
                               {page.sourceType !== 'brand' && (
@@ -545,6 +592,193 @@ function PageResponses({ url, runId, model, topicId, onFilterByRun }: { url: str
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+interface PageDetail {
+  pageId: number;
+  url: string;
+  domain: string;
+  sourceType: string;
+  citationCount: number;
+}
+
+function PageDetailView({
+  pageId,
+  runId,
+  model,
+  topicId,
+  analysisRuns,
+  topics,
+  modelsConfig,
+  selectedRun,
+  setSelectedRun,
+  selectedTopic,
+  setSelectedTopic,
+  selectedModel,
+  setSelectedModel,
+  onBack,
+  reclassifySource,
+  getFavicon,
+}: {
+  pageId: number;
+  runId?: string;
+  model?: string;
+  topicId?: string;
+  analysisRuns?: AnalysisRun[];
+  topics?: Topic[];
+  modelsConfig?: Record<string, { enabled: boolean; label?: string }>;
+  selectedRun: string;
+  setSelectedRun: (v: string) => void;
+  selectedTopic: string;
+  setSelectedTopic: (v: string) => void;
+  selectedModel: string;
+  setSelectedModel: (v: string) => void;
+  onBack: () => void;
+  reclassifySource: (domain: string, t: 'competitor' | 'neutral' | 'brand') => void;
+  getFavicon: (domain: string) => string;
+}) {
+  // The detail endpoint accepts the same run/model filters so the citation
+  // count matches what the responses panel shows. Topic filter applies on
+  // the client (server endpoint doesn't take it — citation count there is
+  // run/model only, which is fine because topic just narrows the responses
+  // we display, not the canonical "how often was this page cited" number).
+  const params = new URLSearchParams();
+  if (runId) params.set('runId', runId);
+  if (model) params.set('model', model);
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+
+  const { data: page, isLoading, error } = useQuery<PageDetail>({
+    queryKey: [`/api/sources/page/${pageId}${queryStr}`],
+  });
+
+  if (isLoading) {
+    return (
+      <div className="animate-pulse">
+        <div className="h-8 bg-gray-200 rounded w-1/3 mb-4" />
+        <div className="h-32 bg-gray-200 rounded" />
+      </div>
+    );
+  }
+
+  if (error || !page) {
+    return (
+      <div className="space-y-4">
+        <button onClick={onBack} className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+          <ChevronLeft className="h-4 w-4" /> Back to all pages
+        </button>
+        <div className="bg-white border rounded-lg p-6">
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">Page not found</h1>
+          <p className="text-sm text-gray-600">
+            This page id (<code>{pageId}</code>) doesn't exist or its domain is on the source blacklist.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const safeUrl = safeHttpHref(page.url);
+
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+        <ChevronLeft className="h-4 w-4" /> Back to all pages
+      </button>
+
+      <div className="bg-white border rounded-lg overflow-hidden">
+        <div className="p-4 border-b">
+          <div className="flex items-start gap-3 mb-3">
+            <img
+              src={getFavicon(page.domain)}
+              alt=""
+              className="w-5 h-5 mt-1 shrink-0"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+            <div className="flex-1 min-w-0">
+              <h1 className="text-lg font-semibold text-gray-900 break-all">{page.url}</h1>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-xs text-gray-500">{page.domain}</span>
+                {page.sourceType === 'brand' && (
+                  <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border-green-200">Brand</Badge>
+                )}
+                {page.sourceType === 'competitor' && (
+                  <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border-red-200">Competitor</Badge>
+                )}
+                <span className="text-xs text-gray-600">{page.citationCount} citation{page.citationCount === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {safeUrl ? (
+              <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                Open page <ExternalLink className="h-3 w-3" />
+              </a>
+            ) : (
+              <span className="text-xs text-gray-500" title="Non-http(s) URL — link disabled">Open page (disabled)</span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-gray-400">Mark domain {page.domain} as:</span>
+              {page.sourceType !== 'brand' && (
+                <button onClick={() => reclassifySource(page.domain, 'brand')} className="text-xs text-gray-400 hover:text-green-600 flex items-center gap-1">
+                  <ArrowRightLeft className="h-3 w-3" />Brand
+                </button>
+              )}
+              {page.sourceType !== 'competitor' && (
+                <button onClick={() => reclassifySource(page.domain, 'competitor')} className="text-xs text-gray-400 hover:text-red-600 flex items-center gap-1">
+                  <ArrowRightLeft className="h-3 w-3" />Competitor
+                </button>
+              )}
+              {page.sourceType !== 'neutral' && (
+                <button onClick={() => reclassifySource(page.domain, 'neutral')} className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1">
+                  <ArrowRightLeft className="h-3 w-3" />Neutral
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-b bg-gray-50 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-gray-700">Filter responses:</span>
+          <Select value={selectedRun} onValueChange={setSelectedRun}>
+            <SelectTrigger className="w-48 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Runs</SelectItem>
+              {analysisRuns?.map(run => (
+                <SelectItem key={run.id} value={run.id.toString()}>
+                  {new Date(run.startedAt).toLocaleDateString()} {new Date(run.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+            <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Topics</SelectItem>
+              {topics?.map(t => (
+                <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Models</SelectItem>
+              {modelsConfig && Object.entries(modelsConfig).map(([key, cfg]) => (
+                <SelectItem key={key} value={key}>{cfg.label || key}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <PageResponses
+          url={page.url}
+          runId={runId}
+          model={model}
+          topicId={topicId}
+          onFilterByRun={(id) => setSelectedRun(id.toString())}
+        />
+      </div>
     </div>
   );
 }

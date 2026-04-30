@@ -43,9 +43,9 @@ export default function SourcesPage() {
   const searchString = useSearch();
   const urlSourceIdRaw = new URLSearchParams(searchString).get('sourceId');
   const urlSourceId = urlSourceIdRaw ? parseInt(urlSourceIdRaw) : null;
-  // ?page=... in the query string means a deep-link to a specific page detail —
-  // force the "By Page" tab even if the user shared the URL without #pages.
-  const hasPageDeepLink = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('page');
+  // ?expand=<id> means a deep-link to a specific page detail — force the
+  // "By Page" tab even if the user shared the URL without #pages.
+  const hasPageDeepLink = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('expand');
   const hashTab = typeof window !== 'undefined' && SOURCE_TABS.includes(window.location.hash.slice(1) as any)
     ? window.location.hash.slice(1)
     : null;
@@ -57,9 +57,13 @@ export default function SourcesPage() {
     setActiveTab(tab);
     if (typeof window !== 'undefined') window.location.hash = tab;
   };
-  const showPageDetail = (url: string) => {
-    setLocation(`/sources?page=${encodeURIComponent(url)}`);
-    handleTabChange('pages');
+  const showPageDetail = (pageId: number | null, _url: string) => {
+    // Always uses pageId — the legacy ?page=URL form is gone. URLs without
+    // a pageId (shouldn't happen post-backfill) just don't get a deep-link.
+    if (pageId != null) {
+      setLocation(`/sources?expand=${pageId}`);
+      handleTabChange('pages');
+    }
   };
   const [categoryFilter, setCategoryFilter] = useState<CategoryType>('all');
   const [showBrand, setShowBrand] = useState(true);
@@ -696,7 +700,7 @@ function DomainResponses({ domain, runId, model, topicId, onFilterByRun }: { dom
   );
 }
 
-function DomainPages({ urls, domain, onShowPageDetail }: { urls: string[]; domain: string; onShowPageDetail: (url: string) => void }) {
+function DomainPages({ urls, domain, onShowPageDetail }: { urls: { url: string; pageId: number | null }[]; domain: string; onShowPageDetail: (pageId: number | null, url: string) => void }) {
   if (!urls || urls.length === 0) {
     return <div className="p-4 text-sm text-gray-500">No pages found for this domain.</div>;
   }
@@ -704,8 +708,10 @@ function DomainPages({ urls, domain, onShowPageDetail }: { urls: string[]; domai
   return (
     <div className="p-4 space-y-1 max-h-96 overflow-y-auto">
       <p className="text-xs text-gray-500 mb-2">{urls.length} page{urls.length !== 1 ? 's' : ''} from {domain}</p>
-      {urls.map((url, i) => {
+      {urls.map((entry, i) => {
+        const { url, pageId } = entry;
         const safeUrl = safeHttpHref(url);
+        const detailHref = pageId != null ? `/sources?expand=${pageId}#pages` : null;
         return (
           <div key={i} className="flex items-center gap-2 py-1">
             <span className="text-xs text-gray-400 w-6">{i + 1}.</span>
@@ -717,16 +723,18 @@ function DomainPages({ urls, domain, onShowPageDetail }: { urls: string[]; domai
               <span className="text-sm text-gray-500 break-all flex-1 min-w-0" title="Non-http(s) URL — link disabled">{url}</span>
             )}
             <ExternalLink className="w-3 h-3 text-gray-400 shrink-0" />
-            {/* Plain href so right-click → "Copy link" produces a shareable URL,
-                click handler intercepts to do an SPA-style navigation. */}
-            <a
-              href={`/sources?page=${encodeURIComponent(url)}#pages`}
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onShowPageDetail(url); }}
-              className="text-xs text-blue-600 hover:text-blue-800 shrink-0 whitespace-nowrap ml-2"
-              title="Open page detail (shareable link)"
-            >
-              Show detail →
-            </a>
+            {detailHref && (
+              /* Plain href so right-click → "Copy link" produces a shareable URL,
+                 click handler intercepts to do an SPA-style navigation. */
+              <a
+                href={detailHref}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onShowPageDetail(pageId, url); }}
+                className="text-xs text-blue-600 hover:text-blue-800 shrink-0 whitespace-nowrap ml-2"
+                title="Open page detail (shareable link)"
+              >
+                Show detail →
+              </a>
+            )}
           </div>
         );
       })}

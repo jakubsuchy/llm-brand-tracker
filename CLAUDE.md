@@ -40,7 +40,8 @@ server/routes/users.ts      # User CRUD + API key regeneration
 server/routes/metrics.ts    # Dashboard metrics (visibility, trends, by-model, counts)
 server/routes/topics.ts     # Topics + prompts + topic analysis
 server/routes/competitors.ts # Competitor CRUD, merge, analysis, blocking
-server/routes/sources.ts    # Source analysis + reclassification
+server/routes/sources.ts    # Source (domain-level) analysis + reclassification
+server/routes/pages.ts      # Source Pages (per-URL view) — list, detail, citing responses
 server/routes/watched-urls.ts # Source Watchlist CRUD + new-citations polling
 server/routes/responses.ts  # Responses, prompts list, per-prompt analytics, data clear
 server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progress, export
@@ -73,7 +74,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (75 total)
+## API Routes (76 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -100,10 +101,13 @@ COMPETITORS (7) server/routes/competitors.ts
             /api/competitors/merge-suggestions, /api/competitors/merge-history
   POST      /api/competitors/merge, /api/competitors/unmerge, /api/competitors/block
 
-SOURCES (7)     server/routes/sources.ts
-  GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses,
-            /api/sources/pages/analysis, /api/sources/page/responses
+SOURCES (5)     server/routes/sources.ts
+  GET       /api/sources, /api/sources/analysis, /api/sources/:domain/responses
   POST      /api/sources/reclassify, /api/sources/extract-sitemap
+
+PAGES (3)       server/routes/pages.ts
+  GET       /api/sources/pages/analysis, /api/sources/page/:pageId,
+            /api/sources/page/responses
 
 WATCHED URLS (6) server/routes/watched-urls.ts
   GET       /api/watched-urls, /api/watched-urls/new-citations,
