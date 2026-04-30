@@ -19,6 +19,10 @@ const APIFY_ACTOR_ID = 'jakubsuchy~llm-prompt-response';
 const APIFY_API_BASE = 'https://api.apify.com/v2';
 const POLL_INTERVAL_MS = 5000;
 const POLL_TIMEOUT_MS = 300000;
+// Override the actor's compiled defaultRunOptions on every API-started run,
+// so the cap doesn't drift if the actor build changes.
+const APIFY_RUN_TIMEOUT_SECS = 120;
+const APIFY_RUN_MEMORY_MB = 4096;
 
 function getBrowserActorUrl(): string {
   return process.env.BROWSER_ACTOR_URL || 'http://browser-actor:8888';
@@ -84,8 +88,14 @@ async function askBrowserLocal(question: string, model: BrowserModel): Promise<B
 async function askBrowserCloud(question: string, model: BrowserModel): Promise<BrowserScraperResult> {
   const token = process.env.APIFY_TOKEN!;
 
-  // Start a run
-  const startRes = await fetch(`${APIFY_API_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${token}`, {
+  // Start a run. timeout + memory are sent on every call so we don't rely on
+  // the actor's compiled defaultRunOptions (which the Console UI defaults
+  // panel doesn't actually control for API-started runs).
+  const startUrl = `${APIFY_API_BASE}/acts/${APIFY_ACTOR_ID}/runs`
+    + `?token=${token}`
+    + `&timeout=${APIFY_RUN_TIMEOUT_SECS}`
+    + `&memory=${APIFY_RUN_MEMORY_MB}`;
+  const startRes = await fetch(startUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildRequestBody(question, model)),
