@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, real, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, real, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -190,6 +190,59 @@ export const userRoles = pgTable("user_roles", {
   roleId: integer("role_id").references(() => roles.id).notNull(),
 });
 
+// Persistent recommendations keyed by a stable fingerprint that survives
+// across runs. The latest run's snapshot is denormalized onto this row for
+// fast list queries; per-run history lives in `recommendationOccurrences`.
+// State transitions are user-only — the detector pipeline never touches
+// `state`. UI hints surface mismatch between user state and latest firing.
+export const recommendations = pgTable("recommendations", {
+  id: serial("id").primaryKey(),
+  fingerprint: text("fingerprint").notNull().unique(),
+  // Bump when the fingerprint hashing logic changes. Old fingerprints orphan
+  // (no longer match any new ones) — fine, recommendations age out.
+  fingerprintVersion: integer("fingerprint_version").notNull().default(1),
+  detectorKey: text("detector_key").notNull(),                 // 'dead_topic', ...
+  severity: text("severity").notNull(),                        // 'red' | 'yellow' | 'info'
+  title: text("title").notNull(),
+  narrative: jsonb("narrative").notNull().default({}),               // structured: { analysis, metrics?, groups?, suggestedAction }
+  evidenceJson: jsonb("evidence_json").notNull(),              // {numbers: {...}, ...}
+  relatedEntities: jsonb("related_entities").notNull(),        // {topicId?, competitorId?, ...}
+  impactScore: real("impact_score").notNull(),
+  state: text("state").notNull().default('open'),              // open | dismissed | actioned | resolved
+  stateChangedBy: integer("state_changed_by").references(() => users.id),
+  stateChangedAt: timestamp("state_changed_at"),
+  // Snapshot of the latest complete run at the moment the user changed
+  // state. Anchors the "is there NEW evidence since the user's decision?"
+  // check that drives the UI hint. NULL when state was never user-changed
+  // (system-default 'open') — `firstSeenRunId` is the implicit anchor then.
+  stateChangedAtRunId: integer("state_changed_at_run_id").references(() => analysisRuns.id),
+  firstSeenRunId: integer("first_seen_run_id").references(() => analysisRuns.id).notNull(),
+  lastSeenRunId: integer("last_seen_run_id").references(() => analysisRuns.id).notNull(),
+  totalOccurrences: integer("total_occurrences").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  stateLastSeenIdx: index("recommendations_state_last_seen_idx").on(t.state, t.lastSeenRunId),
+  severityImpactIdx: index("recommendations_severity_impact_idx").on(t.severity, t.impactScore),
+  detectorKeyIdx: index("recommendations_detector_key_idx").on(t.detectorKey),
+}));
+
+export const recommendationOccurrences = pgTable("recommendation_occurrences", {
+  id: serial("id").primaryKey(),
+  recommendationId: integer("recommendation_id").references(() => recommendations.id, { onDelete: 'cascade' }).notNull(),
+  analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id).notNull(),
+  severity: text("severity").notNull(),
+  evidenceJson: jsonb("evidence_json").notNull(),
+  narrative: jsonb("narrative").notNull().default({}),
+  impactScore: real("impact_score").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // One row per (recommendation, run) — re-running detectors for the same
+  // run upserts cleanly via ON CONFLICT against this unique index.
+  recRunUq: uniqueIndex("recommendation_occurrences_rec_run_uq").on(t.recommendationId, t.analysisRunId),
+  runIdx: index("recommendation_occurrences_run_idx").on(t.analysisRunId),
+}));
+
 export const jobQueue = pgTable("job_queue", {
   id: serial("id").primaryKey(),
   analysisRunId: integer("analysis_run_id").references(() => analysisRuns.id).notNull(),
@@ -329,6 +382,42 @@ export type UserWithRoles = User & { roles: string[] };
 
 export type WatchedUrl = typeof watchedUrls.$inferSelect;
 export type InsertWatchedUrl = z.infer<typeof insertWatchedUrlSchema>;
+
+export type RecommendationState = 'open' | 'dismissed' | 'actioned' | 'resolved';
+export type RecommendationSeverity = 'red' | 'yellow' | 'info';
+
+// Structured narrative — one shape per recommendation, rendered as proper
+// sections in the UI rather than a markdown blob. Detectors fill this in
+// directly so APIs and the UI both consume the same structured data.
+export type RecommendationMetric = { label: string; value: string };
+export type RecommendationGroup = { label: string; items: RecommendationMetric[] };
+export type RecommendationNarrative = {
+  // 1–2 sentence prose summarizing what's happening.
+  analysis: string;
+  // Top-level metric grid. Use for plain key/value facts.
+  metrics?: RecommendationMetric[];
+  // Sub-grouped tables (per-model rates, top competitors, etc.). Each group
+  // renders with its own header and a 2-column key/value grid.
+  groups?: RecommendationGroup[];
+  // 1–2 sentence prose headline for what to do. Shown prominently.
+  suggestedAction: string;
+  // Optional concrete numbered steps below the headline. Use when a single
+  // action isn't enough (e.g., dead topics need both hub-page content AND
+  // earned-media placement AND community presence — these compound).
+  suggestedSteps?: string[];
+};
+
+export type Recommendation = typeof recommendations.$inferSelect;
+export type RecommendationOccurrence = typeof recommendationOccurrences.$inferSelect;
+
+// What the read-time API returns: the latest snapshot plus the UI hint
+// computed against the latest complete run.
+export type RecommendationHint = 'resolved' | 'back' | null;
+export type RecommendationWithHint = Recommendation & {
+  hint: RecommendationHint;
+  // True iff last_seen_run_id equals the latest complete run's id.
+  firingInLatest: boolean;
+};
 
 export type WatchedUrlCitation = {
   responseId: number;

@@ -48,6 +48,7 @@ server/routes/analysis.ts   # Brand analysis, prompt gen, run execution, progres
 server/routes/settings.ts   # Unified GET/PUT /api/settings/:key + browser-status
 server/routes/docs.ts       # Swagger UI at /api-docs (authenticated)
 server/routes/export.ts     # Data export: README.md + CSVs streamed as zip
+server/routes/recommendations.ts # Recommendations CRUD + state mutations
 server/mcp.ts               # MCP server with 20 tools for Claude AI integration
 server/services/analyzer.ts # BrandAnalyzer class — job queue worker loop
 server/services/auth.ts     # PassportJS config, user CRUD, API key generation
@@ -57,6 +58,12 @@ server/services/openai.ts   # OpenAI-specific LLM calls: prompt generation, comp
 server/services/openai-api.ts       # OpenAI Responses API + web_search — "openai-api" model
 server/services/anthropic-api.ts    # Anthropic Messages API + web_search — "anthropic-api" model
 server/services/browser-actor.ts    # Browser actor client (local + Apify Cloud)
+server/services/recommendations/    # Deterministic recommendation pipeline:
+                                    #   index.ts (orchestrator runDetectors)
+                                    #   context.ts (RunContext loader)
+                                    #   fingerprint.ts (stable hash + slug)
+                                    #   types.ts, templates/shared.ts
+                                    #   detectors/ (10 detectors, co-located template + detect)
 server/config.ts            # Public API paths config
 shared/models.ts            # Canonical model metadata (labels, brand colors, icons, descriptions)
 server/database-storage.ts  # All DB queries (implements IStorage interface)
@@ -65,6 +72,7 @@ client/src/pages/           # Page components (dashboard, competitors, sources, 
 client/src/components/      # Shared UI components (metrics, charts, topic analysis, etc.)
 client/src/components/settings/ # Settings page card components (extracted from settings.tsx)
 client/src/components/sources/  # Sources page tab components (e.g. watchlist-tab.tsx)
+client/src/components/recommendations/  # Recommendations cards, hint banner, state menu, occurrences timeline
 client/src/components/model-logos.tsx  # Inline SVG brand logos (OpenAiLogo, ClaudeLogo, etc.) + ModelLogo dispatcher
 client/src/components/prompt-ranking-table.tsx  # Shared per-prompt list (used on /prompts and dashboard widget)
 client/src/hooks/use-auth.ts # Auth context + hook (AuthProvider, useAuth)
@@ -74,7 +82,7 @@ n8n-nodes-traceaio/         # n8n community node package (standalone npm package
 browser-actor/              # Apify actor for browser-based prompt execution (gitignored)
 ```
 
-## API Routes (76 total)
+## API Routes (84 total)
 
 ```
 AUTH (12)        server/routes/auth.ts
@@ -135,6 +143,14 @@ ANALYSIS (15)   server/routes/analysis.ts
 SETTINGS (3)    server/routes/settings.ts
   GET       /api/settings/browser-status, /api/settings/:key
   PUT       /api/settings/:key
+
+RECOMMENDATIONS (8) server/routes/recommendations.ts
+  GET       /api/recommendations, /api/recommendations/counts,
+            /api/recommendations/:id, /api/recommendations/detectors,
+            /api/recommendations/by-detector
+  POST      /api/recommendations/recompute
+  PUT       /api/recommendations/:id/state
+  DELETE    /api/recommendations
 ```
 
 ## Database Schema

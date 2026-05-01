@@ -116,6 +116,15 @@ export async function launchAnalysis(brandUrl?: string, savedPrompts?: any[]) {
   analysisWorker.runFullAnalysis(useExisting, savedPrompts || undefined).then(async () => {
     await storage.completeAnalysisRun(analysisRun.id, 'complete');
     console.log(`[DEBUG] Analysis run #${analysisRun.id} completed`);
+    // Compute recommendations BEFORE the webhook fires so any digest payload
+    // can reflect the latest detector output. Failures are isolated — a
+    // detector bug must not block the webhook or leave the run in 'running'.
+    try {
+      const { runDetectors } = await import('../services/recommendations');
+      await runDetectors(analysisRun.id);
+    } catch (err) {
+      console.error(`[recommendations] runDetectors failed for run #${analysisRun.id}:`, err);
+    }
     const { fireWebhook } = await import('../services/webhook');
     fireWebhook(analysisRun.id, 'complete');
   }).catch(async (error) => {

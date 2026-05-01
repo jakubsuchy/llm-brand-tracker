@@ -11,13 +11,15 @@ import {
   MergeSuggestion, MergeHistoryEntry,
   JobQueueItem, InsertJobQueueItem, JobQueueProgress,
   WatchedUrl, InsertWatchedUrl, WatchedUrlWithCitations, WatchedUrlCitation,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, sourceUniqueUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls
+  Recommendation, RecommendationOccurrence, RecommendationState,
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, sourceUniqueUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls,
+  recommendations, recommendationOccurrences,
 } from "@shared/schema";
 import { normalizeUrl, stripTrackingParams, parseHttpUrl } from "./services/analysis";
 import { extractUrlsFromText } from "./services/scraper";
 import { db } from "./db";
 import { eq, desc, count, sql, isNull, and, gte, lte, inArray } from "drizzle-orm";
-import { IStorage } from "./storage";
+import { IStorage, RecommendationDetectorOutput } from "./storage";
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -1067,6 +1069,10 @@ export class DatabaseStorage implements IStorage {
     await db.delete(analytics);
     await db.delete(apiUsage);
     await db.delete(apifyUsage);
+    // recommendation_occurrences cascades on recommendation FK delete; both
+    // tables FK to analysis_runs, so clear them before dropping runs.
+    await db.delete(recommendationOccurrences);
+    await db.delete(recommendations);
     await db.delete(analysisRuns);
     console.log(`[${new Date().toISOString()}] DatabaseStorage: Results cleared, prompts and topics preserved`);
   }
@@ -1254,8 +1260,160 @@ export class DatabaseStorage implements IStorage {
     await db.delete(analytics);
     await db.delete(apiUsage);
     await db.delete(apifyUsage);
+    await db.delete(recommendationOccurrences);
+    await db.delete(recommendations);
     await db.delete(analysisRuns);
     await db.delete(topics);
     console.log(`[${new Date().toISOString()}] DatabaseStorage: All analysis data cleared`);
+  }
+
+  // ─── Recommendations ──────────────────────────────────────────────
+
+  async upsertRecommendation(
+    input: RecommendationDetectorOutput,
+    runId: number,
+  ): Promise<{ id: number; isNew: boolean }> {
+    // ON CONFLICT (fingerprint) DO UPDATE — refreshes the latest snapshot but
+    // preserves user-controlled fields (state, state_changed_*, first_seen,
+    // total_occurrences increments instead of overwriting).
+    const [row] = await db
+      .insert(recommendations)
+      .values({
+        fingerprint: input.fingerprint,
+        fingerprintVersion: input.fingerprintVersion,
+        detectorKey: input.detectorKey,
+        severity: input.severity,
+        title: input.title,
+        narrative: input.narrative,
+        evidenceJson: input.evidenceJson,
+        relatedEntities: input.relatedEntities,
+        impactScore: input.impactScore,
+        firstSeenRunId: runId,
+        lastSeenRunId: runId,
+        totalOccurrences: 1,
+      })
+      .onConflictDoUpdate({
+        target: recommendations.fingerprint,
+        set: {
+          severity: input.severity,
+          title: input.title,
+          narrative: input.narrative,
+          evidenceJson: input.evidenceJson,
+          relatedEntities: input.relatedEntities,
+          impactScore: input.impactScore,
+          lastSeenRunId: runId,
+          totalOccurrences: sql`${recommendations.totalOccurrences} + 1`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: recommendations.id, firstSeenRunId: recommendations.firstSeenRunId });
+    // isNew is true iff first_seen_run_id == runId AND total_occurrences == 1
+    // We can derive isNew from whether firstSeenRunId equals the current runId
+    // — only true for fresh inserts.
+    const isNew = row.firstSeenRunId === runId;
+    // Note: when re-running detectors for the same run, isNew may be false
+    // even on first detection; the orchestrator avoids that by checking the
+    // occurrence row before incrementing.
+    return { id: row.id, isNew };
+  }
+
+  async upsertRecommendationOccurrence(input: {
+    recommendationId: number;
+    analysisRunId: number;
+    severity: string;
+    narrative: any;
+    evidenceJson: any;
+    impactScore: number;
+  }): Promise<void> {
+    await db
+      .insert(recommendationOccurrences)
+      .values(input)
+      .onConflictDoUpdate({
+        target: [recommendationOccurrences.recommendationId, recommendationOccurrences.analysisRunId],
+        set: {
+          severity: input.severity,
+          narrative: input.narrative,
+          evidenceJson: input.evidenceJson,
+          impactScore: input.impactScore,
+        },
+      });
+  }
+
+  async getRecommendations(opts: {
+    state?: RecommendationState;
+    severity?: 'red' | 'yellow' | 'info';
+    detectorKey?: string;
+  } = {}): Promise<Recommendation[]> {
+    const conds = [];
+    if (opts.state) conds.push(eq(recommendations.state, opts.state));
+    if (opts.severity) conds.push(eq(recommendations.severity, opts.severity));
+    if (opts.detectorKey) conds.push(eq(recommendations.detectorKey, opts.detectorKey));
+    const q = db.select().from(recommendations);
+    const results = conds.length > 0 ? await q.where(and(...conds)) : await q;
+    // Order: severity (red > yellow > info), then impact_score desc.
+    const sevRank: Record<string, number> = { red: 0, yellow: 1, info: 2 };
+    return results.sort((a, b) => {
+      const s = (sevRank[a.severity] ?? 99) - (sevRank[b.severity] ?? 99);
+      if (s !== 0) return s;
+      return b.impactScore - a.impactScore;
+    });
+  }
+
+  async getRecommendationById(id: number): Promise<Recommendation | undefined> {
+    const [rec] = await db.select().from(recommendations).where(eq(recommendations.id, id));
+    return rec;
+  }
+
+  async getRecommendationOccurrences(recommendationId: number): Promise<RecommendationOccurrence[]> {
+    return await db
+      .select()
+      .from(recommendationOccurrences)
+      .where(eq(recommendationOccurrences.recommendationId, recommendationId))
+      .orderBy(desc(recommendationOccurrences.createdAt));
+  }
+
+  async updateRecommendationState(
+    id: number,
+    state: RecommendationState,
+    userId: number,
+    latestRunId: number | null,
+  ): Promise<void> {
+    await db
+      .update(recommendations)
+      .set({
+        state,
+        stateChangedBy: userId,
+        stateChangedAt: new Date(),
+        // Anchors hint computation against the user's decision point. See
+        // computeHint for the read-side logic.
+        stateChangedAtRunId: latestRunId,
+        updatedAt: new Date(),
+      })
+      .where(eq(recommendations.id, id));
+  }
+
+  async getRecommendationCounts(): Promise<{
+    open: number;
+    actioned: number;
+    resolved: number;
+    dismissed: number;
+  }> {
+    const rows = await db
+      .select({ state: recommendations.state, n: count() })
+      .from(recommendations)
+      .groupBy(recommendations.state);
+    const out = { open: 0, actioned: 0, resolved: 0, dismissed: 0 };
+    for (const r of rows) {
+      if (r.state in out) (out as any)[r.state] = Number(r.n);
+    }
+    return out;
+  }
+
+  async clearAllRecommendations(): Promise<{ deleted: number }> {
+    // ON DELETE CASCADE on recommendation_occurrences.recommendation_id
+    // takes care of history. Be explicit anyway so the order is obvious.
+    await db.delete(recommendationOccurrences);
+    const result = await db.delete(recommendations).returning({ id: recommendations.id });
+    return { deleted: result.length };
   }
 }

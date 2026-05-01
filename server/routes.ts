@@ -15,6 +15,7 @@ import { registerAnalysisRoutes } from "./routes/analysis";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerDocsRoutes } from "./routes/docs";
 import { registerExportRoutes } from "./routes/export";
+import { registerRecommendationRoutes } from "./routes/recommendations";
 
 // Re-export for scheduler
 export { launchAnalysis } from "./routes/helpers";
@@ -51,6 +52,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAnalysisRoutes(app);
   registerSettingsRoutes(app);
   registerExportRoutes(app);
+  registerRecommendationRoutes(app);
 
   // --- Startup: crash recovery + scheduler ---
   try {

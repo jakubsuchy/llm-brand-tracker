@@ -33,7 +33,25 @@ import {
   type WatchedUrl,
   type InsertWatchedUrl,
   type WatchedUrlWithCitations,
+  type Recommendation,
+  type RecommendationOccurrence,
+  type RecommendationState,
 } from "@shared/schema";
+
+// Detector-side write payload — tighter than InsertRecommendation because
+// state/timestamps/run pointers are managed by the orchestrator, not the
+// detector.
+export type RecommendationDetectorOutput = {
+  fingerprint: string;
+  fingerprintVersion: number;
+  detectorKey: string;
+  severity: 'red' | 'yellow' | 'info';
+  title: string;
+  narrative: any;
+  evidenceJson: any;
+  relatedEntities: any;
+  impactScore: number;
+};
 
 export interface IStorage {
   // Topics
@@ -140,6 +158,35 @@ export interface IStorage {
   clearAllCompetitors(): Promise<void>;
   clearResultsOnly(): Promise<void>;
   clearAllAnalysisData(): Promise<void>;
+
+  // Recommendations
+  upsertRecommendation(input: RecommendationDetectorOutput, runId: number): Promise<{ id: number; isNew: boolean }>;
+  upsertRecommendationOccurrence(input: {
+    recommendationId: number;
+    analysisRunId: number;
+    severity: string;
+    narrative: any;
+    evidenceJson: any;
+    impactScore: number;
+  }): Promise<void>;
+  getRecommendations(opts?: {
+    state?: RecommendationState;
+    severity?: 'red' | 'yellow' | 'info';
+    detectorKey?: string;
+  }): Promise<Recommendation[]>;
+  getRecommendationById(id: number): Promise<Recommendation | undefined>;
+  getRecommendationOccurrences(recommendationId: number): Promise<RecommendationOccurrence[]>;
+  // `latestRunId` is the run id we anchor the user's decision to, so future
+  // hint computations can ask "has anything fired SINCE this point?". Pass
+  // null when no complete run exists yet (won't happen in normal flow).
+  updateRecommendationState(id: number, state: RecommendationState, userId: number, latestRunId: number | null): Promise<void>;
+  getRecommendationCounts(): Promise<{
+    open: number;
+    actioned: number;
+    resolved: number;
+    dismissed: number;
+  }>;
+  clearAllRecommendations(): Promise<{ deleted: number }>;
 }
 
 export class MemStorage implements IStorage {
@@ -662,6 +709,20 @@ export class MemStorage implements IStorage {
   async deleteWatchedUrl(_id: number): Promise<void> {}
   async getWatchedUrlsWithCitations(): Promise<WatchedUrlWithCitations[]> { return []; }
   async getWatchedUrlCitations(): Promise<WatchedUrlWithCitations | undefined> { return undefined; }
+
+  // Recommendations stubs (MemStorage does not persist them — use DatabaseStorage)
+  async upsertRecommendation(_input: RecommendationDetectorOutput, _runId: number): Promise<{ id: number; isNew: boolean }> {
+    return { id: 1, isNew: true };
+  }
+  async upsertRecommendationOccurrence(_input: any): Promise<void> {}
+  async getRecommendations(_opts?: any): Promise<Recommendation[]> { return []; }
+  async getRecommendationById(_id: number): Promise<Recommendation | undefined> { return undefined; }
+  async getRecommendationOccurrences(_id: number): Promise<RecommendationOccurrence[]> { return []; }
+  async updateRecommendationState(_id: number, _state: RecommendationState, _userId: number, _latestRunId: number | null): Promise<void> {}
+  async getRecommendationCounts(): Promise<{ open: number; actioned: number; resolved: number; dismissed: number }> {
+    return { open: 0, actioned: 0, resolved: 0, dismissed: 0 };
+  }
+  async clearAllRecommendations(): Promise<{ deleted: number }> { return { deleted: 0 }; }
 }
 
 import { DatabaseStorage } from './database-storage';

@@ -21,6 +21,7 @@ import {
   Archive,
   ListChecks,
   BarChart3,
+  Lightbulb,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -66,13 +67,13 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigationItems = [
     ...(isAdminOrAnalyst ? [{ id: "prompt-generator", label: "Prompt Generator", icon: Zap, path: "/prompt-generator" }] : []),
     { id: "dashboard", label: "Dashboard", icon: Home, path: "/" },
+    { id: "recommendations", label: "Recommendations", icon: Lightbulb, path: "/recommendations" },
     { id: "prompts", label: "Prompts", icon: ListChecks, path: "/prompts" },
     { id: "responses", label: "Responses", icon: MessageSquare, path: "/responses" },
     { id: "competitors", label: "Competitors", icon: Users, path: "/competitors" },
     { id: "compare", label: "Compare", icon: Scale, path: "/compare" },
     { id: "sources", label: "Sources", icon: ExternalLink, path: "/sources" },
     ...(isAdminOrAnalyst ? [{ id: "analysis", label: "Analysis Progress", icon: Activity, path: "/analysis-progress" }] : []),
-    ...(isAdminOrAnalyst ? [{ id: "histograms", label: "Histograms", icon: BarChart3, path: "/histograms" }] : []),
     ...(isAdmin ? [{ id: "settings", label: "Settings", icon: Settings, path: "/settings" }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Users', icon: Shield, path: '/users' }] : []),
   ];
