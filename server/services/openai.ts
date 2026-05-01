@@ -27,8 +27,12 @@ export async function extractCompetitorsFromResponse(
   const brandContext = brandName
     ? `\nOUR BRAND: "${brandName}" — do NOT include this brand or its variations as a competitor.`
     : '';
+  // Naming reference, NOT a candidate menu. The previous wording ("these are
+  // confirmed competitors") caused the LLM to treat the list as "extract any
+  // of these that are topically relevant" — producing 70+ hallucinated names
+  // for prompts where only 2 competitors were actually mentioned in text.
   const competitorContext = knownCompetitors && knownCompetitors.length > 0
-    ? `\nKNOWN COMPETITORS: ${knownCompetitors.join(', ')} — these are confirmed competitors.`
+    ? `\nNAMING REFERENCE — use this list ONLY to canonicalize spelling/casing of names that literally appear in the response text. Do NOT include any name from this list unless it appears in the response: ${knownCompetitors.join(', ')}.`
     : '';
 
   const analysis = await chatCompletionJSON<{ competitors: string[] }>({

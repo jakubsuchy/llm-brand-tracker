@@ -291,12 +291,31 @@ export async function analyzePromptResponse(
   // Phase 2: LLM extracts any NEW competitors (still receives known list for naming consistency)
   const llmFound = await extractCompetitors(responseText, brandName, knownCompetitors);
 
-  // Merge: regex matches + LLM finds, deduplicated case-insensitively
+  // Phase 3: post-validate every LLM pick by re-running findKnownCompetitors
+  // against just that name. Drops anything the LLM produced that doesn't
+  // actually appear in the response text — defends against hallucinations
+  // even when the prompt context primes the model to over-extract from the
+  // known-competitors list. Regex matches skip this — they're proven by
+  // construction.
+  const llmFoundValidated: string[] = [];
+  const llmFoundDropped: string[] = [];
+  for (const name of llmFound) {
+    if (findKnownCompetitors(responseText, [name]).length > 0) {
+      llmFoundValidated.push(name);
+    } else {
+      llmFoundDropped.push(name);
+    }
+  }
+  if (llmFoundDropped.length > 0) {
+    console.log(`[analyzePromptResponse] ${model} dropped ${llmFoundDropped.length} LLM-hallucinated competitor(s) not in text: ${llmFoundDropped.slice(0, 10).join(', ')}${llmFoundDropped.length > 10 ? `, +${llmFoundDropped.length - 10} more` : ''}`);
+  }
+
+  // Merge: regex matches + validated LLM finds, deduplicated case-insensitively
   const seen = new Set<string>();
   const competitors: string[] = [];
   const competitorSources = new Map<string, 'regex' | 'llm'>();
   const regexSet = new Set(regexMatched.map(n => n.toLowerCase()));
-  for (const name of [...regexMatched, ...llmFound]) {
+  for (const name of [...regexMatched, ...llmFoundValidated]) {
     const key = name.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);

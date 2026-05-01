@@ -358,8 +358,15 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(prompts, eq(responses.promptId, prompts.id))
       .leftJoin(topics, eq(prompts.topicId, topics.id));
 
+    // Deterministic order (newest first) so callers that slice the result
+    // (e.g. /api/responses with limit) keep the most recent rows. Without
+    // ordering the DB returned rows in arbitrary order — when total exceeded
+    // the slice cap, responses for newer prompts could silently drop out
+    // (observed: prompt 206 had 4 responses but only 1 reached the UI).
     if (runId) {
-      const results = await query.where(eq(responses.analysisRunId, runId));
+      const results = await query
+        .where(eq(responses.analysisRunId, runId))
+        .orderBy(desc(responses.createdAt), desc(responses.id));
       return results.map(result => ({
         ...result.responses,
         prompt: { ...result.prompts!, topic: result.topics }
@@ -373,7 +380,8 @@ export class DatabaseStorage implements IStorage {
 
     const results = await query
       .innerJoin(analysisRuns, eq(responses.analysisRunId, analysisRuns.id))
-      .where(and(...conditions));
+      .where(and(...conditions))
+      .orderBy(desc(responses.createdAt), desc(responses.id));
 
     return results.map(result => ({
       ...result.responses,

@@ -352,17 +352,20 @@ function ResponsesPanel({ promptId, runId }: { promptId: number; runId?: string 
   const [open, setOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const params = new URLSearchParams();
+  // Server-side promptId filter — was previously fetching limit=1000 and
+  // filtering client-side, which silently dropped responses when total
+  // responses exceeded 1000 (the slice in /api/responses kept an arbitrary
+  // 1000, sometimes excluding rows for the requested prompt).
+  params.set('promptId', promptId.toString());
   params.set('limit', '1000');
   params.set('full', 'true');
   if (runId) params.set('runId', runId);
   const queryUrl = `/api/responses?${params.toString()}`;
 
-  const { data: all, isLoading } = useQuery<(ResponseRow & { prompt: { id: number } })[]>({
+  const { data: responses = [], isLoading } = useQuery<(ResponseRow & { prompt: { id: number } })[]>({
     queryKey: [queryUrl],
     enabled: open,
   });
-
-  const responses = (all || []).filter(r => r.prompt?.id === promptId);
 
   return (
     <Card>

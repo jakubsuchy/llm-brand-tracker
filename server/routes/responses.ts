@@ -340,9 +340,11 @@ export function registerResponseRoutes(app: Express) {
   // Prompt results endpoints - supports full dataset access
   app.get("/api/responses", async (req, res) => {
     // #swagger.tags = ['Responses']
+    // #swagger.parameters['promptId'] = { in: 'query', type: 'integer', description: 'Filter to responses for a specific prompt id' }
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const promptId = req.query.promptId ? parseInt(req.query.promptId as string) : undefined;
       const model = (req.query.model || req.query.provider) as string | undefined;
       const { from, to } = parseDateRange(req);
       const useFullDataset = req.query.full === 'true' || limit > 100;
@@ -354,6 +356,11 @@ export function registerResponseRoutes(app: Express) {
         responses = await storage.getRecentResponses(limit, runId, from, to);
       }
       if (model) responses = responses.filter(r => r.model === model);
+      // promptId filter applied AFTER fetch but BEFORE the slice — otherwise
+      // a load-and-slice on a large dataset can drop matching rows for the
+      // requested prompt while keeping unrelated ones (the bug that hid 3
+      // of 4 responses for prompt 206).
+      if (promptId !== undefined) responses = responses.filter(r => r.promptId === promptId);
 
       res.json(responses.slice(0, limit));
     } catch (error) {
