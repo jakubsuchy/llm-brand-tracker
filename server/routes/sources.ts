@@ -185,6 +185,19 @@ export function registerSourceRoutes(app: Express) {
             await storage.setSetting('brandDomains', updated.join(','));
           }
         }
+        // Clear any competitor-domain binding for this domain — without
+        // this the classifier's "explicit competitor domain" check (which
+        // intentionally wins over the blocklist) re-classifies the source
+        // as a competitor on the very next request.
+        {
+          const { db: database } = await import("../db");
+          const { competitors: competitorsTable } = await import("@shared/schema");
+          const { sql: sqlOp } = await import("drizzle-orm");
+          await database
+            .update(competitorsTable)
+            .set({ domain: null })
+            .where(sqlOp`LOWER(${competitorsTable.domain}) = ${domain.toLowerCase()}`);
+        }
         res.json({ success: true, message: `${domain} classified as neutral` });
       } else if (sourceType === 'brand') {
         const domainLower = domain.toLowerCase();
@@ -211,6 +224,19 @@ export function registerSourceRoutes(app: Express) {
           if (updated.length !== subList.length) {
             await storage.setSetting('competitorSubdomains', updated.join(','));
           }
+        }
+        // Clear any competitor-domain binding for this domain — same
+        // hygiene rule as the neutral path. Without this, stale bindings
+        // linger in the DB and the analyzer's auto-stamping treats
+        // "domain currently NULL" as license to bind it again.
+        {
+          const { db: database } = await import("../db");
+          const { competitors: competitorsTable } = await import("@shared/schema");
+          const { sql: sqlOp } = await import("drizzle-orm");
+          await database
+            .update(competitorsTable)
+            .set({ domain: null })
+            .where(sqlOp`LOWER(${competitorsTable.domain}) = ${domainLower}`);
         }
         res.json({ success: true, message: `${domain} classified as brand` });
       } else {

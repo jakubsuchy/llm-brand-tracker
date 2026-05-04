@@ -418,6 +418,13 @@ export class BrandAnalyzer {
       (blocklistSetting ? blocklistSetting.split(',') : defaultBlocklist)
         .map(s => s.trim().toLowerCase()).filter(Boolean)
     );
+    // brandDomains is the user's explicit "this is the brand's domain" list
+    // (set via "Mark as Brand" in the UI). The auto-stamper below must
+    // refuse to stamp these as competitor.domain bindings.
+    const brandDomainsSetting = await storage.getSetting('brandDomains');
+    const brandDomainsSet = new Set(
+      (brandDomainsSetting || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
 
     const filteredCompetitors: string[] = [];
     for (const name of analysis.competitors) {
@@ -511,7 +518,17 @@ export class BrandAnalyzer {
         const labels = domain.toLowerCase().split('.');
         const stripped = labels.length >= 3 && KNOWN_SUBDOMAIN_PREFIXES.has(labels[0]) ? labels.slice(1) : labels;
         const domainBase = stripped[0];
-        if (domainBase) {
+        // Respect the user's explicit classifications. Without these guards,
+        // the next analysis run re-stamps competitor.domain on a domain the
+        // user just marked as "neutral" (in blocklist) or "brand" — silently
+        // reverting their decision. This was the recurring bug behind the
+        // honeycomb.io issue: reclassify-route fix alone wasn't enough.
+        const domainLower = domain.toLowerCase();
+        const strippedDomain = stripped.join('.');
+        const userClassified =
+          blocklist.has(domainLower) || blocklist.has(strippedDomain) ||
+          brandDomainsSet.has(domainLower) || brandDomainsSet.has(strippedDomain);
+        if (domainBase && !userClassified) {
           for (const comp of resolvedCompetitors) {
             if (!comp.name) continue;
             // Exact match only — substring matching here is what caused the

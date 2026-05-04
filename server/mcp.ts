@@ -76,39 +76,16 @@ function competitorPromptCounts(responses: ResponseWithPrompt[]) {
 }
 
 /**
- * Classify source domain as brand/competitor/neutral.
- *
- * Match grain is a *token* of the domain (split on `.` and `-`) — exact
- * equality, not substring. Substring matching is unsafe because brand names
- * can contain incidental letter runs that match unrelated domains: e.g.
- * "haproxy" contains "ox" as a substring, so the previous substring check
- * flagged ox.security as the brand.
- *
- * Competitor name tokens shorter than 3 chars are dropped to avoid noise
- * matches on common syllables. If a competitor's `domain` is recorded that
- * still hits via direct equality.
+ * Classify source domain as brand/competitor/neutral. Delegates to the
+ * shared classifier in routes/sources.ts so the UI's "Mark as X" actions
+ * (brandDomains, competitorBlocklist, competitorSubdomains) are honored
+ * by MCP tool responses too. Previously this function was a parallel
+ * implementation that ignored those user settings.
  */
 async function classifySources() {
-  const brandName = ((await storage.getSetting('brandName')) || '').toLowerCase();
-  const allCompetitors = (await storage.getAllCompetitorsIncludingMerged()).filter(
-    (c) => c.mergedInto !== c.id,
-  );
-  const competitorDomains = new Set<string>();
-  const competitorTokens = new Set<string>();
-  for (const c of allCompetitors) {
-    if (c.domain) competitorDomains.add(c.domain.toLowerCase());
-    for (const w of c.name.toLowerCase().split(/\s+/)) {
-      if (w.length >= 3) competitorTokens.add(w);
-    }
-  }
-  return (domain: string): string => {
-    const dl = domain.toLowerCase();
-    const tokens = dl.split(/[.\-]/).filter(Boolean);
-    if (brandName && tokens.includes(brandName)) return 'brand';
-    if (competitorDomains.has(dl)) return 'competitor';
-    if (tokens.some((t) => competitorTokens.has(t))) return 'competitor';
-    return 'neutral';
-  };
+  const { buildSourceClassifier } = await import('./routes/sources');
+  const { classifyDomain } = await buildSourceClassifier();
+  return classifyDomain;
 }
 
 /** Filter responses by optional model. */
