@@ -37,13 +37,25 @@ export function registerTopicRoutes(app: Express) {
     }
   });
 
-  // Create a topic immediately (used by Prompt Generator's "Add Custom Topic")
+  // Find-or-create a topic by name (used by Prompt Generator's "Add Custom
+  // Topic" + WriteInPrompt). Idempotent — duplicate names produced split
+  // prompt sets and confused the dashboards (e.g. one user ended up with
+  // two "Project Management" topics, prompts scattered across both, after
+  // a single "add prompt" click hit this endpoint with a stale React state
+  // missing the existing topic's id). Match is case-insensitive against
+  // non-deleted topics; soft-deleted rows are skipped so re-creating after
+  // a manual delete still works.
   app.post("/api/topics", requireRole("analyst"), async (req, res) => {
     // #swagger.tags = ['Topics']
     try {
       const name = (req.body?.name || "").toString().trim();
       const description = (req.body?.description || "").toString().trim();
       if (!name) return res.status(400).json({ error: "name is required" });
+      const nameLower = name.toLowerCase();
+      const existing = (await storage.getTopics()).find(
+        t => !t.deleted && t.name.toLowerCase() === nameLower,
+      );
+      if (existing) return res.json(existing);
       const topic = await storage.createTopic({ name, description: description || null });
       res.json(topic);
     } catch (error) {

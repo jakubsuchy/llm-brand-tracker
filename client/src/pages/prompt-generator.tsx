@@ -169,6 +169,12 @@ export default function PromptGeneratorPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/prompts'] });
       queryClient.invalidateQueries({ queryKey: ['/api/analysis/progress'] });
+      // Refetch the persisted topics so the React state picks up the real
+      // IDs that /api/save-and-analyze just assigned. Without this, going
+      // back to Step 4 and adding a custom prompt called WriteInPrompt with
+      // topic.id = undefined → POST /api/topics created a duplicate topic
+      // with the same name, splitting the prompt set across two rows.
+      queryClient.invalidateQueries({ queryKey: ['/api/topics/with-prompts'] });
       toast({
         title: "Analysis started",
         description: "New prompts saved and analysis is running",
