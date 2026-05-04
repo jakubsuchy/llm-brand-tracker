@@ -159,7 +159,49 @@ export function registerAnalysisRoutes(app: Express) {
         })
       );
 
-      res.json({ topics: topicsWithPrompts });
+      // Persist immediately so the UI never holds unsaved topics/prompts in
+      // React state. Topics are find-or-create by name (case-insensitive,
+      // non-deleted) — re-running generate reuses existing rows. Prompts
+      // are deduped by text within each topic so re-generating only adds
+      // genuinely new prompts the AI produced this time around.
+      const allTopicsBefore = await storage.getTopics();
+      const persisted: Array<{
+        id: number;
+        name: string;
+        description: string | null;
+        prompts: Array<{ id: number; text: string }>;
+      }> = [];
+      for (const t of topicsWithPrompts) {
+        const nameLower = t.name.toLowerCase();
+        let topicRow = allTopicsBefore.find(x => !x.deleted && x.name.toLowerCase() === nameLower);
+        if (!topicRow) {
+          topicRow = await storage.createTopic({ name: t.name, description: t.description || null });
+          allTopicsBefore.push(topicRow);
+        }
+        const existingPrompts = (await storage.getPromptsByTopic(topicRow.id))
+          .filter(p => !p.deleted);
+        const byText = new Map(existingPrompts.map(p => [p.text.toLowerCase().trim(), p]));
+        const persistedPrompts: Array<{ id: number; text: string }> = [];
+        for (const promptText of (t.prompts as string[])) {
+          const trimmed = (promptText || '').trim();
+          if (!trimmed) continue;
+          const existing = byText.get(trimmed.toLowerCase());
+          if (existing) {
+            persistedPrompts.push({ id: existing.id, text: existing.text });
+            continue;
+          }
+          const created = await storage.createPrompt({ text: trimmed, topicId: topicRow.id });
+          persistedPrompts.push({ id: created.id, text: created.text });
+        }
+        persisted.push({
+          id: topicRow.id,
+          name: topicRow.name,
+          description: topicRow.description,
+          prompts: persistedPrompts,
+        });
+      }
+
+      res.json({ topics: persisted });
     } catch (error) {
       console.error("Error generating prompts:", error);
       res.status(500).json({ error: "Failed to generate prompts" });
