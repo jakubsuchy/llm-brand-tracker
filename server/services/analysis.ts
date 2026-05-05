@@ -2,6 +2,7 @@
  * Generic analysis utilities — no LLM dependency.
  * Everything here works regardless of which AI provider is used.
  */
+import { getRegistrableDomain } from './domain';
 
 export interface PromptAnalysisResult {
   response: string;
@@ -25,17 +26,56 @@ export function isBrandMentioned(text: string, brandName: string): boolean {
 }
 
 /**
- * Find known competitors mentioned in text using the same regex approach as brand detection.
- * Returns the canonical names of any known competitors found.
+ * Find known competitors mentioned in text via case-insensitive regex.
+ * Returns the canonical names of any matches.
+ *
+ * Two match channels per competitor:
+ *
+ *   1. Name match — `\b<name>(?:\.[a-z]{2,})?\b` (existing behavior).
+ *      Catches "Reprise", "Reprise.com", etc.
+ *
+ *   2. Domain match — when `domain` is supplied, `<optional subdomain
+ *      labels>.<domain>` with negative lookahead/lookbehind so we don't
+ *      catch substrings of a larger domain. Catches `reprise.com`,
+ *      `docs.reprise.com`, `https://app.walnut.io/...`. Skips suspicious
+ *      domains (no label of 4+ chars) so a stray `co.uk` competitor entry
+ *      can't false-match every UK domain.
+ *
+ * `knownCompetitors` accepts plain strings (just name) or
+ * `{ name, domain? }` objects. Phase 3 validator still passes
+ * single-element string arrays — both forms supported.
  */
-export function findKnownCompetitors(text: string, knownCompetitors: string[]): string[] {
+type CompetitorMatchInput = string | { name: string; domain?: string | null };
+
+export function findKnownCompetitors(text: string, knownCompetitors: CompetitorMatchInput[]): string[] {
   const clean = text.replace(/\*{1,2}|`/g, '');
   const found: string[] = [];
-  for (const name of knownCompetitors) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`\\b${escaped}(?:\\.[a-z]{2,})?\\b`, 'i');
-    if (pattern.test(clean)) {
+  for (const item of knownCompetitors) {
+    const name = typeof item === 'string' ? item : item.name;
+    const domain = typeof item === 'string' ? null : (item.domain || null);
+
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const namePattern = new RegExp(`\\b${escapedName}(?:\\.[a-z]{2,})?\\b`, 'i');
+    if (namePattern.test(clean)) {
       found.push(name);
+      continue;
+    }
+
+    if (domain) {
+      const registrable = getRegistrableDomain(domain);
+      if (!registrable) continue;  // public-suffix-only or invalid → skip
+      const escapedDomain = registrable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // (?<![a-z0-9.-])  — registrable isn't a substring of a larger name
+      // (?:[a-z0-9-]+\.)* — optional subdomain labels (docs., app.foo., …)
+      // <escapedDomain>   — the registrable domain itself
+      // (?![a-z0-9.-])    — and nothing further extends the domain
+      const domainPattern = new RegExp(
+        `(?<![a-z0-9.-])(?:[a-z0-9-]+\\.)*${escapedDomain}(?![a-z0-9.-])`,
+        'i',
+      );
+      if (domainPattern.test(clean)) {
+        found.push(name);
+      }
     }
   }
   return found;
@@ -266,18 +306,27 @@ export async function getModelResponse(
 /**
  * Core analysis pipeline: get response, detect brand, extract competitors.
  * The competitor extraction is delegated to a provider-specific function.
+ *
+ * `mode` = 'static' skips Phase 2 entirely — no LLM call to discover new
+ * competitors; only the regex match against the known list runs. Lets a
+ * brand owner with a curated competitor list opt out of LLM-discovered
+ * additions (which can include irrelevant or hallucinated names).
  */
 export async function analyzePromptResponse(
   prompt: string,
   brandName: string | undefined,
-  knownCompetitors: string[] | undefined,
+  // Strings or {name, domain} objects. Domains, when supplied, get matched
+  // alongside names — `docs.reprise.com` in response text resolves to the
+  // "Reprise" competitor via its stored domain.
+  knownCompetitors: CompetitorMatchInput[] | undefined,
   model: string,
   context: { analysisRunId?: number; jobId?: number } | undefined,
   extractCompetitors: (responseText: string, brandName?: string, knownCompetitors?: string[]) => Promise<string[]>,
+  mode: 'static' | 'dynamic' = 'dynamic',
 ): Promise<PromptAnalysisResult> {
   const startTime = Date.now();
 
-  console.log(`[analyzePromptResponse] Model: ${model} | Prompt: "${prompt.substring(0, 80)}..."`);
+  console.log(`[analyzePromptResponse] Model: ${model} | Mode: ${mode} | Prompt: "${prompt.substring(0, 80)}..."`);
 
   const { responseText, sources } = await getModelResponse(prompt, model, context);
 
@@ -285,11 +334,18 @@ export async function analyzePromptResponse(
 
   const brandMentioned = brandName ? isBrandMentioned(responseText, brandName) : false;
 
-  // Phase 1: regex-match known competitors in the response text
+  // Phase 1: regex-match known competitors in the response text (case-
+  // insensitive — see findKnownCompetitors). Always runs.
   const regexMatched = findKnownCompetitors(responseText, knownCompetitors || []);
 
-  // Phase 2: LLM extracts any NEW competitors (still receives known list for naming consistency)
-  const llmFound = await extractCompetitors(responseText, brandName, knownCompetitors);
+  // The LLM extractor only needs names — strip domain info before passing.
+  const knownNames = (knownCompetitors || []).map(c => typeof c === 'string' ? c : c.name);
+
+  // Phase 2: LLM extracts any NEW competitors. Skipped in static mode —
+  // the user has opted out of LLM-discovered additions.
+  const llmFound = mode === 'static'
+    ? []
+    : await extractCompetitors(responseText, brandName, knownNames);
 
   // Phase 3: post-validate every LLM pick by re-running findKnownCompetitors
   // against just that name. Drops anything the LLM produced that doesn't

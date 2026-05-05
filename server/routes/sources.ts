@@ -3,24 +3,21 @@ import { parseDateRange, getCurrentBrandName, getSourceBlacklist, requireRole } 
 import { storage } from "../storage";
 import { fetchSitemap } from "../services/sitemap-fetch";
 import { parseHttpUrl } from "../services/analysis";
+import { getRegistrableDomain } from "../services/domain";
 
 // Build a once-per-request classifier that maps a domain to its source type.
-// Centralizes the lookup tables (brand domains, blocklist, competitor names,
-// recognized subdomain prefixes) so both `/sources/analysis` (per-domain)
-// and `/sources/pages/analysis` (per-URL) classify identically.
+// Centralizes the lookup tables (brand domains, blocklist, competitor names)
+// so both `/sources/analysis` (per-domain) and `/sources/pages/analysis`
+// (per-URL) classify identically.
+//
+// Subdomain handling now uses the Public Suffix List via tldts. Any
+// `*.f5.com` cited domain resolves to registrable `f5.com` and matches a
+// stored competitor with `domain = 'f5.com'`. The legacy
+// `competitorSubdomains` setting (which let users register specific
+// subdomain prefixes for stripping) is preserved as a fallback for
+// domains tldts can't resolve, but typically isn't needed anymore.
 export async function buildSourceClassifier() {
   const brandName = (getCurrentBrandName() || (await storage.getSetting('brandName')) || '').toLowerCase();
-
-  const subdomainSetting = await storage.getSetting('competitorSubdomains');
-  const subdomainEntries = subdomainSetting
-    ? subdomainSetting.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
-    : ['docs'];
-  const subdomainPrefixes = subdomainEntries.filter(e => !e.includes('.'));
-  const exactSubdomainMap = new Map<string, string>();
-  for (const entry of subdomainEntries.filter(e => e.includes('.'))) {
-    const parts = entry.split('.');
-    if (parts.length >= 3) exactSubdomainMap.set(entry, parts.slice(1).join('.'));
-  }
 
   const blocklistRaw = await storage.getSetting('competitorBlocklist');
   const blocklist = new Set(
@@ -28,47 +25,57 @@ export async function buildSourceClassifier() {
       ? blocklistRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
       : ['g2.com', 'reddit.com', 'facebook.com', 'gartner.com', 'idc.com']
   );
+  // Pre-compute registrable forms of blocklist entries so a cited
+  // `forums.reddit.com` registers as blocked (registrable `reddit.com`).
+  // Skips public-suffix-only entries (none in defaults, but defensive).
+  const blocklistRegistrable = new Set<string>();
+  for (const entry of blocklist) {
+    const reg = getRegistrableDomain(entry);
+    if (reg) blocklistRegistrable.add(reg);
+  }
 
   const brandDomainsRaw = await storage.getSetting('brandDomains');
   const brandDomains = new Set(
     brandDomainsRaw ? brandDomainsRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean) : []
   );
+  const brandDomainsRegistrable = new Set<string>();
+  for (const entry of brandDomains) {
+    const reg = getRegistrableDomain(entry);
+    if (reg) brandDomainsRegistrable.add(reg);
+  }
 
   const allCompetitors = (await storage.getAllCompetitorsIncludingMerged())
     .filter(c => c.mergedInto !== c.id);
-  const competitorDomains = new Set<string>();
+  const competitorDomainsRegistrable = new Set<string>();
   const competitorNameWords: string[][] = [];
   for (const c of allCompetitors) {
-    if (c.domain) competitorDomains.add(c.domain.toLowerCase());
+    if (c.domain) {
+      const reg = getRegistrableDomain(c.domain);
+      if (reg) competitorDomainsRegistrable.add(reg);
+    }
     competitorNameWords.push(c.name.toLowerCase().split(/\s+/));
   }
 
-  const stripSubdomain = (domain: string): string => {
-    const exact = exactSubdomainMap.get(domain);
-    if (exact) return exact;
-    for (const prefix of subdomainPrefixes) {
-      if (domain.startsWith(prefix + '.')) return domain.slice(prefix.length + 1);
-    }
-    return domain;
-  };
-
   const classifyDomain = (domain: string): 'brand' | 'competitor' | 'neutral' => {
     const domainLower = domain.toLowerCase();
-    const domainBase = domainLower.split('.')[0];
-    const strippedDomain = stripSubdomain(domainLower);
-    const strippedBase = strippedDomain.split('.')[0];
-    if (brandDomains.has(domainLower) || brandDomains.has(strippedDomain)) return 'brand';
+    // Registrable form via PSL: `docs.reprise.com` → `reprise.com`,
+    // `co.uk` → null, an IP → null. Falls back to domainLower for
+    // weird inputs the PSL can't classify.
+    const registrable = getRegistrableDomain(domainLower) || domainLower;
+    const domainBase = registrable.split('.')[0];
+
+    if (brandDomainsRegistrable.has(registrable)) return 'brand';
     // Explicit competitor-domain bindings (set by "Mark as Competitor" or
     // auto-populated when a source URL matches a competitor by name) must
     // win over the blocklist. The blocklist mixes full domains with generic
     // terms like "loadbalancer" that exist to filter name extraction —
     // without this precedence, those generic terms shadow the user's
     // explicit designation when they happen to equal the domain's base word.
-    if (competitorDomains.has(domainLower) || competitorDomains.has(strippedDomain)) return 'competitor';
-    if (blocklist.has(domainLower) || blocklist.has(strippedDomain) || blocklist.has(domainBase)) return 'neutral';
-    if (brandName && (domainLower.includes(brandName) || brandName.includes(domainBase) || strippedDomain.includes(brandName) || brandName.includes(strippedBase))) return 'brand';
+    if (competitorDomainsRegistrable.has(registrable)) return 'competitor';
+    if (blocklistRegistrable.has(registrable) || blocklist.has(domainBase)) return 'neutral';
+    if (brandName && (registrable.includes(brandName) || brandName.includes(domainBase))) return 'brand';
     if (
-      competitorNameWords.some(words => words.some(w => domainBase.includes(w) || w.includes(domainBase) || strippedBase.includes(w) || w.includes(strippedBase)))
+      competitorNameWords.some(words => words.some(w => domainBase.includes(w) || w.includes(domainBase)))
     ) return 'competitor';
     return 'neutral';
   };

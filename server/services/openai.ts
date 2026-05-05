@@ -88,11 +88,12 @@ Examples:
 export async function analyzePromptResponse(
   prompt: string,
   brandName?: string,
-  knownCompetitors?: string[],
+  knownCompetitors?: Array<string | { name: string; domain?: string | null }>,
   model: string = 'chatgpt',
   context?: { analysisRunId?: number; jobId?: number },
+  mode: 'static' | 'dynamic' = 'dynamic',
 ): Promise<PromptAnalysisResult> {
-  return runAnalysis(prompt, brandName, knownCompetitors, model, context, extractCompetitorsFromResponse);
+  return runAnalysis(prompt, brandName, knownCompetitors, model, context, extractCompetitorsFromResponse, mode);
 }
 
 export async function generatePromptsForTopic(topicName: string, topicDescription: string, count: number = 5, competitors: string[] = []): Promise<string[]> {

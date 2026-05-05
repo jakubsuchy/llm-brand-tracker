@@ -39,6 +39,11 @@ export const competitors = pgTable("competitors", {
   mentionCount: integer("mention_count").default(0),
   lastMentioned: timestamp("last_mentioned"),
   mergedInto: integer("merged_into"),
+  // Soft-delete flag set by the prompt-generator's "remove competitor" UI.
+  // Hides the competitor from the active list AND prevents the analyzer
+  // (in dynamic mode) from re-discovering it as a "new" competitor.
+  // Historical competitor_mentions are preserved.
+  deleted: boolean("deleted").default(false),
 });
 
 export const sources = pgTable("sources", {

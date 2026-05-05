@@ -1,6 +1,8 @@
 // Tiny templating helpers shared across detectors. Keep this thin —
 // detector-specific phrasing lives in the detector file itself.
 
+import { getRegistrableDomain } from "../../domain";
+
 export function pct(n: number, decimals = 0): string {
   if (!Number.isFinite(n)) return '0%';
   return `${n.toFixed(decimals)}%`;
@@ -72,11 +74,15 @@ export function modelMentionRate(
   return (mentioned / responses.length) * 100;
 }
 
-// Hostname → root domain (strip leading www., lowercase). Returns null when
-// the URL can't be parsed.
+// URL → registrable domain (eTLD+1 via Public Suffix List).
+// Subdomains roll up: `docs.reprise.com` and `app.reprise.com` both
+// return `reprise.com` so detector ranking groups them together.
+// Returns null when the URL can't be parsed or has no registrable part
+// (IP addresses, localhost, public-suffix-only inputs).
 export function rootDomainOf(url: string): string | null {
   try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    const hostname = new URL(url).hostname;
+    return getRegistrableDomain(hostname);
   } catch {
     return null;
   }

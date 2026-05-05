@@ -79,8 +79,26 @@ export function registerSettingsRoutes(app: Express) {
     }
   });
 
+  // Specific PUT routes that need a role lower than the generic admin gate.
+  // Registered BEFORE the generic `/api/settings/:key` PUT below — Express
+  // matches in registration order, so these win for their exact paths.
+  app.put("/api/settings/competitor-extraction-mode", requireRole('analyst'), async (req, res) => {
+    // #swagger.tags = ['Settings']
+    try {
+      const mode = (req.body?.mode || '').toString();
+      if (mode !== 'static' && mode !== 'dynamic') {
+        return res.status(400).json({ error: "mode must be 'static' or 'dynamic'" });
+      }
+      await storage.setSetting('competitorExtractionMode', mode);
+      res.json({ mode });
+    } catch (error) {
+      console.error("Error updating competitor extraction mode:", error);
+      res.status(500).json({ error: "Failed to update setting" });
+    }
+  });
+
   // Unified GET — some keys are public (no role), others require admin
-  const PUBLIC_SETTINGS_KEYS = new Set(['brand', 'models', 'analysis-schedule']);
+  const PUBLIC_SETTINGS_KEYS = new Set(['brand', 'models', 'analysis-schedule', 'competitor-extraction-mode']);
 
   app.get("/api/settings/:key", async (req, res) => {
     // #swagger.tags = ['Settings']
@@ -149,6 +167,13 @@ export function registerSettingsRoutes(app: Express) {
         }
         case 'browser-mode':
           return res.json({ mode: (await storage.getSetting('browserMode')) || 'auto' });
+        case 'competitor-extraction-mode': {
+          // Default 'dynamic' = current behavior (LLM extracts new
+          // competitors per response). 'static' = regex-match against the
+          // current competitor list only — no LLM, no new competitors.
+          const value = await storage.getSetting('competitorExtractionMode');
+          return res.json({ mode: value === 'static' ? 'static' : 'dynamic' });
+        }
         case 'competitor-subdomains': {
           const value = await storage.getSetting('competitorSubdomains');
           return res.json({ prefixes: value ? value.split(',').map((s: string) => s.trim()).filter(Boolean) : ['docs'] });

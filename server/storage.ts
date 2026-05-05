@@ -82,6 +82,8 @@ export interface IStorage {
   createCompetitor(competitor: InsertCompetitor): Promise<Competitor>;
   getCompetitorByName(name: string): Promise<Competitor | undefined>;
   updateCompetitorMentionCount(name: string, increment: number): Promise<void>;
+  softDeleteCompetitor(id: number): Promise<void>;
+  updateCompetitor(id: number, patch: Partial<{ name: string; category: string | null; domain: string | null }>): Promise<Competitor | undefined>;
 
   // Sources
   getSources(): Promise<Source[]>;
@@ -347,13 +349,25 @@ export class MemStorage implements IStorage {
   }
 
   async getCompetitors(): Promise<Competitor[]> {
-    return Array.from(this.competitors.values()).filter(c => !c.mergedInto);
+    return Array.from(this.competitors.values())
+      .filter(c => !c.mergedInto && !c.deleted)
+      .sort((a, b) => a.id - b.id);
   }
 
   async createCompetitor(competitor: InsertCompetitor): Promise<Competitor> {
     const nameKey = competitor.name.toLowerCase().trim();
-    const existing = await this.getCompetitorByName(competitor.name);
-    if (existing) return existing;
+    const existing = Array.from(this.competitors.values()).find(c => c.nameKey === nameKey);
+    if (existing) {
+      if (existing.deleted) {
+        existing.deleted = false;
+        // Patch in the newly-supplied domain/category from this re-add.
+        // Empty/null input doesn't erase existing data.
+        if (competitor.domain) existing.domain = competitor.domain;
+        if (competitor.category) existing.category = competitor.category;
+        return existing;
+      }
+      return existing;
+    }
     const newCompetitor: Competitor = {
       id: this.currentCompetitorId++,
       name: competitor.name,
@@ -363,9 +377,27 @@ export class MemStorage implements IStorage {
       lastMentioned: null,
       mergedInto: null,
       domain: competitor.domain || null,
+      deleted: false,
     };
     this.competitors.set(newCompetitor.id, newCompetitor);
     return newCompetitor;
+  }
+
+  async softDeleteCompetitor(id: number): Promise<void> {
+    const c = this.competitors.get(id);
+    if (c) c.deleted = true;
+  }
+
+  async updateCompetitor(id: number, patch: Partial<{ name: string; category: string | null; domain: string | null }>): Promise<Competitor | undefined> {
+    const c = this.competitors.get(id);
+    if (!c) return undefined;
+    if (patch.name !== undefined) {
+      c.name = patch.name;
+      c.nameKey = patch.name.toLowerCase().trim();
+    }
+    if (patch.category !== undefined) c.category = patch.category;
+    if (patch.domain !== undefined) c.domain = patch.domain;
+    return c;
   }
 
   async getCompetitorByName(name: string): Promise<Competitor | undefined> {

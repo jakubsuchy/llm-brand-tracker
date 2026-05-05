@@ -32,11 +32,15 @@ interface TopicWithPrompts {
   prompts: PromptItem[];
 }
 
-interface CompetitorSuggestion {
+interface DbCompetitor {
+  id: number;
   name: string;
-  url: string;
-  category: string;
-  validated: boolean;
+  category: string | null;
+  // `domain` is the persisted form of the legacy "URL" field — the user
+  // edits a URL, we strip to host and store on competitors.domain. Used
+  // by the source classifier so cited URLs from this domain map back to
+  // this competitor.
+  domain: string | null;
 }
 
 interface GenerationSettings {
@@ -46,17 +50,23 @@ interface GenerationSettings {
   customTopics: string[];
 }
 
+type ExtractionMode = 'static' | 'dynamic';
+
 const TOPICS_QUERY_KEY = ['/api/topics/with-prompts'] as const;
+const COMPETITORS_QUERY_KEY = ['/api/competitors'] as const;
+const EXTRACTION_MODE_QUERY_KEY = ['/api/settings/competitor-extraction-mode'] as const;
 
 function invalidateTopics() {
   queryClient.invalidateQueries({ queryKey: TOPICS_QUERY_KEY });
+}
+function invalidateCompetitors() {
+  queryClient.invalidateQueries({ queryKey: COMPETITORS_QUERY_KEY });
 }
 
 export default function PromptGeneratorPage() {
   const { toast } = useToast();
 
   const [brandUrl, setBrandUrl] = useState("");
-  const [competitors, setCompetitors] = useState<CompetitorSuggestion[]>([]);
   const [settings, setSettings] = useState<GenerationSettings>({
     promptsPerTopic: 2,
     numberOfTopics: 2,
@@ -68,6 +78,8 @@ export default function PromptGeneratorPage() {
   const [customTopicName, setCustomTopicName] = useState('');
   const [customTopicDescription, setCustomTopicDescription] = useState('');
   const [dragOverTopicIndex, setDragOverTopicIndex] = useState<number | null>(null);
+  const [newCompetitorName, setNewCompetitorName] = useState('');
+  const [newCompetitorUrl, setNewCompetitorUrl] = useState('');
 
   // Single source of truth for topic + prompt data.
   const { data: topicsData } = useQuery<TopicWithPrompts[]>({
@@ -75,9 +87,19 @@ export default function PromptGeneratorPage() {
   });
   const topics: TopicWithPrompts[] = topicsData || [];
 
-  const { data: dbCompetitors } = useQuery<CompetitorSuggestion[]>({
-    queryKey: ['/api/competitors'],
+  // Single source of truth for the competitors list. Every add / edit /
+  // remove is a mutation; the React state used to hold this got drifty
+  // between the DB and the UI.
+  const { data: competitorsData } = useQuery<DbCompetitor[]>({
+    queryKey: COMPETITORS_QUERY_KEY,
   });
+  const competitors: DbCompetitor[] = competitorsData || [];
+
+  // Static vs dynamic competitor extraction mode (analyzer setting).
+  const { data: extractionModeData } = useQuery<{ mode: ExtractionMode }>({
+    queryKey: EXTRACTION_MODE_QUERY_KEY,
+  });
+  const extractionMode: ExtractionMode = extractionModeData?.mode === 'static' ? 'static' : 'dynamic';
 
   // Load brand URL once on mount — form-input state, not data state.
   useEffect(() => {
@@ -91,35 +113,32 @@ export default function PromptGeneratorPage() {
     if (topics.length > 0 && currentStep === 'url') {
       setCurrentStep('topics');
     }
-    // Intentionally only depending on whether topics exist, not their content.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topics.length > 0]);
-
-  // Hydrate competitors form from DB the first time we see them.
-  useEffect(() => {
-    if (dbCompetitors && dbCompetitors.length > 0 && competitors.length === 0) {
-      setCompetitors(dbCompetitors.map((c: any) => ({
-        name: c.name,
-        url: '',
-        category: c.category || 'Custom',
-        validated: true,
-      })));
-    }
-  }, [dbCompetitors]);
 
   // ── Mutations ────────────────────────────────────────────────────
 
   const analyzeUrlMutation = useMutation({
     mutationFn: async (url: string) => {
       const response = await apiRequest('POST', `/api/analyze-brand`, { url });
-      return response.json();
+      const data = await response.json();
+      // Persist the suggestions immediately. createCompetitor is idempotent
+      // (revives soft-deleted; returns existing on duplicate name) so this
+      // is safe to re-run.
+      for (const comp of (data.competitors || [])) {
+        await apiRequest('POST', '/api/competitors', {
+          name: comp.name,
+          category: comp.category || null,
+        });
+      }
+      return data;
     },
     onSuccess: (data: any) => {
-      setCompetitors(data.competitors.map((comp: any) => ({ ...comp, validated: true })));
+      invalidateCompetitors();
       setCurrentStep('competitors');
       toast({
         title: "Brand analyzed",
-        description: `Found ${data.competitors.length} competitors (auto-validated)`,
+        description: `Found ${data.competitors.length} competitors`,
       });
     },
     onError: () => {
@@ -131,11 +150,67 @@ export default function PromptGeneratorPage() {
     },
   });
 
+  // Best-effort: convert whatever the user typed (a URL or a bare host) to
+  // a domain string for storage. Bad input → null (we'll just save the
+  // name without a domain rather than fail the add).
+  const urlToDomain = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      const u = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+      return u.hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+
+  const addCompetitorMutation = useMutation({
+    mutationFn: async ({ name, url }: { name: string; url: string }) => {
+      const domain = urlToDomain(url);
+      const r = await apiRequest('POST', '/api/competitors', { name, domain });
+      return r.json();
+    },
+    onSuccess: () => {
+      setNewCompetitorName('');
+      setNewCompetitorUrl('');
+      invalidateCompetitors();
+    },
+    onError: () => toast({ title: 'Failed to add competitor', variant: 'destructive' }),
+  });
+
+  const updateCompetitorMutation = useMutation({
+    mutationFn: async ({ id, patch }: { id: number; patch: { name?: string; category?: string | null } }) => {
+      const r = await apiRequest('PATCH', `/api/competitors/${id}`, patch);
+      return r.json();
+    },
+    onSuccess: invalidateCompetitors,
+    onError: (err: any) => toast({ title: 'Update failed', description: err?.message, variant: 'destructive' }),
+  });
+
+  const deleteCompetitorMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await fetch(`/api/competitors/${id}`, { method: 'DELETE' });
+    },
+    onSuccess: invalidateCompetitors,
+    onError: () => toast({ title: 'Failed to remove competitor', variant: 'destructive' }),
+  });
+
+  const updateExtractionModeMutation = useMutation({
+    mutationFn: async (mode: ExtractionMode) => {
+      const r = await apiRequest('PUT', '/api/settings/competitor-extraction-mode', { mode });
+      return r.json();
+    },
+    onSuccess: (_d, mode) => {
+      queryClient.setQueryData(EXTRACTION_MODE_QUERY_KEY, { mode });
+    },
+    onError: () => toast({ title: 'Failed to update mode', variant: 'destructive' }),
+  });
+
   const generatePromptsMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest('POST', `/api/generate-prompts`, {
         brandUrl,
-        competitors: competitors.filter(c => c.validated),
+        competitors: competitors.map(c => ({ name: c.name, category: c.category })),
         settings,
       });
       return response.json();
@@ -221,7 +296,7 @@ export default function PromptGeneratorPage() {
       const response = await apiRequest('POST', '/api/generate-topic-prompts', {
         topicName: customTopicName,
         topicDescription: customTopicDescription,
-        competitors: competitors.filter(c => c.validated),
+        competitors,
         promptCount: settings.promptsPerTopic,
       });
       const data = await response.json();
@@ -259,16 +334,10 @@ export default function PromptGeneratorPage() {
     analyzeUrlMutation.mutate(brandUrl);
   };
 
-  const addCustomCompetitor = () => {
-    setCompetitors(prev => [...prev, { name: "", url: "", category: "Custom", validated: true }]);
-  };
-
-  const updateCompetitor = (index: number, field: keyof CompetitorSuggestion, value: string) => {
-    setCompetitors(prev => prev.map((comp, i) => i === index ? { ...comp, [field]: value } : comp));
-  };
-
-  const removeCompetitor = (index: number) => {
-    setCompetitors(prev => prev.filter((_, i) => i !== index));
+  const handleAddCompetitor = () => {
+    const name = newCompetitorName.trim();
+    if (!name) return;
+    addCompetitorMutation.mutate({ name, url: newCompetitorUrl });
   };
 
   const handleAddCustomTopic = () => {
@@ -292,9 +361,8 @@ export default function PromptGeneratorPage() {
     try {
       await apiRequest('POST', '/api/data/clear', { type: 'all' });
       invalidateTopics();
-      queryClient.invalidateQueries({ queryKey: ['/api/competitors'] });
+      invalidateCompetitors();
       setBrandUrl("");
-      setCompetitors([]);
       setSettings({ promptsPerTopic: 10, numberOfTopics: 5, diversityThreshold: 50, customTopics: [] });
       setCurrentStep('url');
       setCustomTopicName('');
@@ -390,27 +458,140 @@ export default function PromptGeneratorPage() {
         <Card>
           <CardHeader>
             <CardTitle>Review Competitors</CardTitle>
-            <p className="text-sm text-gray-600">Review the suggested competitors. Remove any irrelevant ones or add custom competitors.</p>
+            <p className="text-sm text-gray-600">Edit, remove, or add competitors. Every change saves to the database immediately — no draft state.</p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {competitors.map((competitor, index) => (
-              <div key={index} className="flex items-center space-x-3 p-3 border rounded-lg bg-green-50">
+            {/* Static / Dynamic mode toggle. Persisted as a setting; affects
+                every analysis run from the moment it's saved. */}
+            <div className="rounded-lg border bg-slate-50 p-3 space-y-2">
+              <div className="flex items-center gap-3">
+                <select
+                  id="extraction-mode"
+                  className="text-sm border rounded px-2 py-1 bg-white shrink-0"
+                  value={extractionMode}
+                  onChange={(e) => updateExtractionModeMutation.mutate(e.target.value as ExtractionMode)}
+                  disabled={updateExtractionModeMutation.isPending}
+                >
+                  <option value="dynamic">Dynamic — discover new</option>
+                  <option value="static">Static — fixed list</option>
+                </select>
+                <Label htmlFor="extraction-mode" className="text-sm font-medium text-slate-800">
+                  Competitor extraction mode
+                </Label>
+              </div>
+              {extractionMode === 'dynamic' ? (
+                <p className="text-xs text-slate-600">
+                  <strong className="text-slate-800">Dynamic.</strong> Each analysis run asks the LLM to find new competitors in addition to your list. Catches emerging players, but may add irrelevant or hallucinated names. <em>Costs an extra LLM call per response.</em>
+                </p>
+              ) : (
+                <p className="text-xs text-slate-600">
+                  <strong className="text-slate-800">Static.</strong> Only the competitors below are matched (case-insensitive regex). 100% accurate to your curated list, no surprises. <em>No LLM calls for competitor extraction — faster and cheaper.</em>
+                </p>
+              )}
+            </div>
+
+            {competitors.length === 0 && (
+              <div className="text-sm text-slate-500 p-4 text-center bg-white border rounded-lg">
+                No competitors yet. Add one below or run brand analysis from Step 1.
+              </div>
+            )}
+
+            {competitors.map(competitor => (
+              <div key={competitor.id} className="flex items-center space-x-3 p-3 border rounded-lg bg-green-50">
                 <div className="flex-1 space-y-2">
-                  <Input placeholder="Competitor name" value={competitor.name} onChange={(e) => updateCompetitor(index, 'name', e.target.value)} />
-                  <Input placeholder="Competitor URL" value={competitor.url} onChange={(e) => updateCompetitor(index, 'url', e.target.value)} />
+                  <Input
+                    placeholder="Competitor name"
+                    defaultValue={competitor.name}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (next && next !== competitor.name) {
+                        updateCompetitorMutation.mutate({ id: competitor.id, patch: { name: next } });
+                      } else if (!next) {
+                        e.target.value = competitor.name;  // restore on empty
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
+                  <Input
+                    placeholder="Competitor URL (optional)"
+                    defaultValue={competitor.domain || ''}
+                    onBlur={(e) => {
+                      const raw = e.target.value.trim();
+                      const nextDomain = urlToDomain(raw);
+                      const current = competitor.domain || null;
+                      if ((nextDomain || null) === current) return;
+                      if (raw && !nextDomain) {
+                        e.target.value = current || '';
+                        toast({ title: 'Invalid URL', variant: 'destructive' });
+                        return;
+                      }
+                      updateCompetitorMutation.mutate({ id: competitor.id, patch: { domain: nextDomain } });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
                 </div>
-                <Badge variant="default" className="bg-green-600">{competitor.category}</Badge>
-                <Button variant="ghost" size="sm" onClick={() => removeCompetitor(index)} className="text-red-600 hover:text-red-800">
+                {competitor.category && (
+                  <Badge variant="default" className="bg-green-600">{competitor.category}</Badge>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => deleteCompetitorMutation.mutate(competitor.id)}
+                  disabled={deleteCompetitorMutation.isPending}
+                  className="text-red-600 hover:text-red-800"
+                >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             ))}
-            <div className="flex space-x-2">
-              <Button variant="outline" onClick={addCustomCompetitor}>
-                <Plus className="mr-2 h-4 w-4" /> Add Custom Competitor
+
+            <div className="flex flex-col sm:flex-row gap-2 items-start">
+              <div className="flex-1 w-full space-y-2">
+                <Input
+                  placeholder="Competitor name"
+                  value={newCompetitorName}
+                  onChange={(e) => setNewCompetitorName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCompetitor();
+                    }
+                  }}
+                />
+                <Input
+                  placeholder="Competitor URL (optional)"
+                  value={newCompetitorUrl}
+                  onChange={(e) => setNewCompetitorUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCompetitor();
+                    }
+                  }}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={(e) => { e.preventDefault(); handleAddCompetitor(); }}
+                disabled={!newCompetitorName.trim() || addCompetitorMutation.isPending}
+              >
+                {addCompetitorMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="mr-2 h-4 w-4" /> Add</>}
               </Button>
-              <Button onClick={proceedToSettings} className="flex-1">Continue to Settings</Button>
             </div>
+
+            <Button type="button" onClick={proceedToSettings} className="w-full">Continue to Settings</Button>
           </CardContent>
         </Card>
       )}

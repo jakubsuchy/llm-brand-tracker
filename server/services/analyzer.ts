@@ -394,10 +394,19 @@ export class BrandAnalyzer {
       // Update the job's promptId for reference (fire-and-forget)
     }
 
-    // Get response from LLM
-    const knownCompetitors = (await storage.getCompetitors()).map(c => c.name);
+    // Get response from LLM. Pass {name, domain} objects so the static-mode
+    // regex can match competitor domains (and subdomains) in the response
+    // text — e.g., "docs.reprise.com" → "Reprise" via competitors.domain.
+    // For dynamic mode, the LLM extractor still receives just the names
+    // (LLM doesn't need the domain for naming-consistency hints).
+    const knownCompetitors = (await storage.getCompetitors()).map(c => ({ name: c.name, domain: c.domain }));
     const llm = await getLlmModule();
-    const analysis = await llm.analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id });
+    // Static mode: no LLM extraction, only regex-match against the known
+    // competitors list. Saves an LLM call per response and prevents
+    // hallucinated/irrelevant competitor additions for brands with a
+    // curated list.
+    const competitorMode = (await storage.getSetting('competitorExtractionMode')) === 'static' ? 'static' : 'dynamic';
+    const analysis = await llm.analyzePromptResponse(promptText, this.brandName, knownCompetitors, model, { analysisRunId, jobId: job.id }, competitorMode);
 
     // Empty response text = scraping/API failure, not a valid "brand not
     // mentioned" outcome. Treat it as a job failure so the existing retry

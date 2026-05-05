@@ -12,7 +12,7 @@ import {
   JobQueueItem, InsertJobQueueItem, JobQueueProgress,
   WatchedUrl, InsertWatchedUrl, WatchedUrlWithCitations, WatchedUrlCitation,
   Recommendation, RecommendationOccurrence, RecommendationState,
-  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, sourceUniqueUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, watchedUrls,
+  topics, prompts, responses, competitors, competitorMentions, competitorMerges, sources, sourceUrls, sourceUniqueUrls, analytics, analysisRuns, appSettings, jobQueue, apiUsage, apifyUsage, watchedUrls,
   recommendations, recommendationOccurrences,
 } from "@shared/schema";
 import { normalizeUrl, stripTrackingParams, parseHttpUrl } from "./services/analysis";
@@ -421,7 +421,19 @@ export class DatabaseStorage implements IStorage {
 
   // Competitors
   async getCompetitors(): Promise<Competitor[]> {
-    return await db.select().from(competitors).where(isNull(competitors.mergedInto));
+    // Active = not merged AND not soft-deleted. Both filters are needed:
+    // soft-deleted is the new "remove from prompt-gen list" path; merged is
+    // the existing "this is a duplicate of another competitor" path. NULL
+    // and FALSE both count as not-deleted (default for legacy rows).
+    // Ordered by id ascending so newly-added competitors append to the
+    // bottom of the prompt-generator list (matches user expectation that
+    // "Add" puts the new row where they're looking).
+    return await db.select().from(competitors)
+      .where(and(
+        isNull(competitors.mergedInto),
+        sql`${competitors.deleted} IS NOT TRUE`,
+      ))
+      .orderBy(competitors.id);
   }
 
   async getAllCompetitorsIncludingMerged(): Promise<Competitor[]> {
@@ -436,10 +448,28 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return created;
     } catch (error: any) {
-      // Unique constraint violation on name_key — return existing
+      // Unique constraint violation on name_key — return existing.
+      // If the existing row is soft-deleted, undelete it AND apply any
+      // newly-supplied domain/category from this re-add (the user typed
+      // those expecting them to take effect). Only non-empty values
+      // overwrite — null/empty input doesn't erase existing data.
+      // For an active (non-deleted) duplicate, return as-is so we don't
+      // surprise the user by mutating an unrelated row.
       if (error?.code === '23505') {
-        const existing = await this.getCompetitorByName(competitor.name);
-        if (existing) return existing;
+        const existing = await this.getCompetitorByNameIncludingDeleted(competitor.name);
+        if (existing) {
+          if (existing.deleted) {
+            const update: any = { deleted: false };
+            if (competitor.domain) update.domain = competitor.domain;
+            if (competitor.category) update.category = competitor.category;
+            const [revived] = await db.update(competitors)
+              .set(update)
+              .where(eq(competitors.id, existing.id))
+              .returning();
+            return revived;
+          }
+          return existing;
+        }
       }
       throw error;
     }
@@ -447,8 +477,48 @@ export class DatabaseStorage implements IStorage {
 
   async getCompetitorByName(name: string): Promise<Competitor | undefined> {
     const [competitor] = await db.select().from(competitors)
+      .where(and(
+        eq(competitors.nameKey, name.toLowerCase().trim()),
+        sql`${competitors.deleted} IS NOT TRUE`,
+      ));
+    return competitor || undefined;
+  }
+
+  // Used by createCompetitor on unique-violation to find the existing row
+  // (which may itself be soft-deleted — we revive it rather than failing).
+  private async getCompetitorByNameIncludingDeleted(name: string): Promise<Competitor | undefined> {
+    const [competitor] = await db.select().from(competitors)
       .where(eq(competitors.nameKey, name.toLowerCase().trim()));
     return competitor || undefined;
+  }
+
+  async softDeleteCompetitor(id: number): Promise<void> {
+    await db.update(competitors).set({ deleted: true }).where(eq(competitors.id, id));
+  }
+
+  async updateCompetitor(id: number, patch: Partial<{ name: string; category: string | null; domain: string | null }>): Promise<Competitor | undefined> {
+    const update: any = {};
+    if (patch.name !== undefined) {
+      update.name = patch.name;
+      update.nameKey = patch.name.toLowerCase().trim();
+    }
+    if (patch.category !== undefined) update.category = patch.category;
+    if (patch.domain !== undefined) update.domain = patch.domain;
+    if (Object.keys(update).length === 0) {
+      const [current] = await db.select().from(competitors).where(eq(competitors.id, id));
+      return current;
+    }
+    try {
+      const [updated] = await db.update(competitors).set(update).where(eq(competitors.id, id)).returning();
+      return updated;
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        // Renaming would collide with another competitor — surface a clean
+        // error rather than crashing the request.
+        throw new Error('A competitor with that name already exists');
+      }
+      throw error;
+    }
   }
 
   async updateCompetitorMentionCount(name: string, increment: number): Promise<void> {
