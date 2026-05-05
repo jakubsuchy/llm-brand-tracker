@@ -979,26 +979,36 @@ export class DatabaseStorage implements IStorage {
       .set({ status: 'failed', lastError: error, completedAt: new Date() })
       .where(eq(jobQueue.id, jobId));
 
-    // If retryable and under max attempts, create a new job for the retry
-    if (shouldRetry && job && job.attempts < (job.maxAttempts || 3)) {
-      // 429/busy shouldn't count as a real attempt — dequeueJob already incremented,
-      // so subtract 2 to net zero (one for dequeue increment, one for this retry)
-      const retryAttempts = wasBusy ? Math.max(0, job.attempts - 2) : job.attempts;
-      const originalId = job.originalJobId || job.id;
-      await db.insert(jobQueue).values({
-        analysisRunId: job.analysisRunId,
-        promptId: job.promptId,
-        promptText: job.promptText,
-        promptTopicId: job.promptTopicId,
-        promptIsExisting: job.promptIsExisting,
-        model: job.model,
-        status: 'pending',
-        attempts: retryAttempts,
-        maxAttempts: job.maxAttempts,
-        lastError: null,
-        originalJobId: originalId,
-      });
-    }
+    if (!shouldRetry || !job) return;
+
+    // Real-error cap: stop after maxAttempts dequeues that weren't busy/capacity-related.
+    // (busy retries decrement `attempts`, so this counter only grows on real errors.)
+    if (job.attempts >= (job.maxAttempts || 3)) return;
+
+    // Hard chain cap: bound capacity/busy retry loops at 50 total entries in the chain.
+    const originalId = job.originalJobId || job.id;
+    const [chainCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(jobQueue)
+      .where(sql`${jobQueue.id} = ${originalId} OR ${jobQueue.originalJobId} = ${originalId}`);
+    if (Number(chainCount?.count ?? 0) >= 50) return;
+
+    // 429/busy/capacity shouldn't count as a real attempt — dequeueJob already incremented,
+    // so subtract 2 to net zero (one for dequeue increment, one for this retry)
+    const retryAttempts = wasBusy ? Math.max(0, job.attempts - 2) : job.attempts;
+    await db.insert(jobQueue).values({
+      analysisRunId: job.analysisRunId,
+      promptId: job.promptId,
+      promptText: job.promptText,
+      promptTopicId: job.promptTopicId,
+      promptIsExisting: job.promptIsExisting,
+      model: job.model,
+      status: 'pending',
+      attempts: retryAttempts,
+      maxAttempts: job.maxAttempts,
+      lastError: null,
+      originalJobId: originalId,
+    });
   }
 
   async getJobQueueProgress(analysisRunId: number): Promise<JobQueueProgress> {
