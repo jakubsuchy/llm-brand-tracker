@@ -350,9 +350,16 @@ export class BrandAnalyzer {
           const isQuota = error?.code === 'insufficient_quota' || error?.type === 'insufficient_quota';
           const isAborted = error?.message?.startsWith('ABORTED:');
           const isBusy = error?.message?.includes('(429)') || error?.message?.includes('busy');
-          // Apify "actor-memory-limit-exceeded" (HTTP 402) is a soft capacity cap, not a real failure —
-          // treat it like a rate-limit so it doesn't burn through the real-error attempt budget.
-          const isCapacity = error?.message?.includes('actor-memory-limit-exceeded');
+          // Apify-side capacity/billing caps (memory, residential proxy bandwidth, monthly usage)
+          // are soft caps that clear over time — treat them like rate-limits so they don't burn
+          // through the real-error attempt budget.
+          const msg = error?.message || '';
+          const isCapacity =
+            msg.includes('actor-memory-limit-exceeded') ||
+            msg.includes('proxy transfer limit') ||
+            msg.includes('monthly-usage-limit') ||
+            /memory.*limit.*exceeded/i.test(msg) ||
+            /usage.*limit.*exceeded/i.test(msg);
           // Retry everything except quota and aborted errors
           const shouldRetry = !isQuota && !isAborted;
           const noAttemptCharge = isBusy || isCapacity;
@@ -360,10 +367,10 @@ export class BrandAnalyzer {
           console.error(`[${new Date().toISOString()}] Worker ${workerIdx}: job ${job.id} failed: ${error.message?.substring(0, 200)}`);
 
           if (shouldRetry && isCapacity) {
-            // Apify account is at its memory cap — wait longer than a normal cloud backoff,
-            // since this only clears when other runs finish.
+            // Apify account hit a capacity cap (memory, proxy bandwidth, etc) — wait longer
+            // than a normal cloud backoff, since this only clears when other runs finish.
             const backoff = 90000 + Math.random() * 60000;
-            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: Apify memory limit hit, backing off ${Math.round(backoff / 1000)}s`);
+            console.log(`[${new Date().toISOString()}] Worker ${workerIdx}: Apify capacity cap hit, backing off ${Math.round(backoff / 1000)}s`);
             await new Promise(resolve => setTimeout(resolve, backoff));
           } else if (shouldRetry && isCloud) {
             const backoff = 60000 + Math.random() * 30000;
